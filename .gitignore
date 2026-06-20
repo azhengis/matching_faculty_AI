@@ -1,0 +1,14 @@
+# Generated database and index — rebuild with db_setup.py / search.py
+faculty.db
+faculty_index.pkl
+faculty_embeddings.pkl
+
+# Cached HTML from bio scraping
+bio_cache/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
