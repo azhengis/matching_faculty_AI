@@ -2,18 +2,32 @@
 """
 chatbot.py
 ----------
-Conversational DePaul faculty advisor powered by OpenAI + SPECTER2.
+Conversational DePaul faculty advisor — works with any LLM provider.
 
-GPT handles the conversation: understanding what the user wants,
-deciding when to search vs when to just respond, asking clarifying
-questions, and presenting results naturally.
-
-SPECTER2 does the actual faculty matching underneath as a tool.
+LiteLLM routes to the provider you configure; SPECTER2 does the matching.
 
 SETUP:
-    pip3 install --break-system-packages --user openai
+    pip3 install --break-system-packages --user litellm
+
+    Then set your provider's key + model:
+
+    # OpenAI
     export OPENAI_API_KEY=sk-...
-    (faculty.db and faculty_index.pkl must already exist)
+    export CHATBOT_MODEL=gpt-4o-mini          # or gpt-4o
+
+    # Anthropic / Claude
+    export ANTHROPIC_API_KEY=sk-ant-...
+    export CHATBOT_MODEL=claude-haiku-4-5-20251001
+
+    # Ollama (local, no key needed)
+    export CHATBOT_MODEL=ollama/llama3        # or ollama/mistral, etc.
+
+    # Gemini
+    export GEMINI_API_KEY=...
+    export CHATBOT_MODEL=gemini/gemini-1.5-flash
+
+    Any model supported by LiteLLM works:
+    https://docs.litellm.ai/docs/providers
 
 RUN:
     python3 chatbot.py
@@ -22,21 +36,14 @@ RUN:
 import os, sys, json
 import numpy as np
 
-# ── OpenAI SDK ────────────────────────────────────────────────────────────────
+# ── LiteLLM (universal LLM router) ───────────────────────────────────────────
 try:
-    from openai import OpenAI
+    import litellm
+    litellm.suppress_debug_info = True
 except ImportError:
     sys.exit(
-        "Install the OpenAI SDK first:\n"
-        "  pip3 install --break-system-packages --user openai"
-    )
-
-API_KEY = os.environ.get("OPENAI_API_KEY")
-if not API_KEY:
-    sys.exit(
-        "No API key found. Set it with:\n"
-        "  export OPENAI_API_KEY=sk-...\n"
-        "Get one at: https://platform.openai.com"
+        "Install LiteLLM first:\n"
+        "  pip3 install --break-system-packages --user litellm"
     )
 
 # ── Search engine ─────────────────────────────────────────────────────────────
@@ -55,7 +62,7 @@ _emb       = None
 _labels    = None
 _paper_idx = None
 
-OPENAI_MODEL = "gpt-4o-mini"   # fast + cost-effective for chat
+MODEL = os.environ.get("CHATBOT_MODEL", "gpt-4o-mini")
 TOP_K        = 5
 
 
@@ -228,21 +235,20 @@ def run_search(query: str, mode: str = "semantic") -> dict:
 
 def chat(history: list, user_message: str) -> str:
     """
-    Send one user message to GPT, handle any tool calls it makes,
+    Send one user message to the configured LLM, handle any tool calls,
     and return the final text response.
     """
-    client = OpenAI(api_key=API_KEY)
     history.append({"role": "user", "content": user_message})
 
-    # System prompt goes at the front of the messages array for OpenAI
+    # System prompt goes at the front of the messages array
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
 
     while True:
-        response = client.chat.completions.create(
-            model       = OPENAI_MODEL,
-            max_tokens  = 1024,
-            tools       = TOOLS,
-            messages    = messages,
+        response = litellm.completion(
+            model      = MODEL,
+            max_tokens = 1024,
+            tools      = TOOLS,
+            messages   = messages,
         )
 
         msg           = response.choices[0].message
@@ -296,10 +302,11 @@ def main():
 
     n_pubs = len(_paper_idx["by_faculty"]) if _paper_idx else 0
     print(f"\n{'─'*60}")
-    print(f"DePaul Faculty Advisor")
+    print(f"DePaul Faculty Advisor  [model: {MODEL}]")
     print(f"{len(_people)} faculty indexed  |  {n_pubs} with publication records")
     print(f"{'─'*60}")
     print("Tell me about your research — I'll help you find the right people.")
+    print("(Switch model: export CHATBOT_MODEL=ollama/llama3  or any LiteLLM model)")
     print("Type 'quit' to exit.\n")
 
     history = []
