@@ -11,11 +11,12 @@ Run once (takes ~15-30 min for ~450 faculty):
 Safe to interrupt and re-run — skips faculty already in the papers table.
 After finishing, delete faculty_index.pkl and re-run search.py.
 """
-import time, sqlite3
+import time, sqlite3, os
 import requests
 
 YOUR_EMAIL    = "aruzhanzhengis19@gmail.com"
-DB_FILE       = "faculty.db"
+_ROOT         = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_FILE       = os.path.join(_ROOT, "faculty.db")
 OPENALEX_BASE = "https://api.openalex.org"
 PAUSE         = 0.2    # polite pool delay (seconds between requests)
 MAX_PAPERS    = 20     # papers per faculty

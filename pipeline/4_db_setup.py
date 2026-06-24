@@ -8,10 +8,11 @@ keeping only full-time faculty.
 Run once:  python3 db_setup.py
 Output:    faculty.db
 """
-import json, sqlite3
+import json, sqlite3, os
 
-JSON_IN = "depaul_faculty_enriched.json"
-DB_OUT  = "faculty.db"
+_ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+JSON_IN = os.path.join(_ROOT, "data", "depaul_faculty_enriched.json")
+DB_OUT  = os.path.join(_ROOT, "faculty.db")
 
 CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS faculty (

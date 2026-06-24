@@ -15,11 +15,12 @@ Safe to interrupt and re-run — skips faculty already in the papers table.
 After finishing:
     rm -f faculty_index.pkl paper_index.pkl && python3 search.py
 """
-import time, sqlite3, re
+import time, sqlite3, re, os
 import requests
 
 YOUR_EMAIL    = "aruzhanzhengis19@gmail.com"
-DB_FILE       = "faculty.db"
+_ROOT         = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_FILE       = os.path.join(_ROOT, "faculty.db")
 S2_BASE       = "https://api.semanticscholar.org/graph/v1"
 CROSSREF_BASE = "https://api.crossref.org/works"
 S2_PAUSE      = 1.5    # ~1 req/sec without API key

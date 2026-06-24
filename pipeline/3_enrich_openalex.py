@@ -16,8 +16,9 @@ import json, time, re, sqlite3, os
 import requests
 
 YOUR_EMAIL   = "aruzhanzhengis19@gmail.com"
-JSON_FILE    = "depaul_faculty_enriched.json"
-DB_FILE      = "faculty.db"
+_ROOT        = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+JSON_FILE    = os.path.join(_ROOT, "data", "depaul_faculty_enriched.json")
+DB_FILE      = os.path.join(_ROOT, "faculty.db")
 OPENALEX_BASE = "https://api.openalex.org"
 PAUSE        = 0.2   # seconds between requests (polite pool)
 MAX_PAPERS   = 15    # paper titles to use per person

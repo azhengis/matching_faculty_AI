@@ -25,9 +25,10 @@ Then rebuild paper index:
 import sys, os, re, sqlite3, pickle
 import numpy as np
 
-DB             = "faculty.db"
-INDEX          = "faculty_index.pkl"
-PAPER_INDEX    = "paper_index.pkl"
+_ROOT          = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB             = os.path.join(_ROOT, "faculty.db")
+INDEX          = os.path.join(_ROOT, "faculty_index.pkl")
+PAPER_INDEX    = os.path.join(_ROOT, "paper_index.pkl")
 MODEL_NAME     = "allenai/specter2_base"
 MAX_CITATIONS  = 2000   # above this almost certainly a wrong person
 MIN_FIELD_SIM  = 0.40   # paper must be at least this similar to faculty's own research

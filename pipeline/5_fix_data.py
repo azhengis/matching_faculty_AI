@@ -13,9 +13,10 @@ Cleans known data quality issues in faculty.db in-place:
 Run once after db_setup.py:
     python3 fix_data.py
 """
-import sqlite3, re
+import sqlite3, re, os
 
-DB = "faculty.db"
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB    = os.path.join(_ROOT, "faculty.db")
 
 
 def clean_whitespace(text):
