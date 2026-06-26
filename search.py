@@ -553,15 +553,28 @@ def get_paper_index(people, model):
 
 def find_best_paper(faculty_id, qv, paper_idx):
     """Return (title, year, cited_by_count, similarity) for the best-matching paper."""
+    top = find_top_papers(faculty_id, qv, paper_idx, n=1, min_sim=0.0)
+    return tuple(top[0]) if top else None
+
+
+def find_top_papers(faculty_id, qv, paper_idx, n=2, min_sim=0.55):
+    """Return up to n papers sorted by SPECTER2 similarity to the query.
+    Each result is (title, year, cited_by_count, similarity).
+    """
     if paper_idx is None or faculty_id not in paper_idx["by_faculty"]:
-        return None
-    indices   = paper_idx["by_faculty"][faculty_id]
-    embs      = paper_idx["embs"][indices]
-    sims      = embs @ qv
-    best_local = int(np.argmax(sims))
-    best_global = indices[best_local]
-    fac_id, title, year, cited = paper_idx["meta"][best_global]
-    return title, year, cited, float(sims[best_local])
+        return []
+    indices = paper_idx["by_faculty"][faculty_id]
+    embs    = paper_idx["embs"][indices]
+    sims    = embs @ qv
+    order   = np.argsort(sims)[::-1]
+    results = []
+    for i in order:
+        sim = float(sims[i])
+        if sim < min_sim or len(results) >= n:
+            break
+        _, title, year, cited = paper_idx["meta"][indices[i]]
+        results.append((title, year, cited, sim))
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -786,17 +799,31 @@ def show(results, query, mode, qv=None, paper_idx=None):
             print(f"   {email}")
         print(f"   {why_label}: \"{reason}\"")
 
-        # Show best matching publication only when similarity is high enough
-        # to be genuinely relevant (avoids showing off-topic papers)
+        # Second context line — extra evidence beyond the one-sentence match reason
+        summary = p.get("research_summary", "")
+        if summary.lstrip().startswith("Courses taught:"):
+            # For courses-based faculty, the match reason already shows courses —
+            # add a brief note so users know this person is matched via teaching, not a bio
+            print(f"   (matched via courses taught — no research bio available)")
+        else:
+            # Try to find a second non-overlapping sentence from the bio
+            sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", summary) if len(s.strip()) > 40]
+            non_bio   = [s for s in sentences if not _is_bio_opener(s, p.get("name", ""))]
+            # Pick a sentence that isn't the same as reason (different content)
+            for s in non_bio:
+                if s[:60] not in reason[:60] and s != reason:
+                    print(f"   Also: \"{s[:180]}\"")
+                    break
+
+        # Show up to 2 relevant publications
         if qv is not None and paper_idx is not None:
-            pub = find_best_paper(p.get("id"), qv, paper_idx)
-            if pub:
-                pub_title, pub_year, pub_cited, pub_sim = pub
-                if pub_sim >= 0.58:   # below this, paper is probably not actually relevant
-                    year_str  = f" ({pub_year})" if pub_year else ""
-                    cited_str = f", cited {pub_cited}×" if pub_cited else ""
-                    marker    = "  ★ direct match" if pub_sim >= 0.72 else ""
-                    print(f"   Relevant publication: \"{pub_title}\"{year_str}{cited_str}{marker}")
+            pubs = find_top_papers(p.get("id"), qv, paper_idx, n=2, min_sim=0.58)
+            for i, (pub_title, pub_year, pub_cited, pub_sim) in enumerate(pubs):
+                year_str  = f" ({pub_year})" if pub_year else ""
+                cited_str = f", cited {pub_cited}×" if pub_cited else ""
+                marker    = "  ★" if pub_sim >= 0.72 else ""
+                label_str = "Relevant publication" if i == 0 else "Also published"
+                print(f"   {label_str}: \"{pub_title}\"{year_str}{cited_str}{marker}")
 
         print(f"   {bio_url}")
         print()

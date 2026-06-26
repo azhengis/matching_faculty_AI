@@ -33,7 +33,7 @@ RUN:
     python3 chatbot.py
 """
 
-import os, sys, json
+import os, sys, json, re
 import numpy as np
 
 # ── LiteLLM (universal LLM router) ───────────────────────────────────────────
@@ -144,22 +144,38 @@ Examples of good clarifying questions:
 • "Is this for a specific application area, like healthcare or education?"
 
 ━━━ HOW TO PRESENT RESULTS ━━━
-When results come back, present them as a SHORT, NATURAL conversation — not a formatted list.
+When results come back, present them naturally — not a formatted list.
 
-For each person (pick the 3–5 most relevant), say in 2–3 sentences:
-• Who they are and what they actually work on
+For each person (pick the 3–5 most relevant), cover in 2–4 sentences:
+• Who they are and what they actually work on (use bio_summary, not just why_match)
 • WHY specifically they match this user's situation
-• Their email (always include it — it's the actionable next step)
+• Any relevant publications — mention title + context ("she published on X in 2023")
+• If courses-only (no bio): mention what they teach and that it signals their expertise
+• Their email (always include — it's the actionable next step)
 
 Example tone:
 "The strongest match is Casey Bennett — he builds AI systems specifically for clinical \
-decision support and personalized medicine at DePaul's computing school, which lines up \
-directly with what you described. His email is cbennett@depaul.edu."
+decision support and has published on machine learning for personalized medicine. \
+His email is cbennett@depaul.edu."
 
-After presenting results, end with ONE specific follow-up question, such as:
-• "Are you looking for someone with industry ties, or more of a pure academic researcher?"
-• "Is the ML side or the clinical side more important for your project?"
-• "Would someone from the law school add useful perspective here?"
+━━━ OPTION BLOCKS ━━━
+After EVERY response that shows faculty results, end with this exact block:
+
+"What would you like to do next?
+  [1] [specific refinement based on what was just discussed]
+  [2] [find someone complementary / from a different field]
+  [3] Tell me more about [name of the top result]
+  [4] Start a completely new search"
+
+Make options [1] and [2] specific to the current query — not generic.
+Examples for a healthcare AI query:
+  [1] Focus more on the clinical/hospital implementation side
+  [2] Find someone from public health or nursing who could complement this
+
+When the user picks a number, handle it:
+• [1] or [2]: refine the search accordingly and show new results
+• [3]: give a fuller profile of that person (bio, publications, contact, what to say in an email)
+• [4]: reset and ask what they need
 
 ━━━ TONE ━━━
 Conversational, warm, and direct. Think of yourself as a knowledgeable colleague helping \
@@ -193,30 +209,48 @@ def run_search(query: str, mode: str = "semantic") -> dict:
 
         output = []
         for person, score, _ in results:
-            entry = {
-                "name":        person["name"],
-                "title":       person.get("title", ""),
-                "department":  person.get("department") or person.get("college", ""),
-                "college":     person.get("college", ""),
-                "email":       person.get("email", ""),
-                "match_pct":   round(score * 100),
-                "why_match":   sm.explain_match(
-                    clean_q, person["research_summary"], name=person["name"]
-                ),
-                "bio_url":     person.get("bio_url", ""),
-            }
+            summary = person.get("research_summary", "")
 
-            # Add best matching publication if available and sufficiently relevant
+            # Bio summary: up to 3 non-biographical sentences for richer context
+            sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", summary)
+                         if len(s.strip()) > 40]
+            non_bio   = [s for s in sentences
+                         if not sm._is_bio_opener(s, person.get("name", ""))]
+            bio_summary = " ".join(non_bio[:3])[:500] if non_bio else summary[:400]
+
+            # Courses snippet for courses-only faculty
+            courses_snippet = None
+            if summary.lstrip().startswith("Courses taught:"):
+                block = re.sub(r"^Courses taught:\s*", "", summary, flags=re.IGNORECASE)
+                if "\n\n" in block:
+                    block = block.split("\n\n")[0]
+                courses_snippet = block[:300]
+
+            entry = {
+                "name":            person["name"],
+                "title":           person.get("title", ""),
+                "department":      person.get("department") or person.get("college", ""),
+                "college":         person.get("college", ""),
+                "email":           person.get("email", ""),
+                "match_tier":      sm._score_tier(score),
+                "match_pct":       round(score * 100),
+                "why_match":       sm.explain_match(
+                    clean_q, summary, name=person["name"]
+                ),
+                "bio_summary":     bio_summary,
+                "bio_url":         person.get("bio_url", ""),
+            }
+            if courses_snippet:
+                entry["courses_taught"] = courses_snippet
+
+            # Add up to 2 relevant publications
             if _paper_idx is not None:
-                pub = sm.find_best_paper(person.get("id"), qv, _paper_idx)
-                if pub:
-                    p_title, p_year, p_cited, p_sim = pub
-                    if p_sim >= 0.58:
-                        entry["relevant_paper"] = {
-                            "title":       p_title,
-                            "year":        p_year,
-                            "cited_by":    p_cited,
-                        }
+                pubs = sm.find_top_papers(person.get("id"), qv, _paper_idx, n=2, min_sim=0.58)
+                if pubs:
+                    entry["relevant_papers"] = [
+                        {"title": t, "year": y, "cited_by": c}
+                        for t, y, c, _ in pubs
+                    ]
             output.append(entry)
 
         return {
@@ -300,13 +334,23 @@ def main():
     _paper_idx        = sm.get_paper_index(_people, _model)
 
     n_pubs = len(_paper_idx["by_faculty"]) if _paper_idx else 0
-    print(f"\n{'─'*60}")
-    print(f"DePaul Faculty Advisor  [model: {MODEL}]")
-    print(f"{len(_people)} faculty indexed  |  {n_pubs} with publication records")
-    print(f"{'─'*60}")
-    print("Tell me about your research — I'll help you find the right people.")
-    print("(Switch model: export CHATBOT_MODEL=ollama/llama3  or any LiteLLM model)")
-    print("Type 'quit' to exit.\n")
+    print(f"\n{'━'*60}")
+    print(f"  DePaul Faculty Advisor  [LLM: {MODEL}]")
+    print(f"  {len(_people)} faculty indexed  |  {n_pubs} with publication records")
+    print(f"{'━'*60}")
+    print("""
+Hi! I help you find the right DePaul faculty to collaborate with.
+
+What brings you here today?
+
+  [1] I have a research problem and need a collaborator or co-investigator
+  [2] I'm looking for a thesis or dissertation advisor
+  [3] I want to explore who at DePaul works on a specific topic
+  [4] I'm from outside DePaul and looking for a research partnership
+
+Or just describe what you need in your own words.
+Type 'quit' to exit.
+""")
 
     history = []
 
