@@ -57,6 +57,66 @@ STOPWORDS = {
     "developing","address","addresses","explore","explores",
 }
 
+# Maps individual query keywords to equivalent terms that may appear in faculty text.
+# Handles abbreviations (user types "nlp", bio says "natural language processing")
+# and vocabulary mismatches (user says "cybersecurity", bio says "information security").
+SYNONYMS = {
+    # Abbreviations (3-char minimum passes the keyword length filter)
+    "nlp":            ["natural language", "computational linguistics", "text mining"],
+    "hci":            ["human-computer", "human computer", "user interface", "usability"],
+    "ehr":            ["health record", "electronic health", "clinical informatics"],
+    "emr":            ["health record", "electronic health", "clinical informatics"],
+    "iot":            ["internet of things", "embedded system", "sensor network"],
+    "llm":            ["language model", "large language", "foundation model"],
+    "xai":            ["explainability", "interpretability", "explainable ai"],
+    # Cyber / security
+    "cybersecurity":  ["information security", "network security", "cyber security", "computer security"],
+    "intrusion":      ["anomaly detection", "threat detection", "network monitoring"],
+    "malware":        ["virus", "ransomware", "threat analysis", "malicious code"],
+    # Healthcare
+    "healthcare":     ["clinical", "health informatics", "biomedical", "patient care"],
+    "clinical":       ["healthcare", "patient", "biomedical", "health informatics"],
+    # ML / AI concepts
+    "fairness":       ["bias", "algorithmic fairness", "discrimination"],
+    "bias":           ["fairness", "algorithmic fairness", "discrimination"],
+    "explainability": ["interpretability", "explainable", "transparency"],
+    "interpretability": ["explainability", "explainable", "transparency"],
+    "generative":     ["language model", "diffusion model", "foundation model"],
+    "federated":      ["distributed learning", "privacy-preserving", "decentralized"],
+    "adversarial":    ["robustness", "red team", "attack defense"],
+    "privacy":        ["differential privacy", "anonymization", "data protection"],
+    "multimodal":     ["vision language", "cross-modal", "image text"],
+    # Environment / society
+    "sustainability": ["sustainable", "environmental", "ecology", "climate"],
+    "climate":        ["sustainability", "environmental science", "ecology"],
+    "equity":         ["social justice", "inclusion", "marginalized", "underserved"],
+    "diversity":      ["equity", "inclusion", "social justice", "representation"],
+    "accessibility":  ["disability", "universal design", "inclusive design"],
+}
+
+# Maps multi-word query concepts to synonym phrases checked in faculty text.
+# If the phrase is detected in the query AND a synonym appears in the text,
+# all meaningful words of that phrase are credited as matched (at 70% weight).
+PHRASE_SYNONYMS = {
+    "transfer learning":      ["domain adaptation", "fine-tuning", "pretrained", "pretraining"],
+    "deep learning":          ["neural network", "convolutional network", "transformer model"],
+    "machine learning":       ["statistical learning", "predictive modeling", "supervised learning"],
+    "natural language":       ["nlp", "text processing", "computational linguistics"],
+    "computer vision":        ["image recognition", "visual recognition", "object detection"],
+    "reinforcement learning": ["reward signal", "policy optimization", "q-learning"],
+    "large language model":   ["llm", "generative ai", "foundation model"],
+    "social justice":         ["equity", "inclusion", "marginalized", "racial justice"],
+    "climate change":         ["sustainability", "ecology", "global warming", "carbon emission"],
+    "human computer":         ["hci", "usability", "user experience", "user interface"],
+    "information security":   ["cybersecurity", "network security", "intrusion detection"],
+    "public health":          ["epidemiology", "population health", "community health"],
+    "data science":           ["machine learning", "statistical analysis", "data mining"],
+    "software engineering":   ["software development", "software design", "software architecture"],
+    "quantum computing":      ["quantum algorithm", "qubit", "quantum information"],
+    "augmented reality":      ["mixed reality", "spatial computing", "extended reality"],
+    "virtual reality":        ["immersive experience", "spatial computing", "extended reality"],
+}
+
 try:
     from sentence_transformers import SentenceTransformer
 except ImportError:
@@ -263,17 +323,25 @@ def explain_match(query, research_summary, name=""):
     # high on keywords like "finance" but tell the user nothing about research.
     _PUB_LIST_RE = re.compile(r"journal of|proceedings of|published in the|\bieee \b|\bacm \b", re.IGNORECASE)
 
+    def count_hits(s):
+        words    = set(re.findall(r"[a-z]+", s.lower()))
+        exact    = len(keywords & words)
+        syn_hits = sum(
+            0.75 for kw in keywords
+            if kw not in words and any(syn in s.lower() for syn in SYNONYMS.get(kw, []))
+        )
+        return exact + syn_hits
+
     def score(s):
-        words     = set(re.findall(r"[a-z]+", s.lower()))
-        kw_hits   = len(keywords & words)
-        verb_bonus = 0.4 if _has_research_verb(s) else 0.0
-        len_bonus  = min(len(s) / 250, 0.5)   # reward longer, complete sentences
+        hits        = count_hits(s)
+        verb_bonus  = 0.4 if _has_research_verb(s) else 0.0
+        len_bonus   = min(len(s) / 250, 0.5)
         pub_penalty = -1.5 if _PUB_LIST_RE.search(s) else 0.0
-        return kw_hits + verb_bonus + len_bonus + pub_penalty
+        return hits + verb_bonus + len_bonus + pub_penalty
 
     ranked = sorted(pool, key=score, reverse=True)
     best   = ranked[0]
-    best_kw_hits = len(keywords & set(re.findall(r"[a-z]+", best.lower())))
+    best_kw_hits = count_hits(best)
 
     # If best is a short noun-phrase (no verb, < 55 chars), try to expand
     if len(best) < 55 and not _has_research_verb(best):
@@ -490,9 +558,33 @@ def kw_presence_score(query, text):
     keywords = query_keywords(query)
     if not keywords:
         return 0.5
-    text_lower = text.lower()
-    hits = sum(1 for kw in keywords if kw in text_lower)
-    return hits / len(keywords)
+    text_lower  = text.lower()
+    query_lower = clean_query(query).lower()
+
+    satisfied = {}  # keyword → score (1.0 exact, 0.75 synonym, 0.70 phrase synonym)
+
+    # Pass 1 — exact substring match
+    for kw in keywords:
+        if kw in text_lower:
+            satisfied[kw] = 1.0
+
+    # Pass 2 — single-word synonym: "nlp" → "natural language", "cybersecurity" → "information security"
+    for kw in keywords:
+        if kw not in satisfied:
+            for syn in SYNONYMS.get(kw, []):
+                if syn in text_lower:
+                    satisfied[kw] = 0.75
+                    break
+
+    # Pass 3 — phrase-level synonym: if "transfer learning" is in the query and
+    # "domain adaptation" is in the text, credit both "transfer" and "learning"
+    for phrase, synonyms in PHRASE_SYNONYMS.items():
+        if phrase in query_lower and any(syn in text_lower for syn in synonyms):
+            for word in query_keywords(phrase):
+                if word in keywords and word not in satisfied:
+                    satisfied[word] = 0.70
+
+    return min(sum(satisfied.values()) / len(keywords), 1.0)
 
 
 def alpha_for_query(query, source="research"):
