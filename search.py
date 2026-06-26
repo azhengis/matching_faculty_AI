@@ -590,11 +590,13 @@ def kw_presence_score(query, text):
 def alpha_for_query(query, source="research"):
     n = len(query_keywords(query))
     if source == "courses":
-        # Courses-based summaries: trust keywords heavily — SPECTER2 misreads
-        # course codes (e.g. "SEC" as Securities, "FIN" as Finance)
-        if n <= 1: return 0.25
-        if n <= 3: return 0.45
-        return 0.60
+        # Courses-based summaries get slightly lower SPECTER2 weight than research
+        # summaries because course lists are less semantically dense than prose bios.
+        # Raised from 0.25/0.45/0.60 — course *names* ("Machine Learning", "Computer
+        # Vision") are genuinely informative and shouldn't be heavily discounted.
+        if n <= 1: return 0.38
+        if n <= 3: return 0.58
+        return 0.72
     if n <= 1: return 0.45
     if n <= 3: return 0.65
     return 0.80
@@ -633,14 +635,22 @@ def hybrid_scores(query, qv, emb, people):
 # ---------------------------------------------------------------------------
 
 def diversity_filter(candidates):
-    """Keep at most 2 results per department, return top TOP_K."""
+    """Return top TOP_K with a soft per-department cap.
+
+    Default cap is 2 per department (prevents one field monopolising results
+    for broad queries). For a strong, specific query — where multiple faculty
+    from the same department all score well — the cap rises to 3, so a user
+    explicitly looking for a CS or nursing collaborator gets more options.
+
+    'Strong match' threshold: score >= 0.65 (above the weak-match warning line).
+    """
     dept_count = {}
     out = []
-    for item in candidates:
-        p    = item[0]
+    for p, score, label in candidates:
         dept = (p.get("department") or p.get("college") or "Unknown")
-        if dept_count.get(dept, 0) < 2:
-            out.append(item)
+        cap  = 3 if score >= 0.65 else 2
+        if dept_count.get(dept, 0) < cap:
+            out.append((p, score, label))
             dept_count[dept] = dept_count.get(dept, 0) + 1
         if len(out) >= TOP_K:
             break

@@ -19,7 +19,8 @@ _ROOT         = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_FILE       = os.path.join(_ROOT, "faculty.db")
 OPENALEX_BASE = "https://api.openalex.org"
 PAUSE         = 0.2    # polite pool delay (seconds between requests)
-MAX_PAPERS    = 20     # papers per faculty
+MAX_PAPERS    = 20     # top-cited papers per faculty
+RECENT_PAPERS = 10     # most-recent papers added on top (deduped)
 
 session = requests.Session()
 
@@ -156,28 +157,44 @@ def reconstruct_abstract(inv_idx):
 
 
 def fetch_papers_for_author(author_id):
-    """Return list of dicts {title, abstract, year, cited_by_count}."""
-    short = author_id.rsplit("/", 1)[-1]
-    data = api_get(f"{OPENALEX_BASE}/works", {
+    """Return list of dicts {title, abstract, year, cited_by_count}.
+
+    Makes two calls: top MAX_PAPERS by citations, then RECENT_PAPERS by year.
+    Deduplicates on title so recent highly-cited papers aren't double-counted.
+    This ensures current work (not yet widely cited) appears alongside landmark papers.
+    """
+    short   = author_id.rsplit("/", 1)[-1]
+    seen    = set()
+    papers  = []
+
+    def _parse(data):
+        for w in (data or {}).get("results", []):
+            title = (w.get("title") or "").strip()
+            if not title or title.lower() in seen:
+                continue
+            seen.add(title.lower())
+            abstract = reconstruct_abstract(w.get("abstract_inverted_index") or {})
+            papers.append({
+                "title":          title,
+                "abstract":       abstract,
+                "year":           w.get("publication_year"),
+                "cited_by_count": w.get("cited_by_count") or 0,
+            })
+
+    base_params = {
         "filter": f"author.id:{short}",
-        "per-page": MAX_PAPERS,
-        "sort": "cited_by_count:desc",
         "select": "title,publication_year,cited_by_count,abstract_inverted_index",
-    })
-    if not data:
-        return []
-    papers = []
-    for w in data.get("results", []):
-        title = (w.get("title") or "").strip()
-        if not title:
-            continue
-        abstract = reconstruct_abstract(w.get("abstract_inverted_index") or {})
-        papers.append({
-            "title": title,
-            "abstract": abstract,
-            "year": w.get("publication_year"),
-            "cited_by_count": w.get("cited_by_count") or 0,
-        })
+    }
+
+    # Pass 1: most-cited (established impact)
+    _parse(api_get(f"{OPENALEX_BASE}/works",
+                   {**base_params, "per-page": MAX_PAPERS, "sort": "cited_by_count:desc"}))
+    time.sleep(PAUSE)
+
+    # Pass 2: most-recent (current work not yet widely cited)
+    _parse(api_get(f"{OPENALEX_BASE}/works",
+                   {**base_params, "per-page": RECENT_PAPERS, "sort": "publication_year:desc"}))
+
     return papers
 
 
