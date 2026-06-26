@@ -28,7 +28,7 @@ import numpy as np
 DB          = "faculty.db"
 INDEX       = "faculty_index.pkl"
 PAPER_INDEX = "paper_index.pkl"
-MODEL       = "allenai/specter2_base"
+MODEL       = "allenai/specter2"   # adapter version; changed from _base → cache rebuilds
 TOP_K      = 5
 POOL_SIZE  = 30        # fetch this many candidates before diversity filtering
 K_CLUSTERS = 35        # finer clusters than before
@@ -117,10 +117,70 @@ PHRASE_SYNONYMS = {
     "virtual reality":        ["immersive experience", "spatial computing", "extended reality"],
 }
 
-try:
+class _SPECTER2Adapter:
+    """SPECTER2 base + proximity adapter — better retrieval than base alone.
+    Same .encode() interface as sentence_transformers.SentenceTransformer.
+    Uses CLS-token pooling as recommended in the SPECTER2 paper.
+    """
+
+    def __init__(self):
+        from adapters import AutoAdapterModel
+        from transformers import AutoTokenizer
+        import torch
+        print("  Downloading/loading base weights (first run only)...")
+        self._tok = AutoTokenizer.from_pretrained("allenai/specter2_base")
+        self._mdl = AutoAdapterModel.from_pretrained("allenai/specter2_base")
+        print("  Loading proximity adapter...")
+        self._mdl.load_adapter("allenai/specter2", source="hf",
+                                load_as="specter2", set_active=True)
+        self._mdl.eval()
+        self._torch = torch
+
+    def encode(self, sentences, normalize_embeddings=True,
+               show_progress_bar=False, batch_size=32):
+        import numpy as np
+        all_embs = []
+        batches  = range(0, len(sentences), batch_size)
+        if show_progress_bar:
+            try:
+                from tqdm import tqdm
+                batches = tqdm(batches, desc="Encoding",
+                               total=(len(sentences) + batch_size - 1) // batch_size)
+            except ImportError:
+                pass
+        for i in batches:
+            batch = sentences[i : i + batch_size]
+            enc   = self._tok(batch, padding=True, truncation=True,
+                              return_tensors="pt", max_length=512)
+            with self._torch.no_grad():
+                out = self._mdl(**enc)
+            emb = out.last_hidden_state[:, 0, :].detach().cpu().numpy()  # CLS token
+            if normalize_embeddings:
+                norms = np.linalg.norm(emb, axis=1, keepdims=True)
+                emb   = emb / np.maximum(norms, 1e-8)
+            all_embs.append(emb)
+        return np.vstack(all_embs) if all_embs else np.empty((0, 768))
+
+
+def load_model():
+    """Return the best available SPECTER2 model.
+
+    Prefers the proximity-adapter version (allenai/specter2) for better
+    retrieval accuracy. Falls back to the base model if the 'adapters'
+    library is not installed.
+
+        pip3 install adapters          # to get the improved model
+    """
+    try:
+        import adapters  # noqa: F401 — only checking availability
+        print("  Using SPECTER2 + proximity adapter  (best accuracy)")
+        return _SPECTER2Adapter()
+    except ImportError:
+        print("  Using specter2_base  (install 'adapters' for improved accuracy)")
+    except Exception as e:
+        print(f"  Adapter load failed ({e}), falling back to base model")
     from sentence_transformers import SentenceTransformer
-except ImportError:
-    sys.exit("Run:  pip3 install sentence-transformers numpy")
+    return SentenceTransformer("allenai/specter2_base")
 
 
 # ---------------------------------------------------------------------------
@@ -687,6 +747,19 @@ def complementary(query, qv, emb, labels, people, n_skip=2):
 # Display
 # ---------------------------------------------------------------------------
 
+def _score_tier(score):
+    """Translate a raw hybrid score into a human-readable quality label.
+
+    Replaces the raw percentage which was misleading as an absolute number —
+    two results at 87% and 72% can both be excellent matches; what matters
+    is whether the score clears the meaningful thresholds.
+    """
+    if score >= 0.80: return "Strong"
+    if score >= 0.65: return "Good"
+    if score >= 0.50: return "Possible"
+    return "Weak"
+
+
 def show(results, query, mode, qv=None, paper_idx=None):
     label = "complementary" if mode == "c" else "semantic"
     threshold = MIN_SCORE[mode]
@@ -705,8 +778,9 @@ def show(results, query, mode, qv=None, paper_idx=None):
             why_label = "Why they match"
             reason    = explain_match(query, p["research_summary"], name=p.get("name",""))
 
-        weak = "  ⚠ weak match" if score < threshold else ""
-        print(f"{rank}. {p['name']}  —  {score*100:.0f}%{weak}")
+        tier = _score_tier(score)
+        flag = "  ⚠" if score < threshold else ""
+        print(f"{rank}. {p['name']}  —  {tier}{flag}  ({score*100:.0f})")
         print(f"   {title}  |  {dept}")
         if email:
             print(f"   {email}")
@@ -736,8 +810,8 @@ def show(results, query, mode, qv=None, paper_idx=None):
 
 def main():
     people = load_faculty()
-    print("Loading SPECTER2 (academic embedding model)...")
-    model  = SentenceTransformer(MODEL)
+    print("Loading SPECTER2...")
+    model = load_model()
     emb, labels, centroids = get_index(people, model)
     paper_idx = get_paper_index(people, model)
 

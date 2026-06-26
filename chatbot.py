@@ -51,7 +51,6 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     import search as sm
-    from sentence_transformers import SentenceTransformer
 except ImportError as e:
     sys.exit(f"Missing dependency: {e}\nRun: pip3 install sentence-transformers numpy")
 
@@ -295,7 +294,7 @@ def main():
     _people = sm.load_faculty()
 
     print("Loading SPECTER2 model...")
-    _model = SentenceTransformer(sm.MODEL)
+    _model = sm.load_model()
 
     _emb, _labels, _ = sm.get_index(_people, _model)
     _paper_idx        = sm.get_paper_index(_people, _model)
