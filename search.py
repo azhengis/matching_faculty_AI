@@ -375,13 +375,9 @@ def explain_match(query, research_summary, name=""):
     _PUB_LIST_RE = re.compile(r"journal of|proceedings of|published in the|\bieee \b|\bacm \b", re.IGNORECASE)
 
     def count_hits(s):
-        words    = set(re.findall(r"[a-z]+", s.lower()))
-        exact    = len(keywords & words)
-        syn_hits = sum(
-            0.75 for kw in keywords
-            if kw not in words and any(syn in s.lower() for syn in SYNONYMS.get(kw, []))
-        )
-        return exact + syn_hits
+        words = set(re.findall(r"[a-z]+", s.lower()))
+        exact = len(keywords & words)
+        return float(exact)
 
     def score(s):
         hits        = count_hits(s)
@@ -667,7 +663,7 @@ def zero_kw_penalty(query, kw, specter_sim=None):
       - <15% keyword hits on a 5+ keyword query → 0.60  (e.g. 1/7 = 0.14)
       - <26% keyword hits on a 4+ keyword query → 0.75  (e.g. 1/4 = 0.25)
     """
-    if specter_sim is not None and specter_sim >= 0.87:
+    if specter_sim is not None and specter_sim >= 0.85:
         return 1.0  # SPECTER2 is very confident — trust it over keyword gate
     n_keywords = len(query_keywords(query))
     if n_keywords >= 3 and kw == 0.0:
