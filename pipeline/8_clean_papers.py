@@ -10,7 +10,7 @@ Telltale signs: papers with tens of thousands of citations attached to
 a writing professor, a school counselor, a design professor, etc.
 
 Two-pass cleanup:
-  Pass 1 — citation ceiling: papers cited >2000 are almost certainly not
+  Pass 1 — citation ceiling: papers cited >500 are almost certainly not
             from a DePaul faculty member (those landmark papers come from
             large research consortiums / famous scientists with the same name)
   Pass 2 — topic coherence: embed each faculty member's summary and each
@@ -30,8 +30,8 @@ DB             = os.path.join(_ROOT, "faculty.db")
 INDEX          = os.path.join(_ROOT, "faculty_index.pkl")
 PAPER_INDEX    = os.path.join(_ROOT, "paper_index.pkl")
 MODEL_NAME     = "allenai/specter2_base"
-MAX_CITATIONS  = 2000   # above this almost certainly a wrong person
-MIN_FIELD_SIM  = 0.40   # paper must be at least this similar to faculty's own research
+MAX_CITATIONS  = 500    # above this almost certainly a wrong person (DePaul faculty rarely exceed 300-400 citations per paper)
+MIN_FIELD_SIM  = 0.55   # paper must be at least this similar to faculty's own research
 
 
 def load_faculty_lookup():

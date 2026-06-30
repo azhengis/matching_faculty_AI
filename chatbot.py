@@ -75,8 +75,23 @@ TOOLS = [
             "description": (
                 "Search DePaul University's full-time faculty database by research topic. "
                 "Use this when the user is looking for a faculty collaborator, advisor, "
-                "or expert on a specific research topic or problem. "
-                "Extract the core academic topic from their message before calling this."
+                "or expert on a specific research topic or problem.\n\n"
+                "IMPORTANT — before calling this tool, translate the user's description "
+                "into specific academic/scientific terminology. The search engine matches "
+                "against faculty research bios which use domain vocabulary, not lay language.\n\n"
+                "Examples of how to translate:\n"
+                "  'memory loss in elderly patients' → "
+                "'cognitive decline dementia Alzheimer neurodegeneration geriatric aging'\n"
+                "  'heart disease risk factors' → "
+                "'cardiovascular disease epidemiology risk factors clinical outcomes'\n"
+                "  'kids learning problems' → "
+                "'learning disabilities cognitive development pediatric education intervention'\n"
+                "  'AI that explains itself' → "
+                "'explainability interpretability transparent machine learning'\n"
+                "  'finding cancer early' → "
+                "'cancer screening biomarker early detection oncology diagnosis'\n\n"
+                "Use 4-8 technical terms that would appear in a researcher's publications or bio. "
+                "Expand abbreviations and translate colloquial phrases to academic equivalents."
             ),
             "parameters": {
                 "type": "object",
@@ -84,13 +99,11 @@ TOOLS = [
                     "query": {
                         "type": "string",
                         "description": (
-                            "The research topic to search — use specific academic terms, "
-                            "not the user's full sentence. Strip out phrases like "
-                            "'I am looking for' or 'someone who'. "
-                            "Examples: 'machine learning clinical prediction', "
-                            "'corporate finance risk valuation', "
-                            "'bilingual language acquisition children', "
-                            "'environmental policy urban health disparities'"
+                            "Academic/scientific translation of the user's research description. "
+                            "Use 4-8 domain-specific terms that researchers in this field would "
+                            "use in their publications. Do NOT use the user's lay phrasing — "
+                            "translate it first. Strip connective phrases like "
+                            "'I am looking for' or 'someone who works on'."
                         )
                     },
                     "mode": {
@@ -144,7 +157,13 @@ Examples of good clarifying questions:
 • "Is this for a specific application area, like healthcare or education?"
 
 ━━━ HOW TO PRESENT RESULTS ━━━
-When results come back, present them naturally — not a formatted list.
+When results come back, check the match_tier field for each result.
+If all results are "Possible" or "Weak" (none are "Strong" or "Good"), say clearly
+upfront: "I didn't find any DePaul faculty who are strong matches for this — it may not
+be a current research specialty here." Then briefly mention the closest results anyway
+in case one is still useful.
+
+When there are good matches, present them naturally — not a formatted list.
 
 For each person (pick the 3–5 most relevant), cover in 2–4 sentences:
 • Who they are and what they actually work on (use bio_summary, not just why_match)

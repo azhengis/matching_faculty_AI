@@ -92,6 +92,20 @@ SYNONYMS = {
     "equity":         ["social justice", "inclusion", "marginalized", "underserved"],
     "diversity":      ["equity", "inclusion", "social justice", "representation"],
     "accessibility":  ["disability", "universal design", "inclusive design"],
+    # Cognitive science / neuroscience / aging
+    "memory":         ["cognitive", "dementia", "alzheimer", "neurodegeneration", "cognition"],
+    "cognitive":      ["memory", "dementia", "alzheimer", "neurodegeneration", "neuroscience"],
+    "dementia":       ["alzheimer", "memory", "cognitive decline", "neurodegeneration"],
+    "aging":          ["gerontology", "geriatric", "elderly", "older adults"],
+    "elderly":        ["aging", "gerontology", "geriatric", "older adults"],
+    "neurological":   ["neuroscience", "neural", "brain", "cognitive", "nervous system"],
+    "neuroscience":   ["neurology", "brain", "cognitive", "neural", "neurological"],
+    "psychiatric":    ["mental health", "psychology", "behavioral", "neuroscience"],
+    # General medical / clinical
+    "diagnosis":      ["screening", "detection", "assessment", "evaluation", "diagnostic"],
+    "biomarker":      ["screening", "early detection", "diagnostic marker", "biomarkers"],
+    "treatment":      ["therapy", "intervention", "clinical trial", "therapeutics"],
+    "patient":        ["clinical", "healthcare", "medical", "hospital"],
 }
 
 # Maps multi-word query concepts to synonym phrases checked in faculty text.
@@ -115,6 +129,15 @@ PHRASE_SYNONYMS = {
     "quantum computing":      ["quantum algorithm", "qubit", "quantum information"],
     "augmented reality":      ["mixed reality", "spatial computing", "extended reality"],
     "virtual reality":        ["immersive experience", "spatial computing", "extended reality"],
+    # Cognitive / neurological / aging
+    "memory loss":            ["cognitive decline", "dementia", "alzheimer", "cognitive impairment", "neurodegeneration"],
+    "cognitive decline":      ["dementia", "alzheimer", "memory loss", "cognitive impairment", "neurodegeneration"],
+    "early signs":            ["biomarker", "screening", "early detection", "early diagnosis", "prodromal"],
+    "early detection":        ["screening", "biomarker", "early signs", "early diagnosis"],
+    "brain disease":          ["neurodegeneration", "neurology", "cognitive decline", "dementia"],
+    "mental health":          ["psychiatry", "psychology", "behavioral health", "wellbeing"],
+    "patient care":           ["clinical", "healthcare delivery", "medical treatment", "nursing"],
+    "older adults":           ["aging", "gerontology", "geriatric", "elderly"],
 }
 
 class _SPECTER2Adapter:
@@ -234,8 +257,17 @@ def load_faculty():
         WHERE TRIM(research_summary) != ''
            OR TRIM(COALESCE(classes_taught,'')) != ''
     """).fetchall()
+
+    # Load paper titles per faculty for keyword boosting at query time
+    paper_title_rows = con.execute(
+        "SELECT faculty_id, GROUP_CONCAT(title, ' | ') as titles FROM papers GROUP BY faculty_id"
+    ).fetchall()
+    paper_titles_by_id = {r["faculty_id"]: r["titles"] for r in paper_title_rows}
     con.close()
+
     people = [dict(r) for r in rows]
+    for p in people:
+        p["pub_titles"] = paper_titles_by_id.get(p["id"], "")
 
     for p in people:
         summary = fix_summary(p.get("research_summary") or "")
@@ -675,18 +707,32 @@ def alpha_for_query(query, source="research"):
     return 0.80
 
 
-def zero_kw_penalty(query, kw):
+def zero_kw_penalty(query, kw, specter_sim=None):
     """
-    When a query has 3+ distinct keywords and a result matches none of them,
-    SPECTER2 is almost certainly finding a spurious semantic connection
-    (e.g. 'network security' → education professor because academic language
-    papers land near security papers in embedding space).
-    Apply a strong multiplier to push these out of the top results.
+    When a query has 3+ distinct keywords and a result matches few of them,
+    SPECTER2 is likely finding a spurious semantic connection via shared
+    domain vocabulary.
+
+    Exception: when SPECTER2 similarity is very high (>= 0.87), trust it
+    even without strong keyword overlap. At that similarity level the model
+    is almost certainly right — it's encoding a genuine topic match that the
+    lay query terms don't expose. This handles experts who publish in academic
+    vocabulary (e.g. 'Alzheimer's disease neurodegeneration') when the query
+    uses lay terms ('memory loss in elderly').
+
+    Penalty tiers:
+      - 0 keyword hits on a 3+ keyword query → 0.50
+      - <15% keyword hits on a 5+ keyword query → 0.60  (e.g. 1/7 = 0.14)
+      - <26% keyword hits on a 4+ keyword query → 0.75  (e.g. 1/4 = 0.25)
     """
+    if specter_sim is not None and specter_sim >= 0.87:
+        return 1.0  # SPECTER2 is very confident — trust it over keyword gate
     n_keywords = len(query_keywords(query))
     if n_keywords >= 3 and kw == 0.0:
         return 0.50
-    if n_keywords >= 4 and kw < 0.26:   # only 1/4 keywords matched on a specific query
+    if n_keywords >= 5 and kw < 0.15:   # only 1 of 7+ keywords matched
+        return 0.60
+    if n_keywords >= 4 and kw < 0.26:   # only 1 of 4+ keywords matched
         return 0.75
     return 1.0
 
@@ -699,7 +745,7 @@ def hybrid_scores(query, qv, emb, people):
         a   = alpha_for_query(query, src)
         kw  = kw_presence_score(query, people[i]["research_summary"])
         raw = a * float(sims[i]) + (1 - a) * kw
-        scores.append(recency_penalty(people[i]) * raw * zero_kw_penalty(query, kw))
+        scores.append(recency_penalty(people[i]) * raw * zero_kw_penalty(query, kw, float(sims[i])))
     return np.array(scores)
 
 
@@ -777,6 +823,9 @@ def show(results, query, mode, qv=None, paper_idx=None):
     label = "complementary" if mode == "c" else "semantic"
     threshold = MIN_SCORE[mode]
     print(f"\nTop {len(results)} {label} matches:\n")
+    if results and results[0][1] < 0.65:
+        print("Note: No strong faculty matches found — this topic may not be a current")
+        print("      DePaul research specialty. Results below are closest available.\n")
 
     for rank, (p, score, _) in enumerate(results, 1):
         dept    = p.get("department") or p.get("college", "")
