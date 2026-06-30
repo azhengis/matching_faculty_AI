@@ -22,3 +22,26 @@ python3 search.py
 
 Scripts 1–5 only need to run once (or when DePaul updates its faculty directory).
 Scripts 6–8 can be re-run periodically to pick up new publications.
+
+---
+
+## Optional: Fine-tune the search model on DePaul data
+
+These scripts fine-tune SPECTER2 to better understand DePaul's specific research vocabulary,
+then compare 3 training configurations and pick the best one.
+
+Requires: `OPENAI_API_KEY` + `CHATBOT_MODEL` set (for training data generation).
+
+```
+# Step 1: generate ~2200 synthetic (query, faculty_bio) training pairs via LLM
+#         takes ~5 minutes, requires API key
+python3 pipeline/9_generate_training_data.py
+
+# Step 2: fine-tune with 3 configs (A=fast, B=standard, C=conservative) and compare
+#         takes ~1-3 hours on CPU, ~20 min on GPU
+python3 pipeline/10_finetune_specter2.py
+
+# Step 3: use the best fine-tuned model
+export FINETUNED_MODEL=models/specter2_depaul_B_standard   # or whichever won
+rm -f faculty_index.pkl && python3 search.py
+```

@@ -60,85 +60,38 @@ STOPWORDS = {
 # Maps individual query keywords to equivalent terms that may appear in faculty text.
 # Handles abbreviations (user types "nlp", bio says "natural language processing")
 # and vocabulary mismatches (user says "cybersecurity", bio says "information security").
-SYNONYMS = {
-    # Abbreviations (3-char minimum passes the keyword length filter)
-    "nlp":            ["natural language", "computational linguistics", "text mining"],
-    "hci":            ["human-computer", "human computer", "user interface", "usability"],
-    "ehr":            ["health record", "electronic health", "clinical informatics"],
-    "emr":            ["health record", "electronic health", "clinical informatics"],
-    "iot":            ["internet of things", "embedded system", "sensor network"],
-    "llm":            ["language model", "large language", "foundation model"],
-    "xai":            ["explainability", "interpretability", "explainable ai"],
-    # Cyber / security
-    "cybersecurity":  ["information security", "network security", "cyber security", "computer security"],
-    "intrusion":      ["anomaly detection", "threat detection", "network monitoring"],
-    "malware":        ["virus", "ransomware", "threat analysis", "malicious code"],
-    # Healthcare
-    "healthcare":     ["clinical", "health informatics", "biomedical", "patient care"],
-    "clinical":       ["healthcare", "patient", "biomedical", "health informatics"],
-    # ML / AI concepts
-    "fairness":       ["bias", "algorithmic fairness", "discrimination"],
-    "bias":           ["fairness", "algorithmic fairness", "discrimination"],
-    "explainability": ["interpretability", "explainable", "transparency"],
-    "interpretability": ["explainability", "explainable", "transparency"],
-    "generative":     ["language model", "diffusion model", "foundation model"],
-    "federated":      ["distributed learning", "privacy-preserving", "decentralized"],
-    "adversarial":    ["robustness", "red team", "attack defense"],
-    "privacy":        ["differential privacy", "anonymization", "data protection"],
-    "multimodal":     ["vision language", "cross-modal", "image text"],
-    # Environment / society
-    "sustainability": ["sustainable", "environmental", "ecology", "climate"],
-    "climate":        ["sustainability", "environmental science", "ecology"],
-    "equity":         ["social justice", "inclusion", "marginalized", "underserved"],
-    "diversity":      ["equity", "inclusion", "social justice", "representation"],
-    "accessibility":  ["disability", "universal design", "inclusive design"],
-    # Cognitive science / neuroscience / aging
-    "memory":         ["cognitive", "dementia", "alzheimer", "neurodegeneration", "cognition"],
-    "cognitive":      ["memory", "dementia", "alzheimer", "neurodegeneration", "neuroscience"],
-    "dementia":       ["alzheimer", "memory", "cognitive decline", "neurodegeneration"],
-    "aging":          ["gerontology", "geriatric", "elderly", "older adults"],
-    "elderly":        ["aging", "gerontology", "geriatric", "older adults"],
-    "neurological":   ["neuroscience", "neural", "brain", "cognitive", "nervous system"],
-    "neuroscience":   ["neurology", "brain", "cognitive", "neural", "neurological"],
-    "psychiatric":    ["mental health", "psychology", "behavioral", "neuroscience"],
-    # General medical / clinical
-    "diagnosis":      ["screening", "detection", "assessment", "evaluation", "diagnostic"],
-    "biomarker":      ["screening", "early detection", "diagnostic marker", "biomarkers"],
-    "treatment":      ["therapy", "intervention", "clinical trial", "therapeutics"],
-    "patient":        ["clinical", "healthcare", "medical", "hospital"],
-}
+def expand_query_with_llm(query: str) -> str:
+    """Translate a lay-term query into academic vocabulary using the LLM.
 
-# Maps multi-word query concepts to synonym phrases checked in faculty text.
-# If the phrase is detected in the query AND a synonym appears in the text,
-# all meaningful words of that phrase are credited as matched (at 70% weight).
-PHRASE_SYNONYMS = {
-    "transfer learning":      ["domain adaptation", "fine-tuning", "pretrained", "pretraining"],
-    "deep learning":          ["neural network", "convolutional network", "transformer model"],
-    "machine learning":       ["statistical learning", "predictive modeling", "supervised learning"],
-    "natural language":       ["nlp", "text processing", "computational linguistics"],
-    "computer vision":        ["image recognition", "visual recognition", "object detection"],
-    "reinforcement learning": ["reward signal", "policy optimization", "q-learning"],
-    "large language model":   ["llm", "generative ai", "foundation model"],
-    "social justice":         ["equity", "inclusion", "marginalized", "racial justice"],
-    "climate change":         ["sustainability", "ecology", "global warming", "carbon emission"],
-    "human computer":         ["hci", "usability", "user experience", "user interface"],
-    "information security":   ["cybersecurity", "network security", "intrusion detection"],
-    "public health":          ["epidemiology", "population health", "community health"],
-    "data science":           ["machine learning", "statistical analysis", "data mining"],
-    "software engineering":   ["software development", "software design", "software architecture"],
-    "quantum computing":      ["quantum algorithm", "qubit", "quantum information"],
-    "augmented reality":      ["mixed reality", "spatial computing", "extended reality"],
-    "virtual reality":        ["immersive experience", "spatial computing", "extended reality"],
-    # Cognitive / neurological / aging
-    "memory loss":            ["cognitive decline", "dementia", "alzheimer", "cognitive impairment", "neurodegeneration"],
-    "cognitive decline":      ["dementia", "alzheimer", "memory loss", "cognitive impairment", "neurodegeneration"],
-    "early signs":            ["biomarker", "screening", "early detection", "early diagnosis", "prodromal"],
-    "early detection":        ["screening", "biomarker", "early signs", "early diagnosis"],
-    "brain disease":          ["neurodegeneration", "neurology", "cognitive decline", "dementia"],
-    "mental health":          ["psychiatry", "psychology", "behavioral health", "wellbeing"],
-    "patient care":           ["clinical", "healthcare delivery", "medical treatment", "nursing"],
-    "older adults":           ["aging", "gerontology", "geriatric", "elderly"],
-}
+    This replaces the old hardcoded SYNONYMS/PHRASE_SYNONYMS dicts.
+    The LLM understands context — "memory loss" in a medical context maps to
+    "dementia Alzheimer cognitive decline", not "computer memory RAM cache".
+    Falls back to the original query if no LLM key is configured.
+    """
+    model = os.environ.get("CHATBOT_MODEL", "")
+    if not model:
+        return query
+    try:
+        import litellm
+        litellm.suppress_debug_info = True
+        resp = litellm.completion(
+            model=model,
+            max_tokens=80,
+            temperature=0.0,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Translate this search query into 6-8 specific academic/scientific terms "
+                    "that researchers who work in this field would use in their publications or bio. "
+                    "Return ONLY the terms, space-separated, no explanation, no punctuation.\n\n"
+                    f"Query: {query}"
+                ),
+            }],
+        )
+        expanded = resp.choices[0].message.content.strip()
+        return expanded if expanded else query
+    except Exception:
+        return query
 
 class _SPECTER2Adapter:
     """SPECTER2 base + proximity adapter — better retrieval than base alone.
@@ -188,12 +141,18 @@ class _SPECTER2Adapter:
 def load_model():
     """Return the best available SPECTER2 model.
 
-    Prefers the proximity-adapter version (allenai/specter2) for better
-    retrieval accuracy. Falls back to the base model if the 'adapters'
-    library is not installed.
-
-        pip3 install adapters          # to get the improved model
+    Priority order:
+      1. Fine-tuned DePaul model (FINETUNED_MODEL env var set after running
+         pipeline/10_finetune_specter2.py)
+      2. SPECTER2 + proximity adapter  (best off-the-shelf accuracy)
+      3. SPECTER2 base  (fallback if 'adapters' library not installed)
     """
+    finetuned_path = os.environ.get("FINETUNED_MODEL", "")
+    if finetuned_path and os.path.isdir(finetuned_path):
+        from sentence_transformers import SentenceTransformer
+        print(f"  Using fine-tuned DePaul model: {finetuned_path}")
+        return SentenceTransformer(finetuned_path)
+
     try:
         import adapters  # noqa: F401 — only checking availability
         print("  Using SPECTER2 + proximity adapter  (best accuracy)")
@@ -660,36 +619,19 @@ def recency_penalty(p):
 
 
 def kw_presence_score(query, text):
+    """Exact-match keyword overlap between query terms and faculty text.
+
+    Synonym expansion is handled upstream by expand_query_with_llm(), so the
+    query arriving here already uses academic vocabulary. This function is a
+    literal sanity check: if the LLM-expanded query terms appear nowhere in
+    the faculty bio, SPECTER2 must be finding a spurious connection.
+    """
     keywords = query_keywords(query)
     if not keywords:
         return 0.5
-    text_lower  = text.lower()
-    query_lower = clean_query(query).lower()
-
-    satisfied = {}  # keyword → score (1.0 exact, 0.75 synonym, 0.70 phrase synonym)
-
-    # Pass 1 — exact substring match
-    for kw in keywords:
-        if kw in text_lower:
-            satisfied[kw] = 1.0
-
-    # Pass 2 — single-word synonym: "nlp" → "natural language", "cybersecurity" → "information security"
-    for kw in keywords:
-        if kw not in satisfied:
-            for syn in SYNONYMS.get(kw, []):
-                if syn in text_lower:
-                    satisfied[kw] = 0.75
-                    break
-
-    # Pass 3 — phrase-level synonym: if "transfer learning" is in the query and
-    # "domain adaptation" is in the text, credit both "transfer" and "learning"
-    for phrase, synonyms in PHRASE_SYNONYMS.items():
-        if phrase in query_lower and any(syn in text_lower for syn in synonyms):
-            for word in query_keywords(phrase):
-                if word in keywords and word not in satisfied:
-                    satisfied[word] = 0.70
-
-    return min(sum(satisfied.values()) / len(keywords), 1.0)
+    text_lower = text.lower()
+    hits = sum(1.0 for kw in keywords if kw in text_lower)
+    return hits / len(keywords)
 
 
 def alpha_for_query(query, source="research"):
@@ -924,8 +866,12 @@ def main():
             query = named_person["research_summary"][:300]
         else:
             topic = clean_query(q) or q
-            qv    = model.encode([topic], normalize_embeddings=True)[0]
-            query = q
+            # Expand lay terms to academic vocabulary before encoding
+            expanded = expand_query_with_llm(topic)
+            if expanded != topic:
+                print(f"  [query expanded → {expanded}]")
+            qv    = model.encode([expanded], normalize_embeddings=True)[0]
+            query = expanded   # use expanded for both SPECTER2 and keyword scoring
         last_qv = qv
 
         # --- mode ---

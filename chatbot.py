@@ -206,8 +206,10 @@ someone navigate the university — not a search engine returning a list."""
 def run_search(query: str, mode: str = "semantic") -> dict:
     """Execute the faculty search and return structured data for Claude."""
     try:
-        clean_q = sm.clean_query(query) or query
-        qv      = _model.encode([clean_q], normalize_embeddings=True)[0]
+        clean_q  = sm.clean_query(query) or query
+        expanded = sm.expand_query_with_llm(clean_q)
+        qv       = _model.encode([expanded], normalize_embeddings=True)[0]
+        clean_q  = expanded   # use academic expansion for both SPECTER2 and keyword scoring
 
         if mode == "complementary":
             scores       = sm.hybrid_scores(clean_q, qv, _emb, _people)
