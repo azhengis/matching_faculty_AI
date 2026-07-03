@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Faculty Profile — DePaul Faculty Matcher</title>
+<style>
+:root {
+  --navy:#003366; --scarlet:#C41E2E;
+  --ground:#EEF2F7; --surface:#FFFFFF;
+  --border:#CED6E2; --border-2:#B0BECE;
+  --ink:#16202E; --ink-2:#4C5B72; --ink-3:#8594A8;
+  --green:#1A6B3A; --green-bg:#E8F5ED;
+  --amber:#7A4F00; --amber-bg:#FDF5E5;
+  --teal:#0D5C63; --teal-bg:#E4F4F5;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ground);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;min-height:100vh}
+
+/* ── Nav ── */
+nav{background:var(--navy);display:flex;align-items:stretch;padding:0 28px;gap:0}
+.nav-brand{color:#fff;font-size:13.5px;font-weight:700;display:flex;align-items:center;padding-right:20px;margin-right:4px;border-right:1px solid rgba(255,255,255,.15);white-space:nowrap}
+.nav-brand span{background:var(--scarlet);color:#fff;font-size:11px;font-weight:800;padding:2px 6px;margin-right:8px;letter-spacing:.02em}
+nav a{color:rgba(255,255,255,.6);text-decoration:none;font-size:13px;padding:0 16px;display:flex;align-items:center;border-bottom:2px solid transparent;transition:color .15s}
+nav a:hover{color:#fff}
+nav a.active{color:#fff;border-bottom-color:var(--scarlet)}
+
+/* ── Main ── */
+.main{max-width:680px;margin:0 auto;padding:40px 28px 80px}
+
+/* ── Step indicator ── */
+.steps{display:flex;gap:0;margin-bottom:36px}
+.step{flex:1;display:flex;flex-direction:column;align-items:center;position:relative}
+.step+.step::before{content:'';position:absolute;left:-50%;right:50%;top:14px;height:1.5px;background:var(--border)}
+.step.done+.step::before,.step.active+.step::before{background:var(--navy)}
+.step-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:var(--surface);border:1.5px solid var(--border);color:var(--ink-3);position:relative;z-index:1;transition:all .2s}
+.step.active .step-num{background:var(--navy);border-color:var(--navy);color:#fff}
+.step.done .step-num{background:var(--green);border-color:var(--green);color:#fff}
+.step-label{font-size:11px;color:var(--ink-3);margin-top:6px;font-weight:500;text-align:center}
+.step.active .step-label{color:var(--navy);font-weight:600}
+.step.done .step-label{color:var(--green)}
+
+/* ── Section heading ── */
+.section-tag{font-size:10px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--teal);margin-bottom:6px}
+h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal;color:var(--ink);margin-bottom:8px}
+.section-desc{font-size:14px;color:var(--ink-2);margin-bottom:24px;line-height:1.6}
+
+/* ── Form inputs ── */
+.input-row{display:flex;gap:8px;margin-bottom:6px}
+.text-input{flex:1;padding:11px 14px;font-size:15px;border:1.5px solid var(--border);background:var(--surface);color:var(--ink);outline:none;font-family:inherit}
+.text-input::placeholder{color:var(--ink-3)}
+.text-input:focus{border-color:var(--navy)}
+.btn-primary{padding:11px 24px;background:var(--navy);color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.btn-primary:hover{background:#004488}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-outline{padding:9px 18px;background:var(--surface);color:var(--navy);border:1.5px solid var(--navy);font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit}
+.btn-outline:hover{background:#E5EEF8}
+
+/* ── Faculty search results ── */
+.search-status{min-height:20px;font-size:13px;color:var(--ink-2);margin-bottom:14px}
+.search-status.err{color:#9B2020}
+
+.faculty-card{background:var(--surface);border:1.5px solid var(--border);padding:16px 18px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;cursor:default}
+.faculty-card:hover{border-color:var(--border-2)}
+.faculty-info .name{font-size:15px;font-weight:700;color:var(--ink);margin-bottom:2px}
+.faculty-info .meta{font-size:12.5px;color:var(--ink-2);margin-bottom:6px}
+.faculty-info .bio-preview{font-size:12.5px;color:var(--ink-3);line-height:1.5;max-width:420px}
+.btn-select{padding:8px 16px;background:var(--navy);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;align-self:center;white-space:nowrap;flex-shrink:0}
+.btn-select:hover{background:#004488}
+
+/* ── Selected faculty banner ── */
+.selected-banner{background:var(--teal-bg);border:1.5px solid var(--teal);padding:13px 16px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center}
+.selected-banner strong{color:var(--teal)}
+.btn-change{background:none;border:none;font-size:13px;color:var(--teal);cursor:pointer;text-decoration:underline;font-family:inherit}
+.btn-change:hover{color:var(--navy)}
+
+/* ── Papers ── */
+.papers-section{margin-bottom:28px}
+.papers-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.papers-head-label{font-size:13.5px;font-weight:600;color:var(--ink)}
+.papers-count{font-size:12px;color:var(--ink-3)}
+.papers-note{font-size:12.5px;color:var(--ink-2);background:var(--amber-bg);border:1px solid #E8D5A0;padding:9px 12px;margin-bottom:12px;line-height:1.5}
+.paper-row{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.paper-row:last-child{border-bottom:none}
+.paper-cb{margin-top:3px;width:15px;height:15px;accent-color:var(--navy);cursor:pointer;flex-shrink:0}
+.paper-label{cursor:pointer;flex:1;min-width:0}
+.paper-title{font-size:13.5px;color:var(--ink);line-height:1.4}
+.paper-meta{font-size:11.5px;color:var(--ink-3);margin-top:1px}
+.select-all-row{display:flex;gap:12px;margin-bottom:8px}
+.btn-tiny{background:none;border:none;font-size:12px;color:var(--navy);cursor:pointer;text-decoration:underline;font-family:inherit;padding:0}
+.btn-tiny:hover{color:var(--scarlet)}
+
+/* ── Project textarea ── */
+.textarea-wrap{margin-bottom:20px}
+.field-label{font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
+.proj-textarea{width:100%;padding:12px 14px;font-size:14.5px;border:1.5px solid var(--border);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;line-height:1.6;resize:vertical;min-height:130px}
+.proj-textarea::placeholder{color:var(--ink-3)}
+.proj-textarea:focus{border-color:var(--navy)}
+.char-count{font-size:11.5px;color:var(--ink-3);text-align:right;margin-top:4px}
+
+/* ── Welcome back ── */
+.welcome-back{background:var(--surface);border:1.5px solid var(--border);padding:24px;margin-bottom:24px}
+.welcome-back h3{font-size:17px;font-weight:700;margin-bottom:6px}
+.welcome-back p{font-size:14px;color:var(--ink-2);margin-bottom:16px}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap}
+.btn-scarlet{padding:11px 22px;background:var(--scarlet);color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+.btn-scarlet:hover{background:#a01828}
+
+/* ── Loading ── */
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Panel visibility ── */
+.panel{display:none}
+.panel.active{display:block}
+
+@media(max-width:560px){.input-row{flex-direction:column}.btn-group{flex-direction:column}.faculty-card{flex-direction:column}.btn-select{align-self:flex-start}}
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-brand"><span>D</span>DePaul Faculty Matcher</span>
+  <a href="/baseline">Baseline Search</a>
+  <a href="/search">LLM Search</a>
+  <a href="/chat">Chatbot</a>
+  <a href="/advisor" class="active">Faculty Advisor</a>
+</nav>
+
+<div class="main">
+
+  <!-- Welcome back (shown if profile exists in localStorage) -->
+  <div id="welcome-back" style="display:none">
+    <div class="welcome-back">
+      <h3 id="wb-name">Welcome back</h3>
+      <p id="wb-desc">Your profile is saved. Head to the advisor to continue, or update your profile below.</p>
+      <div class="btn-group">
+        <a class="btn-scarlet" href="/advisor">Go to Advisor &rarr;</a>
+        <button class="btn-outline" onclick="startFresh()">Update my profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step indicator -->
+  <div class="steps" id="steps">
+    <div class="step active" id="step-dot-1">
+      <div class="step-num">1</div>
+      <div class="step-label">Find yourself</div>
+    </div>
+    <div class="step" id="step-dot-2">
+      <div class="step-num">2</div>
+      <div class="step-label">Confirm papers</div>
+    </div>
+    <div class="step" id="step-dot-3">
+      <div class="step-num">3</div>
+      <div class="step-label">Your project</div>
+    </div>
+  </div>
+
+  <!-- ── Step 1: Name search ── -->
+  <div id="panel-1" class="panel active">
+    <div class="section-tag">Step 1 of 3</div>
+    <h2>Find yourself in our database</h2>
+    <p class="section-desc">Search by your name so we can pre-fill your profile with your existing research summary and publications.</p>
+
+    <div class="input-row">
+      <input type="text" class="text-input" id="name-input" placeholder="e.g.  Smith  or  Maria Rodriguez" />
+      <button class="btn-primary" id="btn-search" onclick="searchFaculty()">Search</button>
+    </div>
+    <div class="search-status" id="search-status"></div>
+    <div id="faculty-results"></div>
+  </div>
+
+  <!-- ── Step 2: Confirm papers ── -->
+  <div id="panel-2" class="panel">
+    <div class="selected-banner" id="selected-banner">
+      <div><strong id="selected-name"></strong><br><span id="selected-meta" style="font-size:13px;color:var(--teal)"></span></div>
+      <button class="btn-change" onclick="goToStep(1)">Not me &rarr; search again</button>
+    </div>
+
+    <div class="section-tag">Step 2 of 3</div>
+    <h2>Confirm your publications</h2>
+    <p class="section-desc">We found these papers in our database. Check the ones that are yours — uncheck any misattributions.</p>
+
+    <div class="papers-section" id="papers-section">
+      <div class="papers-note">Don't see all your papers? That's fine — our database pulls from OpenAlex and may be incomplete. You can always add more context in your project description.</div>
+      <div class="papers-head">
+        <span class="papers-head-label" id="papers-count-label">Publications</span>
+        <div class="select-all-row">
+          <button class="btn-tiny" onclick="toggleAll(true)">Select all</button>
+          <button class="btn-tiny" onclick="toggleAll(false)">Deselect all</button>
+        </div>
+      </div>
+      <div id="papers-list">
+        <span class="spinner"></span>Loading papers...
+      </div>
+    </div>
+
+    <button class="btn-primary" onclick="goToStep(3)" style="width:100%;margin-top:4px">Continue &rarr;</button>
+  </div>
+
+  <!-- ── Step 3: Project description ── -->
+  <div id="panel-3" class="panel">
+    <div class="selected-banner">
+      <div><strong id="s3-name"></strong><br><span id="s3-meta" style="font-size:13px;color:var(--teal)"></span></div>
+      <button class="btn-change" onclick="goToStep(1)">Change profile</button>
+    </div>
+
+    <div class="section-tag">Step 3 of 3</div>
+    <h2>Describe your research project</h2>
+    <p class="section-desc">The advisor will use this to give you personalized suggestions for AI integration and find the right collaborators.</p>
+
+    <div class="textarea-wrap">
+      <div class="field-label">Current research project</div>
+      <textarea class="proj-textarea" id="project-desc"
+        placeholder="What research problem are you working on right now? What are you trying to find out or build? What data do you have? What's the hardest part of the methodology?&#10;&#10;The more specific you are, the more targeted the AI's suggestions will be."></textarea>
+      <div class="char-count" id="char-count">0 / 1000 characters recommended</div>
+    </div>
+
+    <button class="btn-primary" id="btn-save" onclick="saveProfile()" style="width:100%">
+      Save Profile &amp; Open Advisor &rarr;
+    </button>
+    <div class="search-status" id="save-status" style="margin-top:12px"></div>
+  </div>
+
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let _selected  = null;   // { id, name, title, dept, email, bio }
+let _paperIds  = [];     // all paper ids loaded for this faculty member
+let _step      = 1;
+
+// ── On load: check for existing profile ──────────────────────────────────────
+(function init() {
+  const pid = localStorage.getItem('advisor_profile_id');
+  const pname = localStorage.getItem('advisor_profile_name');
+  if (pid) {
+    document.getElementById('welcome-back').style.display = 'block';
+    document.getElementById('wb-name').textContent = 'Welcome back' + (pname ? ', ' + pname : '') + '!';
+    document.getElementById('wb-desc').textContent =
+      'Your profile is saved. Head to the advisor to continue, or create a new profile below.';
+    document.getElementById('steps').style.display = 'none';
+    document.getElementById('panel-1').classList.remove('active');
+  }
+})();
+
+function startFresh() {
+  localStorage.removeItem('advisor_profile_id');
+  localStorage.removeItem('advisor_profile_name');
+  document.getElementById('welcome-back').style.display = 'none';
+  document.getElementById('steps').style.display = 'flex';
+  document.getElementById('panel-1').classList.add('active');
+}
+
+// ── Step navigation ──────────────────────────────────────────────────────────
+function goToStep(n) {
+  document.getElementById('panel-' + _step).classList.remove('active');
+  _step = n;
+  document.getElementById('panel-' + n).classList.add('active');
+
+  // Update step dots
+  for (let i = 1; i <= 3; i++) {
+    const dot = document.getElementById('step-dot-' + i);
+    dot.className = 'step' + (i < n ? ' done' : i === n ? ' active' : '');
+    dot.querySelector('.step-num').textContent = i < n ? '✓' : i;
+  }
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── Step 1: Faculty search ───────────────────────────────────────────────────
+async function searchFaculty() {
+  const name = document.getElementById('name-input').value.trim();
+  if (!name) return;
+
+  const btn    = document.getElementById('btn-search');
+  const status = document.getElementById('search-status');
+  const res_el = document.getElementById('faculty-results');
+
+  btn.disabled      = true;
+  status.textContent = '';
+  res_el.innerHTML  = '<span class="spinner"></span> Searching...';
+
+  try {
+    const res  = await fetch('/api/profile/search', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name })
+    });
+    const data = await res.json();
+    const r    = data.results || [];
+
+    if (r.length === 0) {
+      status.textContent = 'No faculty found with that name. Try a partial name or last name only.';
+      res_el.innerHTML   = '';
+    } else {
+      status.textContent = r.length + ' result' + (r.length !== 1 ? 's' : '') + ' — click "This is me" to continue.';
+      res_el.innerHTML   = r.map(facultyCard).join('');
+    }
+  } catch (e) {
+    status.textContent = 'Network error: ' + e.message;
+    status.className   = 'search-status err';
+    res_el.innerHTML   = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function facultyCard(p) {
+  return `
+  <div class="faculty-card">
+    <div class="faculty-info">
+      <div class="name">${esc(p.name)}</div>
+      <div class="meta">${esc(p.title || '')}${p.title && p.dept ? ' &middot; ' : ''}${esc(p.dept || '')}</div>
+      <div class="bio-preview">${esc((p.bio || '').slice(0, 220))}${(p.bio || '').length > 220 ? '…' : ''}</div>
+    </div>
+    <button class="btn-select" onclick="selectFaculty(${JSON.stringify(p).replace(/"/g,'&quot;')})">This is me</button>
+  </div>`;
+}
+
+async function selectFaculty(p) {
+  _selected = p;
+
+  // Fill step 2 and 3 banners
+  document.getElementById('selected-name').textContent = p.name;
+  document.getElementById('selected-meta').textContent = [p.title, p.dept].filter(Boolean).join(' · ');
+  document.getElementById('s3-name').textContent = p.name;
+  document.getElementById('s3-meta').textContent = [p.title, p.dept].filter(Boolean).join(' · ');
+
+  goToStep(2);
+  loadPapers(p.id);
+}
+
+// ── Step 2: Papers ───────────────────────────────────────────────────────────
+async function loadPapers(facultyId) {
+  const list = document.getElementById('papers-list');
+  list.innerHTML = '<span class="spinner"></span> Loading publications...';
+
+  try {
+    const res  = await fetch('/api/profile/papers/' + facultyId);
+    const data = await res.json();
+    const papers = data.papers || [];
+    _paperIds = papers.map(p => p.id);
+
+    document.getElementById('papers-count-label').textContent =
+      'Publications (' + papers.length + ' found)';
+
+    if (papers.length === 0) {
+      list.innerHTML = '<div style="color:var(--ink-3);font-size:13.5px;padding:12px 0">No publications found in our database for this faculty member. You can still continue — describe your work in the next step.</div>';
+      return;
+    }
+
+    list.innerHTML = papers.map(p => `
+      <div class="paper-row">
+        <input type="checkbox" class="paper-cb" id="cb-${p.id}" value="${p.id}" checked>
+        <label class="paper-label" for="cb-${p.id}">
+          <div class="paper-title">${esc(p.title)}</div>
+          <div class="paper-meta">${p.year || ''}${p.year && p.cited ? ' &middot; ' : ''}${p.cited ? p.cited + ' citations' : ''}</div>
+        </label>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = '<div style="color:#9B2020;font-size:13px">Could not load papers: ' + esc(e.message) + '</div>';
+  }
+}
+
+function toggleAll(checked) {
+  document.querySelectorAll('.paper-cb').forEach(cb => cb.checked = checked);
+}
+
+function getCheckedPaperIds() {
+  return [...document.querySelectorAll('.paper-cb:checked')].map(cb => parseInt(cb.value));
+}
+
+// ── Step 3: Project + save ───────────────────────────────────────────────────
+const projTA = document.getElementById('project-desc');
+projTA.addEventListener('input', () => {
+  const n = projTA.value.length;
+  document.getElementById('char-count').textContent = n + ' / 1000 characters recommended';
+  document.getElementById('char-count').style.color = n > 1000 ? 'var(--scarlet)' : 'var(--ink-3)';
+});
+
+async function saveProfile() {
+  const btn    = document.getElementById('btn-save');
+  const status = document.getElementById('save-status');
+  const proj   = document.getElementById('project-desc').value.trim();
+
+  if (!proj) {
+    status.textContent = 'Please describe your current research project before saving.';
+    status.className   = 'search-status err';
+    return;
+  }
+
+  btn.disabled      = true;
+  status.textContent = '';
+
+  const payload = {
+    faculty_id:           _selected ? _selected.id : null,
+    name:                 _selected ? _selected.name : 'Unknown',
+    email:                _selected ? _selected.email || '' : '',
+    bio_text:             _selected ? _selected.bio || '' : '',
+    project_description:  proj,
+    confirmed_paper_ids:  getCheckedPaperIds(),
+  };
+
+  try {
+    const res  = await fetch('/api/profile/save', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      status.textContent = 'Error: ' + data.error;
+      status.className   = 'search-status err';
+      btn.disabled       = false;
+      return;
+    }
+
+    localStorage.setItem('advisor_profile_id',   String(data.profile_id));
+    localStorage.setItem('advisor_profile_name', data.name);
+
+    // Redirect to advisor
+    window.location.href = '/advisor';
+
+  } catch (e) {
+    status.textContent = 'Network error: ' + e.message;
+    status.className   = 'search-status err';
+    btn.disabled       = false;
+  }
+}
+
+// ── Utility ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+document.getElementById('name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchFaculty();
+});
+</script>
+</body>
+</html>

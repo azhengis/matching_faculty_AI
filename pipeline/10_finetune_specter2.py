@@ -152,9 +152,10 @@ def evaluate(model, faculty_bios: list, test_queries: list, label: str) -> float
 
 
 def finetune_config(cfg: dict, train_pairs: list, faculty_bios: list) -> float:
-    from sentence_transformers import SentenceTransformer, InputExample, losses
-    from sentence_transformers.evaluation import InformationRetrievalEvaluator
-    from torch.utils.data import DataLoader
+    import torch
+    from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer, SentenceTransformerTrainingArguments
+    from sentence_transformers.losses import MultipleNegativesRankingLoss
+    from datasets import Dataset
 
     name   = cfg["name"]
     epochs = cfg["epochs"]
@@ -162,24 +163,31 @@ def finetune_config(cfg: dict, train_pairs: list, faculty_bios: list) -> float:
     batch  = cfg["batch"]
     out    = os.path.join(MODELS_DIR, f"specter2_depaul_{name}")
 
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"\n{'='*60}")
-    print(f"Config {name}: {epochs} epoch(s), lr={lr}, batch={batch}")
+    print(f"Config {name}: {epochs} epoch(s), lr={lr}, batch={batch}, device={device}")
     print(f"{'='*60}")
 
-    model = SentenceTransformer(BASE_MODEL)
+    model = SentenceTransformer(BASE_MODEL, device=device)
+    loss  = MultipleNegativesRankingLoss(model)
 
-    examples = [InputExample(texts=[p["query"], p["bio"]]) for p in train_pairs]
-    loader   = DataLoader(examples, shuffle=True, batch_size=batch)
-    loss     = losses.MultipleNegativesRankingLoss(model)
+    train_dataset = Dataset.from_dict({
+        "anchor":   [p["query"] for p in train_pairs],
+        "positive": [p["bio"]   for p in train_pairs],
+    })
 
-    start = time.time()
-    model.fit(
-        train_objectives=[(loader, loss)],
-        epochs=epochs,
-        optimizer_params={"lr": lr},
-        show_progress_bar=True,
-        output_path=out,
+    train_args = SentenceTransformerTrainingArguments(
+        output_dir=out,
+        num_train_epochs=epochs,
+        per_device_train_batch_size=batch,
+        learning_rate=lr,
+        save_strategy="no",
     )
+
+    start   = time.time()
+    trainer = SentenceTransformerTrainer(model=model, args=train_args, train_dataset=train_dataset, loss=loss)
+    trainer.train()
+    model.save(out)
     elapsed = time.time() - start
     print(f"  Training done in {elapsed/60:.1f} min — saved to {out}")
 
@@ -188,17 +196,19 @@ def finetune_config(cfg: dict, train_pairs: list, faculty_bios: list) -> float:
 
 
 def evaluate_baseline(faculty_bios: list) -> float:
+    import torch
     from sentence_transformers import SentenceTransformer
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
     print("\n" + "="*60)
     print("Baseline: allenai/specter2_base (no fine-tuning)")
     print("="*60)
-    model = SentenceTransformer(BASE_MODEL)
+    model = SentenceTransformer(BASE_MODEL, device=device)
     return evaluate(model, faculty_bios, TEST_QUERIES, label="baseline")
 
 
 def main():
     try:
-        from sentence_transformers import SentenceTransformer, InputExample, losses
+        from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer, SentenceTransformerTrainingArguments
     except ImportError:
         sys.exit(
             "Install sentence-transformers first:\n"

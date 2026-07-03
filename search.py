@@ -22,17 +22,24 @@ SETUP (one time):
 RUN:
     python3 search.py
 """
-import os, sys, sqlite3, pickle, re
+import os, sys, sqlite3, pickle, re, json
 import numpy as np
 
 DB          = "faculty.db"
 INDEX       = "faculty_index.pkl"
 PAPER_INDEX = "paper_index.pkl"
 MODEL       = "allenai/specter2"   # adapter version; changed from _base → cache rebuilds
-TOP_K      = 5
-POOL_SIZE  = 30        # fetch this many candidates before diversity filtering
-K_CLUSTERS = 35        # finer clusters than before
-MIN_SCORE  = {"s": 0.50, "c": 0.30}   # below this, warn user result may be weak
+TOP_K            = 5
+POOL_SIZE        = 30    # kept for complementary mode
+POOL_SIZE_STAGE1 = 25    # SPECTER2 + keywords → cross-encoder
+POOL_SIZE_STAGE2 = 7     # cross-encoder → LLM reranker
+POOL_SIZE_COMP   = 10    # complementary candidates sent to LLM (no cross-encoder step)
+K_CLUSTERS       = 35
+MIN_SCORE        = {"s": 0.50, "c": 0.30}
+
+# Cross-encoder lazy-load state (stage 2)
+_cross_encoder       = None
+_cross_encoder_tried = False
 
 STOPWORDS = {
     "a","an","the","and","or","but","in","on","at","to","for","of","with",
@@ -60,38 +67,50 @@ STOPWORDS = {
 # Maps individual query keywords to equivalent terms that may appear in faculty text.
 # Handles abbreviations (user types "nlp", bio says "natural language processing")
 # and vocabulary mismatches (user says "cybersecurity", bio says "information security").
-def expand_query_with_llm(query: str) -> str:
-    """Translate a lay-term query into academic vocabulary using the LLM.
+def expand_query_with_llm(query: str) -> dict:
+    """Translate a lay-term query into structured academic vocabulary.
 
-    This replaces the old hardcoded SYNONYMS/PHRASE_SYNONYMS dicts.
-    The LLM understands context — "memory loss" in a medical context maps to
-    "dementia Alzheimer cognitive decline", not "computer memory RAM cache".
-    Falls back to the original query if no LLM key is configured.
+    Returns a dict:
+      academic_jargon: a phrase of 6-10 academic terms for SPECTER2 encoding
+      keywords:        a list of discrete terms for exact keyword matching
+
+    Splitting these lets SPECTER2 get a dense semantic phrase while the keyword
+    scorer gets a clean list of high-signal individual terms.
+    Falls back to the original query if no LLM is configured.
     """
+    fallback = {"academic_jargon": query, "keywords": list(query_keywords(query))}
     model = os.environ.get("CHATBOT_MODEL", "")
     if not model:
-        return query
+        return fallback
     try:
         import litellm
         litellm.suppress_debug_info = True
         resp = litellm.completion(
             model=model,
-            max_tokens=80,
+            max_tokens=150,
             temperature=0.0,
             messages=[{
                 "role": "user",
                 "content": (
-                    "Translate this search query into 6-8 specific academic/scientific terms "
-                    "that researchers who work in this field would use in their publications or bio. "
-                    "Return ONLY the terms, space-separated, no explanation, no punctuation.\n\n"
+                    "Translate this search query into academic vocabulary a researcher would use.\n"
+                    "Respond with JSON only — no prose, no markdown:\n"
+                    '{"academic_jargon": "<6-10 academic terms as a phrase>", '
+                    '"keywords": ["<term1>", "<term2>", "<term3>", ...]}\n\n'
                     f"Query: {query}"
                 ),
             }],
         )
-        expanded = resp.choices[0].message.content.strip()
-        return expanded if expanded else query
+        content = resp.choices[0].message.content.strip()
+        m = re.search(r'\{.*\}', content, re.DOTALL)
+        if m:
+            data = json.loads(m.group())
+            if isinstance(data.get("academic_jargon"), str) and isinstance(data.get("keywords"), list):
+                data["academic_jargon"] = data["academic_jargon"].strip() or query
+                data["keywords"] = [str(k).lower().strip() for k in data["keywords"] if k]
+                return data
     except Exception:
-        return query
+        pass
+    return fallback
 
 class _SPECTER2Adapter:
     """SPECTER2 base + proximity adapter — better retrieval than base alone.
@@ -675,16 +694,171 @@ def zero_kw_penalty(query, kw, specter_sim=None):
     return 1.0
 
 
-def hybrid_scores(query, qv, emb, people):
-    sims  = emb @ qv
+def hybrid_scores(query, qv, emb, people, kw_list=None):
+    """Score all faculty against the query.
+
+    kw_list: list of discrete keywords from LLM expansion (stage 1 structured output).
+             When provided, used for keyword overlap instead of tokenising query string.
+             This keeps SPECTER2 encoding (jargon phrase) and keyword matching (term list) separate.
+    """
+    sims = emb @ qv
+
+    # Build keyword set once — prefer LLM list, fall back to tokenising query
+    if kw_list:
+        kw_set = {k.lower().strip() for k in kw_list if k.strip()}
+    else:
+        kw_set = query_keywords(query)
+    n_kw = len(kw_set)
+
     scores = []
     for i in range(len(people)):
-        src = people[i].get("summary_source", "research")
-        a   = alpha_for_query(query, src)
-        kw  = kw_presence_score(query, people[i]["research_summary"])
-        raw = a * float(sims[i]) + (1 - a) * kw
+        src        = people[i].get("summary_source", "research")
+        a          = alpha_for_query(query, src)
+        text_lower = people[i]["research_summary"].lower()
+        hits       = sum(1.0 for kw in kw_set if kw in text_lower) if kw_set else 0
+        kw         = (hits / n_kw) if n_kw > 0 else 0.5
+        raw        = a * float(sims[i]) + (1 - a) * kw
         scores.append(recency_penalty(people[i]) * raw * zero_kw_penalty(query, kw, float(sims[i])))
     return np.array(scores)
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 — Cross-encoder reranking (local, free, ~80ms for 25 pairs)
+# ---------------------------------------------------------------------------
+
+def load_cross_encoder():
+    global _cross_encoder, _cross_encoder_tried
+    if _cross_encoder_tried:
+        return _cross_encoder
+    _cross_encoder_tried = True
+    try:
+        from sentence_transformers import CrossEncoder
+        print("  Loading cross-encoder (stage 2, one-time ~30s download)...")
+        # MiniLM-L-12 is ~120MB: fast, good quality, no GPU needed
+        _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-12-v2", max_length=512)
+        print("  Cross-encoder ready.")
+    except Exception as e:
+        print(f"  Cross-encoder unavailable ({e}) — stage 2 skipped")
+        _cross_encoder = None
+    return _cross_encoder
+
+
+def cross_rerank(query, candidates, top_n=POOL_SIZE_STAGE2):
+    """Stage 2: cross-encoder re-scores (query, bio) pairs together.
+
+    Unlike SPECTER2 (which encodes query and bio independently), the cross-encoder
+    sees both simultaneously so its attention can cross between them — better at
+    catching mismatches like 'biomedical image analysis' vs 'Alzheimer's research'.
+    """
+    ce = load_cross_encoder()
+    if ce is None or not candidates:
+        return candidates[:top_n]
+    pairs  = [(query, p["research_summary"][:512]) for p, _, _ in candidates]
+    scores = ce.predict(pairs)
+    ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
+    return [c for c, _ in ranked[:top_n]]
+
+
+# ---------------------------------------------------------------------------
+# Stage 3 — LLM reranking (Claude Haiku, ~500ms, ~$0.001 per query)
+# ---------------------------------------------------------------------------
+
+def llm_rerank(original_query, candidates, expansion, mode="semantic"):
+    """LLM reranking for both semantic and complementary modes.
+
+    mode="semantic":      score direct relevance; penalise adjacent fields.
+    mode="complementary": score interdisciplinary value; exclude non-researchers.
+    """
+    model_name = os.environ.get("CHATBOT_MODEL", "")
+    if not model_name or not candidates:
+        return candidates[:TOP_K]
+
+    try:
+        import litellm
+        litellm.suppress_debug_info = True
+
+        academic_query = expansion.get("academic_jargon", original_query) if isinstance(expansion, dict) else original_query
+
+        bios = []
+        for i, (p, _, _) in enumerate(candidates):
+            bios.append(
+                f"[{i+1}] {p['name']} | {p.get('department', '')}\n"
+                f"{p['research_summary'][:380]}"
+            )
+        bio_block = "\n---\n".join(bios)
+
+        if mode == "complementary":
+            prompt = (
+                f"A researcher is exploring: \"{original_query}\"\n"
+                f"Academic framing: \"{academic_query}\"\n\n"
+                f"These professors work in DIFFERENT fields. Score each (0-10) on how "
+                f"valuable they would be as a COMPLEMENTARY collaborator — someone who brings "
+                f"a different methodology, dataset, or perspective that enriches this research.\n"
+                f"Scoring: 0-2 = no research role or zero connection, 3-5 = very weak link, "
+                f"6-8 = meaningful complementary angle, 9-10 = strong cross-disciplinary fit.\n"
+                f"Give score 0 to anyone who is clearly an administrator, fundraiser, or "
+                f"staff with no active research.\n\n"
+                f"{bio_block}\n\n"
+                f"Respond with a JSON array only, no prose:\n"
+                f'[{{"id": 1, "score": 7, "reason": "one sentence on complementary value"}}, ...]'
+            )
+        else:
+            prompt = (
+                f"A user searched for: \"{original_query}\"\n"
+                f"Academic interpretation: \"{academic_query}\"\n\n"
+                f"Rate each professor's relevance to this specific query (0-10).\n"
+                f"Scoring: 0-3 = unrelated field, 4-6 = adjacent/tangential, 7-10 = direct match.\n"
+                f"Be strict: adjacent fields (e.g. biomedical imaging vs. disease research) score 3-5, not 7+.\n\n"
+                f"{bio_block}\n\n"
+                f"Respond with a JSON array only, no prose:\n"
+                f'[{{"id": 1, "score": 8, "reason": "one sentence why"}}, ...]'
+            )
+
+        print(f"  [LLM rerank: scoring {len(candidates)} {mode} candidates...]")
+        resp = litellm.completion(
+            model=model_name,
+            max_tokens=900,   # 10 candidates × ~50 tokens each + overhead
+            temperature=0.0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = resp.choices[0].message.content.strip()
+
+        # Strip markdown code-fences (```json ... ```) before parsing
+        content_clean = re.sub(r'```(?:json)?\s*', '', content).strip()
+        m = re.search(r'\[.*\]', content_clean, re.DOTALL)
+        if not m:
+            print(f"  [LLM rerank: no JSON array found in response — skipping]")
+            return candidates[:TOP_K]
+
+        try:
+            ratings = json.loads(m.group())
+        except json.JSONDecodeError as e:
+            print(f"  [LLM rerank: JSON parse error ({e}) — skipping]")
+            return candidates[:TOP_K]
+        scored  = []
+        for r in ratings:
+            idx = int(r.get("id", 0)) - 1
+            if not (0 <= idx < len(candidates)):
+                continue
+            p, orig_score, label = candidates[idx]
+            llm_score = max(0.0, min(10.0, float(r.get("score", 0)))) / 10.0
+            blended   = 0.60 * llm_score + 0.40 * orig_score
+            reason    = str(r.get("reason", "")).strip()
+            scored.append((p, blended, label, reason))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        result = []
+        for p, blended, label, reason in scored[:TOP_K]:
+            p = dict(p)
+            if reason:
+                p["_llm_reason"] = reason
+            result.append((p, blended, label))
+        return result
+
+    except Exception as e:
+        print(f"  [LLM rerank failed: {e}]")
+        return candidates[:TOP_K]
 
 
 # ---------------------------------------------------------------------------
@@ -718,16 +892,50 @@ def diversity_filter(candidates):
 # Search modes
 # ---------------------------------------------------------------------------
 
-def semantic(query, qv, emb, people):
-    scores = hybrid_scores(query, qv, emb, people)
-    top    = np.argsort(scores)[::-1][:POOL_SIZE]
-    candidates = [(people[i], float(scores[i]), None) for i in top]
-    return diversity_filter(candidates)
+def semantic(query, qv, emb, people, expansion=None):
+    """Three-stage hybrid cascade.
+
+    Stage 1 — SPECTER2 + keywords  →  top 25 candidates  (fast, in-memory)
+    Stage 2 — Cross-encoder        →  top 7  candidates  (local, ~80ms)
+    Stage 3 — LLM reranking        →  final 5            (~500ms, ~$0.001)
+
+    expansion: dict from expand_query_with_llm() with keys academic_jargon / keywords.
+               When None (e.g. refine-by-name mode), stages 1-2 still run; stage 3 skipped.
+    """
+    kw_list = expansion.get("keywords") if isinstance(expansion, dict) else None
+
+    # Stage 1
+    scores     = hybrid_scores(query, qv, emb, people, kw_list=kw_list)
+    top        = np.argsort(scores)[::-1][:POOL_SIZE_STAGE1]
+    stage1     = [(people[i], float(scores[i]), None) for i in top]
+
+    # Stage 2 — cross-encoder (uses academic_jargon phrase for richer signal)
+    ce_query   = expansion.get("academic_jargon", query) if isinstance(expansion, dict) else query
+    stage2     = cross_rerank(ce_query, stage1, top_n=POOL_SIZE_STAGE2)
+
+    # Stage 3 — LLM reranking (only when expansion is available, i.e. real user query)
+    if isinstance(expansion, dict) and os.environ.get("CHATBOT_MODEL"):
+        stage3 = llm_rerank(query, stage2, expansion)
+    else:
+        stage3 = stage2[:TOP_K]
+
+    return diversity_filter(stage3)
 
 
-def complementary(query, qv, emb, labels, people, n_skip=2):
-    """n_skip controls how different: 1=adjacent, 2=moderate, 3=very different."""
-    scores           = hybrid_scores(query, qv, emb, people)
+def complementary(query, qv, emb, labels, people, n_skip=2, expansion=None):
+    """Find faculty from different research clusters who could complement the query topic.
+
+    n_skip controls how different: 1=adjacent, 2=moderate, 3=very different.
+
+    Pipeline:
+      Stage 1 — exclude the top semantic clusters, rank remaining by hybrid score
+      Stage 3 — LLM scores complementary value and eliminates non-researchers
+      (No cross-encoder: its relevance metric is wrong here — high score = direct
+       match, which is exactly what complementary mode excludes.)
+    """
+    kw_list = expansion.get("keywords") if isinstance(expansion, dict) else None
+
+    scores           = hybrid_scores(query, qv, emb, people, kw_list=kw_list)
     top_semantic_idx = np.argsort(scores)[::-1][:TOP_K * n_skip]
     excluded         = {int(labels[i]) for i in top_semantic_idx}
 
@@ -737,7 +945,12 @@ def complementary(query, qv, emb, labels, people, n_skip=2):
         if labels[i] not in excluded
     ]
     candidates.sort(key=lambda x: x[1], reverse=True)
-    return diversity_filter(candidates)
+    pool = candidates[:POOL_SIZE_COMP]
+
+    if isinstance(expansion, dict) and os.environ.get("CHATBOT_MODEL"):
+        pool = llm_rerank(query, pool, expansion, mode="complementary")
+
+    return diversity_filter(pool)
 
 
 # ---------------------------------------------------------------------------
@@ -773,7 +986,12 @@ def show(results, query, mode, qv=None, paper_idx=None):
 
         if mode == "c":
             why_label = "What they bring"
-            reason    = first_sentence(p["research_summary"], name=p.get("name",""))
+            reason    = (p.get("_llm_reason")
+                         or first_sentence(p["research_summary"], name=p.get("name","")))
+        elif p.get("_llm_reason"):
+            # Stage 3 LLM provided a direct explanation — use it
+            why_label = "Why they match"
+            reason    = p["_llm_reason"]
         else:
             why_label = "Why they match"
             reason    = explain_match(query, p["research_summary"], name=p.get("name",""))
@@ -840,10 +1058,11 @@ def main():
     print("Type 'quit' to exit.\n")
 
     # Keep last results so user can refine
-    last_results = []
-    last_emb     = emb
-    last_people  = people
-    last_qv      = None
+    last_results   = []
+    last_emb       = emb
+    last_people    = people
+    last_qv        = None
+    last_expansion = None
 
     while True:
         try:
@@ -854,6 +1073,7 @@ def main():
             break
 
         # --- check if this is a name lookup ---
+        expansion    = None   # populated below in the else branch
         named_person, named_vec = find_by_name(q, people, emb)
         if named_person:
             print(f"\n  Found: {named_person['name']} ({named_person.get('title','')}, {named_person.get('department','')})")
@@ -861,14 +1081,18 @@ def main():
             qv    = named_vec
             query = named_person["research_summary"][:300]
         else:
-            topic = clean_query(q) or q
-            # Expand lay terms to academic vocabulary before encoding
-            expanded = expand_query_with_llm(topic)
-            if expanded != topic:
-                print(f"  [query expanded → {expanded}]")
-            qv    = model.encode([expanded], normalize_embeddings=True)[0]
-            query = expanded   # use expanded for both SPECTER2 and keyword scoring
-        last_qv = qv
+            topic     = clean_query(q) or q
+            expansion = expand_query_with_llm(topic)
+            academic  = expansion["academic_jargon"]
+            if academic != topic:
+                kw_preview = ", ".join(expansion["keywords"][:6])
+                print(f"  [expanded → {academic}]")
+                if kw_preview:
+                    print(f"  [keywords → {kw_preview}]")
+            qv    = model.encode([academic], normalize_embeddings=True)[0]
+            query = academic   # used by explain_match / keyword scoring fallback
+        last_qv        = qv
+        last_expansion = expansion if not named_person else None
 
         # --- mode ---
         raw_mode = input("Mode  s=semantic  c=complementary  [s]: ").strip().lower() or "s"
@@ -889,14 +1113,15 @@ def main():
         # --- run search ---
         if mode == "c":
             f_labels = labels[np.array([people.index(p) for p in f_people])] if f_people is not people else labels
-            results  = complementary(query, qv, f_emb, f_labels, f_people, n_skip=n_skip)
+            results  = complementary(query, qv, f_emb, f_labels, f_people, n_skip=n_skip, expansion=expansion)
         else:
-            results = semantic(query, qv, f_emb, f_people)
+            results = semantic(query, qv, f_emb, f_people, expansion=expansion)
 
         show(results, query, mode, qv=qv, paper_idx=paper_idx)
-        last_results = results
-        last_people  = f_people
-        last_emb     = f_emb
+        last_results   = results
+        last_people    = f_people
+        last_emb       = f_emb
+        last_expansion = expansion
 
         # --- feedback refinement ---
         refine = input("Refine: pick result number to find more like them (or Enter to skip): ").strip()
@@ -905,7 +1130,7 @@ def main():
             pick_idx  = last_people.index(pick)
             refined_qv = last_emb[pick_idx]
             print(f"\n  Finding more like {pick['name']}...\n")
-            ref_results = semantic(pick["research_summary"], refined_qv, last_emb, last_people)
+            ref_results = semantic(pick["research_summary"], refined_qv, last_emb, last_people, expansion=None)
             ref_results = [(p, s, c) for p, s, c in ref_results if p["name"] != pick["name"]][:TOP_K]
             show(ref_results, pick["research_summary"], "s", qv=refined_qv, paper_idx=paper_idx)
 

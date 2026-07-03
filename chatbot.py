@@ -206,13 +206,15 @@ someone navigate the university — not a search engine returning a list."""
 def run_search(query: str, mode: str = "semantic") -> dict:
     """Execute the faculty search and return structured data for Claude."""
     try:
-        clean_q  = sm.clean_query(query) or query
-        expanded = sm.expand_query_with_llm(clean_q)
-        qv       = _model.encode([expanded], normalize_embeddings=True)[0]
-        clean_q  = expanded   # use academic expansion for both SPECTER2 and keyword scoring
+        clean_q   = sm.clean_query(query) or query
+        expansion = sm.expand_query_with_llm(clean_q)
+        academic  = expansion["academic_jargon"]
+        kw_list   = expansion.get("keywords")
+        qv        = _model.encode([academic], normalize_embeddings=True)[0]
+        clean_q   = academic  # used for keyword scoring fallback
 
         if mode == "complementary":
-            scores       = sm.hybrid_scores(clean_q, qv, _emb, _people)
+            scores       = sm.hybrid_scores(clean_q, qv, _emb, _people, kw_list=kw_list)
             top_sem_idx  = np.argsort(scores)[::-1][:TOP_K * 2]
             excluded     = {int(_labels[i]) for i in top_sem_idx}
             candidates   = [
@@ -223,7 +225,7 @@ def run_search(query: str, mode: str = "semantic") -> dict:
             candidates.sort(key=lambda x: x[1], reverse=True)
             results = sm.diversity_filter(candidates)
         else:
-            scores     = sm.hybrid_scores(clean_q, qv, _emb, _people)
+            scores     = sm.hybrid_scores(clean_q, qv, _emb, _people, kw_list=kw_list)
             top        = np.argsort(scores)[::-1][:sm.POOL_SIZE]
             candidates = [(_people[i], float(scores[i]), None) for i in top]
             results    = sm.diversity_filter(candidates)

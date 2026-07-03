@@ -22,20 +22,18 @@ Run:
 Then rebuild paper index:
     rm -f paper_index.pkl && python3 search.py
 """
-import sys, os, re, sqlite3, pickle
-import numpy as np
+import sys, os, re, sqlite3
+from collections import defaultdict
 
 _ROOT          = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB             = os.path.join(_ROOT, "faculty.db")
-INDEX          = os.path.join(_ROOT, "faculty_index.pkl")
-PAPER_INDEX    = os.path.join(_ROOT, "paper_index.pkl")
-MODEL_NAME     = "allenai/specter2_base"
-MAX_CITATIONS  = 500    # above this almost certainly a wrong person (DePaul faculty rarely exceed 300-400 citations per paper)
-MIN_FIELD_SIM  = 0.55   # paper must be at least this similar to faculty's own research
+MAX_CITATIONS    = 500   # above this almost certainly a wrong person
+MIN_KW_OVERLAP   = 1     # paper must share at least this many domain-specific words
+GENERIC_DOC_FREQ = 0.30  # words appearing in >30% of all bios are generic noise
 
 
 def load_faculty_lookup():
-    """Return {faculty_id: research_summary} for all faculty with papers."""
+    """Return {faculty_id: (name, bio_text)} for all faculty with papers."""
     con = sqlite3.connect(DB)
     rows = con.execute("""
         SELECT f.id, f.name, f.research_summary, f.classes_taught
@@ -50,6 +48,24 @@ def load_faculty_lookup():
             text = (courses or "")[:500]
         lookup[fid] = (name, text)
     return lookup
+
+
+def build_generic_words(fac_lookup):
+    """Compute words that appear in >GENERIC_DOC_FREQ of all faculty bios.
+    These are automatically identified as too generic to signal field membership.
+    No hardcoded stopword list — derived entirely from the corpus itself.
+    """
+    from collections import Counter
+    all_bios = [text for _, text in fac_lookup.values() if text]
+    n_docs   = len(all_bios)
+    doc_freq = Counter()
+    for bio in all_bios:
+        words = set(re.findall(r"[a-z]{4,}", bio.lower()))
+        doc_freq.update(words)
+    generic = {w for w, cnt in doc_freq.items() if cnt / n_docs > GENERIC_DOC_FREQ}
+    print(f"  Corpus: {n_docs} bios  →  {len(generic)} generic words auto-detected "
+          f"(appear in >{GENERIC_DOC_FREQ*100:.0f}% of bios)")
+    return generic
 
 
 def main():
@@ -76,94 +92,48 @@ def main():
     after_pass1 = cur.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
     print(f"After Pass 1: {after_pass1} papers remain")
 
-    # --- Pass 2: topic coherence via SPECTER2 ---
-    if not os.path.exists(INDEX):
-        print("\nNo faculty_index.pkl found — skipping Pass 2 (topic coherence check).")
-        print("Run search.py once to build the index, then re-run clean_papers.py.")
-        con.close()
-        return
+    # --- Pass 2: domain-specific keyword overlap ---
+    # Generic words (appearing in >30% of all bios) are auto-detected from the
+    # corpus — no hardcoded stopword list. Only domain-specific words count.
+    # If a paper shares zero domain-specific words with the faculty bio, it
+    # almost certainly belongs to a different researcher with the same name.
 
-    with open(INDEX, "rb") as f:
-        idx_cache = pickle.load(f)
-    fac_embs = idx_cache["emb"]   # shape (n_faculty, 768)
+    fac_lookup   = load_faculty_lookup()
+    generic_words = build_generic_words(fac_lookup)
 
-    # We need a mapping faculty_id → index in the people list
-    # Load people the same way search.py does (same order)
-    FRAGMENT_STARTERS = re.compile(
-        r"^(are|is|include|includes|focus|focuses|have|has|span|spans|center|"
-        r"cover|covers|examine|examines|explore|explores|involve|involves|"
-        r"range|ranges|consist|consists)\b", re.IGNORECASE)
-    def fix_summary(t):
-        t = t.strip()
-        if not t: return t
-        if t[0].islower() or FRAGMENT_STARTERS.match(t):
-            t = "Research interests " + t[0].lower() + t[1:]
-        return t
-    def is_bio(s, n):
-        if not s or not n: return False
-        p = n.strip().split(); f, l = p[0].lower(), p[-1].lower()
-        o = s.strip()[:80].lower()
-        return o.startswith(f) or o.startswith(l) or o.startswith("dr. " + l)
-    def clean_courses(t):
-        t = re.sub(r"DePaul University.*", "", t, flags=re.DOTALL|re.IGNORECASE)
-        t = re.sub(r"\(?\d{3}\)?\s*\d{3}[-.\s]\d{4}", "", t)
-        t = re.sub(r"\b1\s*E\.?\s*Jackson.*", "", t, flags=re.DOTALL|re.IGNORECASE)
-        return t.strip()
-
-    rows = con.execute("""
-        SELECT id, name, research_summary, classes_taught FROM faculty
-        WHERE TRIM(research_summary) != '' OR TRIM(COALESCE(classes_taught,'')) != ''
-    """).fetchall()
-    fac_id_to_emb_idx = {}
-    for list_idx, (fid, name, summary, courses) in enumerate(rows):
-        s = fix_summary(summary or "")
-        c = clean_courses(courses or "")
-        if is_bio(s, name) and c: s = f"Courses taught: {c}\n\n{s}"
-        elif not s and c: s = f"Courses taught: {c}"
-        if s.strip():
-            fac_id_to_emb_idx[fid] = list_idx
-
-    # For each faculty's papers, embed and compare to faculty embedding
-    print(f"\nPass 2 — topic coherence check (threshold: cosine ≥ {MIN_FIELD_SIM})")
-    print("Loading SPECTER2 model...")
-    try:
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer(MODEL_NAME)
-    except ImportError:
-        print("sentence-transformers not installed — skipping Pass 2")
-        con.close()
-        return
+    def extract_keywords(text):
+        return {w for w in re.findall(r"[a-z]{4,}", (text or "").lower())
+                if w not in generic_words}
 
     papers_rows = con.execute(
         "SELECT id, faculty_id, title, abstract FROM papers ORDER BY faculty_id"
     ).fetchall()
 
-    # Group by faculty
     from collections import defaultdict
     by_fac = defaultdict(list)
     for pid, fid, title, abstract in papers_rows:
         by_fac[fid].append((pid, title, abstract))
 
+    print(f"\nPass 2 — keyword overlap check (min shared words ≥ {MIN_KW_OVERLAP})")
     delete_ids = []
     checked_fac = 0
     for fid, fpaps in by_fac.items():
-        if fid not in fac_id_to_emb_idx:
+        if fid not in fac_lookup:
             continue
-        if len(fac_embs) <= fac_id_to_emb_idx[fid]:
+        _, bio_text = fac_lookup[fid]
+        bio_kws = extract_keywords(bio_text)
+        if len(bio_kws) < 8:
+            # Bio too sparse to make a reliable judgment — skip
             continue
-        fac_emb = fac_embs[fac_id_to_emb_idx[fid]]
 
-        # Embed each paper
-        texts = [
-            f"{title}. {(abstract or '')[:500]}" if abstract else title
-            for _, title, abstract in fpaps
-        ]
-        pembs = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-        sims  = pembs @ fac_emb
-
-        for (pid, title, _), sim in zip(fpaps, sims):
-            if float(sim) < MIN_FIELD_SIM:
-                delete_ids.append(pid)
+        for pid, title, abstract in fpaps:
+            paper_text = f"{title} {abstract or ''}"
+            paper_kws  = extract_keywords(paper_text)
+            if not paper_kws:
+                continue
+            overlap = len(bio_kws & paper_kws)
+            if overlap < MIN_KW_OVERLAP:
+                delete_ids.append((pid, title, overlap))
 
         checked_fac += 1
         if checked_fac % 50 == 0:
@@ -171,7 +141,11 @@ def main():
 
     print(f"Pass 2 — removing {len(delete_ids)} off-field papers")
     if delete_ids:
-        cur.executemany("DELETE FROM papers WHERE id=?", [(i,) for i in delete_ids])
+        for pid, title, overlap in delete_ids[:10]:
+            print(f"  [overlap={overlap}] {title[:70]}")
+        if len(delete_ids) > 10:
+            print(f"  ... and {len(delete_ids)-10} more")
+        cur.executemany("DELETE FROM papers WHERE id=?", [(i,) for i, _, _ in delete_ids])
         con.commit()
 
     total_after = cur.execute("SELECT COUNT(*) FROM papers").fetchone()[0]

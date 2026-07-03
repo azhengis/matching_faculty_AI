@@ -11,7 +11,7 @@ Run once (takes ~15-30 min for ~450 faculty):
 Safe to interrupt and re-run — skips faculty already in the papers table.
 After finishing, delete faculty_index.pkl and re-run search.py.
 """
-import time, sqlite3, os
+import time, sqlite3, os, re
 import requests
 
 YOUR_EMAIL    = "aruzhanzhengis19@gmail.com"

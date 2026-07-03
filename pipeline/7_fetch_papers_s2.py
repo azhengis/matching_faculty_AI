@@ -72,11 +72,22 @@ def api_get(url, params=None, headers=None, pause=S2_PAUSE):
 # Semantic Scholar
 # ---------------------------------------------------------------------------
 
-def s2_find_author(name):
+_S2_STOPWORDS = {"research", "studies", "university", "professor", "department",
+                 "science", "study", "analysis", "data", "using", "based",
+                 "approach", "methods", "results", "with", "from", "have",
+                 "been", "were", "their", "which", "these", "those", "that"}
+
+def _summary_keywords(text):
+    """Meaningful words (4+ chars) from a faculty research summary."""
+    return {w for w in re.findall(r"[a-z]{4,}", text.lower())
+            if w not in _S2_STOPWORDS}
+
+
+def s2_find_author(name, faculty_summary=""):
     """Return best S2 authorId for a DePaul faculty member, or None."""
     data = api_get(f"{S2_BASE}/author/search", params={
         "query": name,
-        "fields": "authorId,name,affiliations,paperCount",
+        "fields": "authorId,name,affiliations,paperCount,externalIds",
         "limit": 5,
     }, pause=S2_PAUSE)
     if not data:
@@ -109,6 +120,22 @@ def s2_find_author(name):
     last_name = name.lower().split()[-1]
     if last_name not in best_words:
         return None
+
+    # If multiple DePaul candidates exist, require topic keyword overlap with
+    # the faculty summary to avoid selecting a namesake in a different field
+    summary_kws = _summary_keywords(faculty_summary)
+    if summary_kws and len(depaul_results) > 1:
+        affil_text = " ".join(
+            a for a in (best.get("affiliations") or []) if a
+        ).lower()
+        if not (summary_kws & set(re.findall(r"[a-z]{4,}", affil_text))):
+            # No keyword overlap — try the next best DePaul candidate
+            for candidate in sorted(depaul_results, key=name_score, reverse=True):
+                cand_affil = " ".join(
+                    a for a in (candidate.get("affiliations") or []) if a
+                ).lower()
+                if summary_kws & set(re.findall(r"[a-z]{4,}", cand_affil)):
+                    return candidate.get("authorId")
 
     return best.get("authorId")
 

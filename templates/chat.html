@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chatbot — DePaul Faculty Matcher</title>
+<style>
+:root {
+  --navy:#003366; --scarlet:#C41E2E;
+  --ground:#EEF2F7; --surface:#FFFFFF;
+  --border:#CED6E2; --border-2:#B0BECE;
+  --ink:#16202E; --ink-2:#4C5B72; --ink-3:#8594A8;
+  --green:#1A6B3A; --green-bg:#E8F5ED;
+  --bubble-user:#003366; --bubble-bot:#FFFFFF;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--ground);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+
+/* ── Nav ── */
+nav{background:var(--navy);display:flex;align-items:stretch;padding:0 28px;gap:0;flex-shrink:0}
+.nav-brand{color:#fff;font-size:13.5px;font-weight:700;display:flex;align-items:center;padding-right:20px;margin-right:4px;border-right:1px solid rgba(255,255,255,.15);white-space:nowrap}
+.nav-brand span{background:var(--scarlet);color:#fff;font-size:11px;font-weight:800;padding:2px 6px;margin-right:8px}
+nav a{color:rgba(255,255,255,.6);text-decoration:none;font-size:13px;padding:0 16px;display:flex;align-items:center;border-bottom:2px solid transparent}
+nav a:hover{color:#fff}
+nav a.active{color:#fff;border-bottom-color:var(--scarlet)}
+
+/* ── Chat layout ── */
+.chat-wrap{flex:1;display:flex;flex-direction:column;max-width:800px;width:100%;margin:0 auto;padding:0 20px;min-height:0}
+
+/* ── Messages area ── */
+.messages{flex:1;overflow-y:auto;padding:24px 0 16px;display:flex;flex-direction:column;gap:16px;min-height:0}
+
+/* ── Bubbles ── */
+.msg{display:flex;gap:10px;align-items:flex-start;max-width:100%}
+.msg.user{flex-direction:row-reverse}
+
+.bubble{padding:12px 16px;max-width:70%;line-height:1.6;font-size:14.5px}
+.msg.user .bubble{background:var(--bubble-user);color:#fff;border-radius:2px 0 2px 2px}
+.msg.bot  .bubble{background:var(--bubble-bot);color:var(--ink);border:1.5px solid var(--border);border-radius:0 2px 2px 2px}
+
+.avatar{width:30px;height:30px;border-radius:2px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-top:2px}
+.msg.user .avatar{background:var(--scarlet);color:#fff}
+.msg.bot  .avatar{background:var(--navy);color:#fff}
+
+/* ── Bot message formatting ── */
+.bubble p{margin-bottom:8px}
+.bubble p:last-child{margin-bottom:0}
+.bubble strong{font-weight:600;color:var(--ink)}
+.msg.user .bubble strong{color:#fff}
+.bubble em{font-style:italic}
+.bubble a{color:var(--navy);text-decoration:underline}
+.bubble ul,.bubble ol{padding-left:18px;margin-bottom:8px}
+.bubble li{margin-bottom:3px}
+
+/* ── Option buttons (parsed from [1][2][3][4] blocks) ── */
+.options{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.opt-btn{background:var(--ground);border:1.5px solid var(--border);padding:9px 14px;text-align:left;font-size:13.5px;color:var(--ink);cursor:pointer;font-family:inherit;display:flex;gap:10px;align-items:baseline}
+.opt-btn:hover{background:#E4EAF3;border-color:var(--navy)}
+.opt-num{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;color:var(--ink-3);flex-shrink:0;min-width:18px}
+
+/* ── Typing indicator ── */
+.typing{display:none;padding-bottom:4px}
+.typing .bubble{padding:12px 16px}
+.dot{display:inline-block;width:6px;height:6px;background:var(--border-2);border-radius:50%;margin:0 2px;animation:bounce .9s infinite}
+.dot:nth-child(2){animation-delay:.15s}
+.dot:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
+
+/* ── Intro card ── */
+.intro-card{background:var(--surface);border:1.5px solid var(--border);padding:18px 20px;margin-bottom:0}
+.intro-card p{font-size:14px;color:var(--ink-2);margin-bottom:10px;line-height:1.6}
+.intro-options{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.intro-btn{background:var(--ground);border:1.5px solid var(--border);padding:9px 14px;text-align:left;font-size:13.5px;color:var(--ink);cursor:pointer;font-family:inherit;display:flex;gap:10px;align-items:baseline}
+.intro-btn:hover{background:#E4EAF3;border-color:var(--navy)}
+.intro-num{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;color:var(--ink-3);flex-shrink:0;min-width:18px}
+
+/* ── Input bar ── */
+.input-bar{padding:16px 0 20px;flex-shrink:0;display:flex;gap:8px}
+.chat-input{flex:1;padding:11px 14px;font-size:15px;border:1.5px solid var(--border);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;resize:none;max-height:120px;overflow-y:auto}
+.chat-input:focus{border-color:var(--navy)}
+.btn-send{padding:11px 20px;background:var(--navy);color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;align-self:flex-end;white-space:nowrap;flex-shrink:0}
+.btn-send:hover{background:#004488}
+.btn-send:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── Disabled notice ── */
+.disabled-notice{background:#FBF0F1;border:1.5px solid #E8B4B8;padding:14px 16px;font-size:13.5px;color:#7A2030;margin:16px 0}
+.disabled-notice code{background:rgba(0,0,0,.06);padding:1px 5px;font-family:ui-monospace,monospace;font-size:0.9em}
+
+@media(max-width:560px){.bubble{max-width:90%}}
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-brand"><span>D</span>DePaul Faculty Matcher</span>
+  <a href="/baseline">Baseline Search</a>
+  <a href="/search">LLM Search</a>
+  <a href="/chat" class="active">Chatbot</a>
+  <a href="/advisor">Faculty Advisor</a>
+</nav>
+
+<div class="chat-wrap">
+  <div class="messages" id="messages">
+
+    <!-- Bot intro message -->
+    <div class="msg bot">
+      <div class="avatar">D</div>
+      <div>
+        <div class="bubble">
+          <p>Hi! I'm DePaul's research advisor. I can help you find a faculty member to collaborate with, advise a thesis, or partner on a research project.</p>
+          <p>What brings you here today?</p>
+        </div>
+        <div class="intro-options">
+          <button class="intro-btn" onclick="quickSend('I have a research problem and need a collaborator')">
+            <span class="intro-num">[1]</span>I have a research problem and need a collaborator
+          </button>
+          <button class="intro-btn" onclick="quickSend('I am looking for a thesis or dissertation advisor')">
+            <span class="intro-num">[2]</span>I'm looking for a thesis or dissertation advisor
+          </button>
+          <button class="intro-btn" onclick="quickSend('I want to explore who at DePaul works on a specific topic')">
+            <span class="intro-num">[3]</span>I want to explore who at DePaul works on a specific topic
+          </button>
+          <button class="intro-btn" onclick="quickSend('I am from outside DePaul and looking for a research partnership')">
+            <span class="intro-num">[4]</span>I'm from outside DePaul looking for a research partnership
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Typing indicator -->
+    <div class="msg bot typing" id="typing">
+      <div class="avatar">D</div>
+      <div class="bubble">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="input-bar">
+    <textarea class="chat-input" id="chat-input" rows="1"
+              placeholder="Describe your research topic or what kind of collaborator you need..."></textarea>
+    <button class="btn-send" id="btn-send" onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+<script>
+let _sessionId = null;
+let _busy = false;
+
+// ── Send a message ────────────────────────────────────────────────────────────
+async function sendMessage(text) {
+  const input = document.getElementById('chat-input');
+  const msg   = (text !== undefined ? text : input.value).trim();
+  if (!msg || _busy) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+  addBubble('user', msg);
+
+  _busy = true;
+  document.getElementById('btn-send').disabled = true;
+  showTyping(true);
+
+  try {
+    const res  = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: msg, session_id: _sessionId })
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      addBotMessage(
+        data.error.includes('CHATBOT_MODEL')
+          ? '<div class="disabled-notice">Chatbot requires the <code>CHATBOT_MODEL</code> environment variable to be set on the server. Ask your administrator to set it and restart the app.</div>'
+          : 'Sorry, something went wrong: ' + esc(data.error)
+      );
+    } else {
+      if (data.session_id) _sessionId = data.session_id;
+      addBotMessage(formatBotText(data.reply || ''));
+    }
+  } catch (e) {
+    addBotMessage('Network error: ' + esc(e.message));
+  } finally {
+    _busy = false;
+    document.getElementById('btn-send').disabled = false;
+    showTyping(false);
+  }
+}
+
+function quickSend(text) {
+  sendMessage(text);
+}
+
+// ── Add message bubbles ───────────────────────────────────────────────────────
+function addBubble(role, html) {
+  const messages = document.getElementById('messages');
+  const typing   = document.getElementById('typing');
+
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+
+  if (role === 'user') {
+    div.innerHTML = `
+      <div class="avatar">You</div>
+      <div class="bubble">${esc(html)}</div>`;
+  } else {
+    div.innerHTML = `
+      <div class="avatar">D</div>
+      <div>${html}</div>`;
+  }
+
+  messages.insertBefore(div, typing);
+  scrollToBottom();
+  return div;
+}
+
+function addBotMessage(html) {
+  addBubble('bot', html);
+}
+
+// ── Format bot reply: parse markdown-ish text + extract option buttons ────────
+function formatBotText(raw) {
+  // Split off "What would you like to do next?" block
+  const { main, options } = extractOptions(raw);
+
+  // Basic markdown: **bold**, *italic*, newlines → <br>/<p>
+  let html = esc(main)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n{2,}/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+  html = '<p>' + html + '</p>';
+
+  // Render option buttons
+  let optHtml = '';
+  if (options.length) {
+    optHtml = '<div class="options">' +
+      options.map(o =>
+        `<button class="opt-btn" onclick="quickSend('[${o.num}] ${esc(o.text).replace(/"/g,'&quot;')}">`+
+        `<span class="opt-num">[${o.num}]</span>${esc(o.text)}</button>`
+      ).join('') +
+      '</div>';
+  }
+
+  return `<div class="bubble">${html}</div>${optHtml}`;
+}
+
+// Extract [1][2][3][4] option block from bot reply text
+function extractOptions(text) {
+  const lines   = text.split('\n');
+  const options = [];
+  const main    = [];
+  let inOpts    = false;
+
+  for (const line of lines) {
+    const m = line.match(/^\s*\[(\d+)\]\s*(.+)$/);
+    if (m) {
+      inOpts = true;
+      options.push({ num: m[1], text: m[2].trim() });
+    } else if (inOpts && /^\s*$/.test(line)) {
+      // skip blank lines inside option block
+    } else if (!inOpts) {
+      main.push(line);
+    }
+  }
+
+  // Remove trailing "What would you like to do next?" prompt from main text
+  let mainText = main.join('\n').replace(/What would you like to do next\?\s*$/i, '').trimEnd();
+  return { main: mainText, options };
+}
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+function showTyping(show) {
+  const t = document.getElementById('typing');
+  t.style.display = show ? 'flex' : 'none';
+  if (show) scrollToBottom();
+}
+
+function scrollToBottom() {
+  const m = document.getElementById('messages');
+  m.scrollTop = m.scrollHeight;
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Input auto-resize + Enter to send ─────────────────────────────────────────
+const chatInput = document.getElementById('chat-input');
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+});
+chatInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+</script>
+</body>
+</html>
