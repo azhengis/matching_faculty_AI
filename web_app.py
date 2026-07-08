@@ -17,6 +17,7 @@ FastAPI server — five interfaces:
   GET  /api/profile/papers/{id} — papers already on file for a faculty member
   POST /api/profile/save        — create/update profile
   GET  /api/profile/{id}        — load a saved profile
+  POST /api/profile/extract-file — extract text from an uploaded .pdf/.docx
   POST /api/advisor/chat        — personalized advisor chat turn
 
 Run:
@@ -32,11 +33,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import search as sm
+import doc_extract
 
 # ── LiteLLM ───────────────────────────────────────────────────────────────────
 CHATBOT_MODEL = os.environ.get("CHATBOT_MODEL", "")
@@ -393,6 +395,31 @@ async def api_profile_save(req: Request):
     con.commit()
     con.close()
     return JSONResponse({"profile_id": profile_id, "name": name})
+
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
+
+
+@app.post("/api/profile/extract-file")
+async def api_profile_extract_file(file: UploadFile = File(...)):
+    """Extract text from an uploaded .pdf or .docx for review before saving."""
+    filename = file.filename or ""
+    if not filename.lower().endswith((".pdf", ".docx")):
+        return JSONResponse(
+            {"error": "Unsupported file type. Please upload a .pdf or .docx file."},
+            status_code=400,
+        )
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"error": "File is too large (10MB max)."}, status_code=400)
+
+    try:
+        text = doc_extract.extract_text(filename, content)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=422)
+
+    return JSONResponse({"text": text})
 
 
 @app.get("/api/profile/{profile_id}")
