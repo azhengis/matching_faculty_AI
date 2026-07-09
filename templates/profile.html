@@ -100,6 +100,11 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
 .mode-tab{padding:10px 2px;background:none;border:none;border-bottom:2px solid transparent;font-size:13.5px;font-weight:600;color:var(--ink-3);cursor:pointer;font-family:inherit}
 .mode-tab.active{color:var(--navy);border-bottom-color:var(--navy)}
 .mode-tab:hover{color:var(--navy)}
+.tag-input-wrap{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;border:1.5px solid var(--border);background:var(--surface)}
+.tag-input-wrap:focus-within{border-color:var(--navy)}
+.tag-chip{display:flex;align-items:center;gap:6px;background:var(--teal-bg);color:var(--teal);border:1px solid var(--teal);padding:4px 8px;font-size:13px}
+.tag-chip button{background:none;border:none;color:var(--teal);cursor:pointer;font-size:14px;line-height:1;padding:0}
+#tag-input{border:none;outline:none;flex:1;min-width:160px;font-size:14px;font-family:inherit;padding:4px 0}
 
 /* ── Welcome back ── */
 .welcome-back{background:var(--surface);border:1.5px solid var(--border);padding:24px;margin-bottom:24px}
@@ -152,7 +157,7 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
     </div>
     <div class="step" id="step-dot-2">
       <div class="step-num">2</div>
-      <div class="step-label">Confirm papers</div>
+      <div class="step-label">Your bio</div>
     </div>
     <div class="step" id="step-dot-3">
       <div class="step-num">3</div>
@@ -172,9 +177,24 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
     </div>
     <div class="search-status" id="search-status"></div>
     <div id="faculty-results"></div>
+
+    <div style="margin-top:14px">
+      <button type="button" class="btn-tiny" id="btn-manual-entry" onclick="showManualEntry()">Not listed? Continue manually &rarr;</button>
+    </div>
+    <div id="manual-entry" style="display:none;margin-top:14px;padding:16px;border:1.5px solid var(--border);background:var(--surface)">
+      <div class="textarea-wrap" style="margin-bottom:14px">
+        <div class="field-label">Your name</div>
+        <input type="text" class="text-input" id="manual-name" placeholder="e.g. Maria Rodriguez" style="width:100%">
+      </div>
+      <div class="textarea-wrap" style="margin-bottom:14px">
+        <div class="field-label">Your email <span style="text-transform:none;font-weight:400">(optional)</span></div>
+        <input type="text" class="text-input" id="manual-email" placeholder="you@depaul.edu" style="width:100%">
+      </div>
+      <button class="btn-primary" onclick="continueManually()">Continue &rarr;</button>
+    </div>
   </div>
 
-  <!-- ── Step 2: Confirm papers ── -->
+  <!-- ── Step 2: Confirm & enrich your bio ── -->
   <div id="panel-2" class="panel">
     <div class="selected-banner" id="selected-banner">
       <div><strong id="selected-name"></strong><br><span id="selected-meta" style="font-size:13px;color:var(--teal)"></span></div>
@@ -182,8 +202,21 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
     </div>
 
     <div class="section-tag">Step 2 of 3</div>
-    <h2>Confirm your publications</h2>
-    <p class="section-desc">We found these papers in our database. Check the ones that are yours — uncheck any misattributions.</p>
+    <h2>Confirm &amp; enrich your bio</h2>
+    <p class="section-desc">This bio and these research interests are shown to others matching against you &mdash; edit them to make sure they're accurate and current.</p>
+
+    <div class="textarea-wrap">
+      <div class="field-label">Your bio</div>
+      <textarea class="proj-textarea" id="bio-text" placeholder="A short description of your research background."></textarea>
+    </div>
+
+    <div class="textarea-wrap">
+      <div class="field-label">Research interests</div>
+      <div class="tag-input-wrap">
+        <div id="tag-chips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+        <input type="text" id="tag-input" placeholder="Type a topic and press Enter">
+      </div>
+    </div>
 
     <div class="papers-section" id="papers-section">
       <div class="papers-note">Don't see all your papers? That's fine — our database pulls from OpenAlex and may be incomplete. You can always add more context in your project description.</div>
@@ -198,6 +231,7 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
         <span class="spinner"></span>Loading papers...
       </div>
     </div>
+    <div id="papers-manual-note" style="display:none;color:var(--ink-3);font-size:13.5px;padding:12px 0">No publications to confirm for a manual profile — you can add context in your project description on the next step.</div>
 
     <button class="btn-primary" onclick="goToStep(3)" style="width:100%;margin-top:4px">Continue &rarr;</button>
   </div>
@@ -266,9 +300,12 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let _selected  = null;   // { id, name, title, dept, email, bio }
-let _paperIds  = [];     // all paper ids loaded for this faculty member
-let _step      = 1;
+let _selected    = null;   // { id, name, title, dept, email, bio }
+let _paperIds    = [];     // all paper ids loaded for this faculty member
+let _step        = 1;
+let _manualName  = null;   // set when the user chose "Not listed? Continue manually"
+let _manualEmail = null;
+let _tags        = [];     // current research interest tags
 
 // ── On load: check for existing profile ──────────────────────────────────────
 (function init() {
@@ -360,6 +397,8 @@ function facultyCard(p) {
 
 async function selectFaculty(p) {
   _selected = p;
+  _manualName = null;
+  _manualEmail = null;
 
   // Fill step 2 and 3 banners
   document.getElementById('selected-name').textContent = p.name;
@@ -367,9 +406,88 @@ async function selectFaculty(p) {
   document.getElementById('s3-name').textContent = p.name;
   document.getElementById('s3-meta').textContent = [p.title, p.dept].filter(Boolean).join(' · ');
 
+  setStepMode('matched');
   goToStep(2);
   loadPapers(p.id);
+  loadOverrides(p.email, p.bio || '');
 }
+
+function showManualEntry() {
+  document.getElementById('manual-entry').style.display = 'block';
+  document.getElementById('btn-manual-entry').style.display = 'none';
+}
+
+function continueManually() {
+  const name = document.getElementById('manual-name').value.trim();
+  if (!name) {
+    document.getElementById('search-status').textContent = 'Please enter your name to continue.';
+    document.getElementById('search-status').className = 'search-status err';
+    return;
+  }
+  _selected = null;
+  _manualName = name;
+  _manualEmail = document.getElementById('manual-email').value.trim();
+
+  document.getElementById('selected-name').textContent = name;
+  document.getElementById('selected-meta').textContent = 'Manual profile';
+  document.getElementById('s3-name').textContent = name;
+  document.getElementById('s3-meta').textContent = 'Manual profile';
+
+  setStepMode('manual');
+  goToStep(2);
+  loadOverrides(null);
+}
+
+function setStepMode(mode) {
+  document.getElementById('papers-section').style.display = mode === 'matched' ? 'block' : 'none';
+  document.getElementById('papers-manual-note').style.display = mode === 'manual' ? 'block' : 'none';
+}
+
+async function loadOverrides(email, fallbackBio) {
+  document.getElementById('bio-text').value = fallbackBio || '';
+  _tags = [];
+  renderTags();
+
+  if (!email) return;
+
+  try {
+    const res  = await fetch('/api/profile/faculty-overrides/' + encodeURIComponent(email));
+    const data = await res.json();
+    if (data.self_bio) document.getElementById('bio-text').value = data.self_bio;
+    _tags = data.self_research_interests || [];
+    renderTags();
+  } catch (e) {
+    // No existing override or network hiccup — bio stays at the scraped fallback.
+  }
+}
+
+function renderTags() {
+  document.getElementById('tag-chips').innerHTML = _tags.map((t, i) => `
+    <span class="tag-chip">${esc(t)}<button type="button" onclick="removeTag(${i})">&times;</button></span>
+  `).join('');
+}
+
+function addTag(raw) {
+  const t = raw.trim();
+  if (!t) return;
+  if (!_tags.some(existing => existing.toLowerCase() === t.toLowerCase())) {
+    _tags.push(t);
+    renderTags();
+  }
+}
+
+function removeTag(i) {
+  _tags.splice(i, 1);
+  renderTags();
+}
+
+document.getElementById('tag-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    addTag(e.target.value);
+    e.target.value = '';
+  }
+});
 
 // ── Step 2: Papers ───────────────────────────────────────────────────────────
 async function loadPapers(facultyId) {
@@ -510,11 +628,12 @@ async function saveProfile() {
 
   const payload = {
     faculty_id:           _selected ? _selected.id : null,
-    name:                 _selected ? _selected.name : 'Unknown',
-    email:                _selected ? _selected.email || '' : '',
-    bio_text:             _selected ? _selected.bio || '' : '',
+    name:                 _selected ? _selected.name : (_manualName || 'Unknown'),
+    email:                _selected ? (_selected.email || '') : (_manualEmail || ''),
+    bio_text:             document.getElementById('bio-text').value.trim(),
     project_description:  proj,
     confirmed_paper_ids:  getCheckedPaperIds(),
+    research_interests:   _tags,
   };
 
   try {
