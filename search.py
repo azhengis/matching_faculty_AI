@@ -229,6 +229,20 @@ def load_faculty():
         sys.exit(f"Run db_setup.py first to create {DB}")
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
+
+    # Self-edited overlay (faculty-facing profile editing). Created here too,
+    # not just in web_app.py's _init_profiles_db, so load_faculty() works
+    # even when the DB was set up without ever starting the web app.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS faculty_overrides (
+            email                    TEXT PRIMARY KEY,
+            self_bio                 TEXT,
+            self_research_interests  TEXT DEFAULT '[]',
+            self_editor_email        TEXT,
+            updated_at               TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
     # Load faculty who have a research summary OR courses taught
     rows = con.execute("""
         SELECT * FROM faculty
@@ -241,6 +255,12 @@ def load_faculty():
         "SELECT faculty_id, GROUP_CONCAT(title, ' | ') as titles FROM papers GROUP BY faculty_id"
     ).fetchall()
     paper_titles_by_id = {r["faculty_id"]: r["titles"] for r in paper_title_rows}
+
+    # Load self-edited overrides, keyed by lowercased email
+    override_rows = con.execute(
+        "SELECT email, self_bio, self_research_interests FROM faculty_overrides"
+    ).fetchall()
+    overrides_by_email = {r["email"].lower(): r for r in override_rows if r["email"]}
     con.close()
 
     people = [dict(r) for r in rows]
@@ -248,17 +268,30 @@ def load_faculty():
         p["pub_titles"] = paper_titles_by_id.get(p["id"], "")
 
     for p in people:
-        summary = fix_summary(p.get("research_summary") or "")
-        courses = clean_courses(p.get("classes_taught") or "")
+        override = overrides_by_email.get((p.get("email") or "").strip().lower())
+        self_bio = (override["self_bio"] or "").strip() if override else ""
+        self_interests = json.loads(override["self_research_interests"] or "[]") if override else []
 
-        if is_biographical(summary, p["name"]) and courses:
-            summary = f"Courses taught: {courses}\n\n{summary}"
-            p["summary_source"] = "courses"
-        elif not summary and courses:
-            summary = f"Courses taught: {courses}"
-            p["summary_source"] = "courses"
-        else:
+        if self_bio:
+            # Self-authored text is already clean prose — skip the scraped-bio
+            # heuristics (fix_summary/course-merging) and use it as-is.
+            summary = self_bio
             p["summary_source"] = "research"
+        else:
+            summary = fix_summary(p.get("research_summary") or "")
+            courses = clean_courses(p.get("classes_taught") or "")
+
+            if is_biographical(summary, p["name"]) and courses:
+                summary = f"Courses taught: {courses}\n\n{summary}"
+                p["summary_source"] = "courses"
+            elif not summary and courses:
+                summary = f"Courses taught: {courses}"
+                p["summary_source"] = "courses"
+            else:
+                p["summary_source"] = "research"
+
+        if self_interests:
+            summary = f"Research interests: {', '.join(self_interests)}\n\n{summary}"
 
         p["research_summary"] = summary
 
