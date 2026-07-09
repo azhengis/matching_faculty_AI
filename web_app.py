@@ -17,6 +17,7 @@ FastAPI server — five interfaces:
   GET  /api/profile/papers/{id} — papers already on file for a faculty member
   POST /api/profile/save        — create/update profile
   GET  /api/profile/{id}        — load a saved profile
+  GET  /api/profile/faculty-overrides/{email} — existing self-edit overlay for a faculty email
   POST /api/profile/extract-file — extract text from an uploaded .pdf/.docx
   POST /api/advisor/chat        — personalized advisor chat turn
 
@@ -402,17 +403,40 @@ async def api_profile_save(req: Request):
     bio_text     = (body.get("bio_text") or "").strip()
     project_desc = (body.get("project_description") or "").strip()
     paper_ids    = json.dumps(body.get("confirmed_paper_ids", []))
+    interests    = json.dumps(body.get("research_interests", []))
     if not name:
         return JSONResponse({"error": "Name required"}, status_code=400)
     con = sqlite3.connect(DB_PATH)
     cur = con.execute(
         """INSERT INTO profiles
-           (faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
-        (faculty_id, name, email, bio_text, project_desc, paper_ids)
+           (faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (faculty_id, name, email, bio_text, project_desc, paper_ids, interests)
     )
     profile_id = cur.lastrowid
     con.commit()
+
+    # Faculty self-edit overlay: only when this profile is linked to a real
+    # faculty record with a usable email. The key is the faculty record's own
+    # (authoritative) email, not the client-submitted `email` field, which is
+    # only trusted as an audit note (self_editor_email).
+    if faculty_id:
+        row = con.execute("SELECT email FROM faculty WHERE id = ?", (faculty_id,)).fetchone()
+        faculty_email = (row[0] or "").strip().lower() if row else ""
+        if faculty_email:
+            con.execute(
+                """INSERT INTO faculty_overrides
+                       (email, self_bio, self_research_interests, self_editor_email, updated_at)
+                   VALUES (?, ?, ?, ?, datetime('now'))
+                   ON CONFLICT(email) DO UPDATE SET
+                       self_bio = excluded.self_bio,
+                       self_research_interests = excluded.self_research_interests,
+                       self_editor_email = excluded.self_editor_email,
+                       updated_at = excluded.updated_at""",
+                (faculty_email, bio_text, interests, email)
+            )
+            con.commit()
+
     con.close()
     return JSONResponse({"profile_id": profile_id, "name": name})
 
@@ -447,17 +471,21 @@ async def api_profile_get(profile_id: int):
     """Load a saved profile by ID."""
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
-        "SELECT id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids "
+        "SELECT id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests "
         "FROM profiles WHERE id = ?", (profile_id,)
     ).fetchone()
     con.close()
     if not row:
         return JSONResponse({"error": "Profile not found"}, status_code=404)
-    pid, fid, name, email, bio, proj, papers_json = row
+    pid, fid, name, email, bio, proj, papers_json, interests_json = row
     try:
         paper_ids = json.loads(papers_json or "[]")
     except Exception:
         paper_ids = []
+    try:
+        interests = json.loads(interests_json or "[]")
+    except Exception:
+        interests = []
     papers = []
     if paper_ids:
         con = sqlite3.connect(DB_PATH)
@@ -467,7 +495,27 @@ async def api_profile_get(profile_id: int):
         papers = [{"id": r[0], "title": r[1] or "", "year": r[2]} for r in prows]
     return JSONResponse({"id": pid, "faculty_id": fid, "name": name, "email": email or "",
                          "bio": bio or "", "project_description": proj or "",
-                         "confirmed_paper_ids": paper_ids, "papers": papers})
+                         "confirmed_paper_ids": paper_ids, "research_interests": interests,
+                         "papers": papers})
+
+
+@app.get("/api/profile/faculty-overrides/{email}")
+async def api_profile_faculty_overrides(email: str):
+    """Look up any existing self-edit overlay for a faculty email, to pre-fill Step 2."""
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT self_bio, self_research_interests FROM faculty_overrides WHERE email = ?",
+        (email.strip().lower(),)
+    ).fetchone()
+    con.close()
+    if not row:
+        return JSONResponse({"self_bio": "", "self_research_interests": []})
+    self_bio, interests_json = row
+    try:
+        interests = json.loads(interests_json or "[]")
+    except Exception:
+        interests = []
+    return JSONResponse({"self_bio": self_bio or "", "self_research_interests": interests})
 
 
 # ── Advisor ───────────────────────────────────────────────────────────────────
