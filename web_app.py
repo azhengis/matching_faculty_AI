@@ -81,6 +81,26 @@ def _init_profiles_db():
             -- future columns: user_id INTEGER, auth_provider TEXT
         )
     """)
+    try:
+        con.execute("ALTER TABLE profiles ADD COLUMN research_interests TEXT DEFAULT '[]'")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
+    # Self-edited overlay for faculty-facing profile editing. Keyed by email,
+    # not faculty.id, because pipeline/4_db_setup.py deletes and re-inserts
+    # every faculty row on each run, reassigning AUTOINCREMENT ids. Keeping
+    # this in its own table (rather than columns on `faculty`) means a
+    # pipeline re-import can never touch or wipe a self-edit, and the
+    # original scraped research_summary is never overwritten in place.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS faculty_overrides (
+            email                    TEXT PRIMARY KEY,
+            self_bio                 TEXT,
+            self_research_interests  TEXT DEFAULT '[]',
+            self_editor_email        TEXT,
+            updated_at               TEXT DEFAULT (datetime('now'))
+        )
+    """)
     con.commit()
     con.close()
 
