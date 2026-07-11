@@ -102,6 +102,26 @@ def _init_profiles_db():
             updated_at               TEXT DEFAULT (datetime('now'))
         )
     """)
+
+    # One structured research proposal per profile, built up by the advisor
+    # chat's save_proposal tool. Keyed by profile_id (not email like
+    # faculty_overrides) because `profiles` is pure user data never touched
+    # by any pipeline re-import, so there's no id-churn risk here.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS proposals (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id          INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+            background          TEXT,
+            objectives          TEXT,
+            research_questions  TEXT,
+            related_work        TEXT,
+            methodology         TEXT,
+            expected_outcomes   TEXT,
+            created_at          TEXT DEFAULT (datetime('now')),
+            updated_at          TEXT DEFAULT (datetime('now')),
+            UNIQUE(profile_id)
+        )
+    """)
     con.commit()
     con.close()
 
