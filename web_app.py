@@ -19,6 +19,7 @@ FastAPI server — five interfaces:
   GET  /api/profile/{id}        — load a saved profile
   GET  /api/profile/faculty-overrides/{email} — existing self-edit overlay for a faculty email
   POST /api/profile/extract-file — extract text from an uploaded .pdf/.docx
+  GET  /api/profile/{id}/proposal — saved research proposal for a profile, if any
   POST /api/advisor/chat        — personalized advisor chat turn
 
 Run:
@@ -538,6 +539,28 @@ async def api_profile_faculty_overrides(email: str):
     return JSONResponse({"self_bio": self_bio or "", "self_research_interests": interests})
 
 
+@app.get("/api/profile/{profile_id}/proposal")
+async def api_profile_proposal(profile_id: int):
+    """Load the saved research proposal for a profile, if any."""
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "FROM proposals WHERE profile_id = ?", (profile_id,)
+    ).fetchone()
+    con.close()
+    if not row:
+        return JSONResponse({
+            "background": "", "objectives": "", "research_questions": "",
+            "related_work": "", "methodology": "", "expected_outcomes": "",
+        })
+    background, objectives, research_questions, related_work, methodology, expected_outcomes = row
+    return JSONResponse({
+        "background": background or "", "objectives": objectives or "",
+        "research_questions": research_questions or "", "related_work": related_work or "",
+        "methodology": methodology or "", "expected_outcomes": expected_outcomes or "",
+    })
+
+
 # ── Advisor ───────────────────────────────────────────────────────────────────
 
 def _advisor_system_prompt(profile: dict) -> str:
@@ -574,14 +597,19 @@ Their confirmed publications:
 ━━━ CONVERSATION FLOW ━━━
 • First message: Greet {name} by name. Reference their research area from their bio — show you read it. If they described a project, acknowledge it specifically. If not, ask: "What research problem are you currently working on?"
 
-• Ask AT MOST one round of 2-3 focused intake questions before searching — never more than one round, even if answers are vague:
-  - What kind of data do you have or could you collect? (text, images, surveys, sensor data, records...)
-  - What is the core methodological challenge you are facing?
-  - Are you looking for a technical co-investigator, or a consultant on AI methods?
+• Work with {name} to build out a structured research proposal, using their bio and project description above as your starting material — don't re-ask for things you already know. Cover, conversationally (not as a rigid checklist):
+  - Background: the problem and its context.
+  - Objectives: what they're trying to find out or build.
+  - Research questions / hypotheses: what specifically they're testing or investigating. Invite them to add more at any point.
+  - Related work: when relevant, suggest literature or prior approaches you're aware of that connect to their work — always frame these as suggestions for them to verify, not citations to take on faith, since you don't have live literature search.
+  - Methodology: suggest 2-3 candidate approaches when there's a real choice to be made, and let them react, pick one, or push back with their own idea.
+  This should feel like a real conversation — let {name} steer, revisit earlier sections, or add detail at any point, not just when first asked.
 
-• If their answers are vague or uncertain ("not sure", "I don't know", short non-answers), do NOT ask another round of clarifying questions. Instead, immediately pivot: offer a short menu of 3-4 broad, generally-applicable AI/data-science possibilities for their field (e.g. "text/document analysis," "predictive modeling from existing records," "survey or interview data analysis," "automating a manual review process") so they have something concrete to react to instead of another open question. Ask which sounds closest to what they need, then proceed — don't wait for a perfectly specific answer.
+• If {name}'s answers stay vague or uncertain ("not sure", "I don't know", short non-answers) across a couple of exchanges, do NOT keep pressing for a full proposal. Instead, pivot: offer a short menu of 3-4 broad, generally-applicable AI/data-science possibilities for their field (e.g. "text/document analysis," "predictive modeling from existing records," "survey or interview data analysis," "automating a manual review process") so they have something concrete to react to. Ask which sounds closest, then proceed straight to the AI integration suggestions below — skip the full proposal and do not call save_proposal.
 
-• Once you understand their needs (or once you've offered the fallback menu above), give 3-4 CONCRETE AI integration suggestions. Name actual methods — topic modeling, computer vision, NLP, predictive modeling, network analysis, etc. — and explain why each fits this specific research.
+• Once background, objectives, research questions, and methodology are reasonably clear, call save_proposal with the sections you've worked out together (related_work and expected_outcomes are a bonus — include them if you have them, but don't hold up saving for them). If the proposal keeps evolving later in the conversation (a new hypothesis, a refined methodology), call save_proposal again to update it.
+
+• Once you understand their needs (whether from the full proposal or the fallback menu), give 3-4 CONCRETE AI integration suggestions. Name actual methods — topic modeling, computer vision, NLP, predictive modeling, network analysis, etc. — and explain why each fits this specific research.
 
 • Then call search_faculty. IMPORTANT: craft the query around the AI/DATA SKILLS needed, not the subject domain.
   Example: for a researcher studying political polarization via surveys who needs ML help, search:
@@ -612,6 +640,28 @@ _ADVISOR_TOOLS = [{
                           "description": "semantic = find these specific skills (default). complementary = adjacent fields."}
             },
             "required": ["query"]
+        }
+    }
+}, {
+    "type": "function",
+    "function": {
+        "name": "save_proposal",
+        "description": (
+            "Save the structured research proposal once you and the researcher have "
+            "worked through it together. Can be called again later in the conversation "
+            "to update it as it evolves."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "background": {"type": "string", "description": "The research problem/context, 2-4 sentences."},
+                "objectives": {"type": "string", "description": "The primary research objectives."},
+                "research_questions": {"type": "string", "description": "Research questions and/or hypotheses being tested."},
+                "related_work": {"type": "string", "description": "Relevant related work/literature discussed."},
+                "methodology": {"type": "string", "description": "The chosen or discussed methodological approach(es)."},
+                "expected_outcomes": {"type": "string", "description": "What the research is expected to produce or show."}
+            },
+            "required": ["background", "objectives", "research_questions", "methodology"]
         }
     }
 }]
@@ -683,6 +733,57 @@ def _advisor_search(query: str, mode: str = "semantic") -> dict:
         return {"error": str(e), "results": []}
 
 
+_PROPOSAL_FIELDS = [
+    "background", "objectives", "research_questions",
+    "related_work", "methodology", "expected_outcomes",
+]
+
+
+def _save_proposal(profile_id, args: dict) -> dict:
+    """Upsert the structured research proposal for a profile.
+
+    Merges over any existing row rather than overwriting wholesale: if the
+    LLM omits an optional field (related_work/expected_outcomes) on a later
+    call, the previously-saved value for that field is preserved rather than
+    wiped to empty.
+    """
+    try:
+        pid = int(profile_id)
+    except (TypeError, ValueError):
+        return {"status": "error", "reason": "no profile"}
+
+    con = sqlite3.connect(DB_PATH)
+    existing = con.execute(
+        "SELECT background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "FROM proposals WHERE profile_id = ?", (pid,)
+    ).fetchone()
+    existing_values = dict(zip(_PROPOSAL_FIELDS, existing)) if existing else {f: "" for f in _PROPOSAL_FIELDS}
+
+    values = {
+        field: (args[field].strip() if field in args and args[field] is not None else existing_values[field])
+        for field in _PROPOSAL_FIELDS
+    }
+
+    con.execute(
+        """INSERT INTO proposals
+               (profile_id, background, objectives, research_questions, related_work, methodology, expected_outcomes, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(profile_id) DO UPDATE SET
+               background = excluded.background,
+               objectives = excluded.objectives,
+               research_questions = excluded.research_questions,
+               related_work = excluded.related_work,
+               methodology = excluded.methodology,
+               expected_outcomes = excluded.expected_outcomes,
+               updated_at = excluded.updated_at""",
+        (pid, values["background"], values["objectives"], values["research_questions"],
+         values["related_work"], values["methodology"], values["expected_outcomes"])
+    )
+    con.commit()
+    con.close()
+    return {"status": "saved"}
+
+
 @app.post("/api/advisor/chat")
 async def api_advisor_chat(req: Request):
     if not CHATBOT_MODEL or not _litellm:
@@ -747,8 +848,11 @@ async def api_advisor_chat(req: Request):
             if reason != "tool_calls":
                 return JSONResponse({"reply": msg.content or "", "session_id": session_id})
             for tc in msg.tool_calls:
-                args   = json.loads(tc.function.arguments)
-                result = _advisor_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
+                args = json.loads(tc.function.arguments)
+                if tc.function.name == "save_proposal":
+                    result = _save_proposal(profile_id, args)
+                else:
+                    result = _advisor_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
                 tool_entry = {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)}
                 history.append(tool_entry); messages.append(tool_entry)
     except Exception as e:
