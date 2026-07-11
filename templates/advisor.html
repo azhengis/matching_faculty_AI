@@ -41,6 +41,10 @@ nav a.active{color:#fff;border-bottom-color:var(--scarlet)}
 .profile-bar-actions{display:flex;gap:10px;flex-shrink:0}
 .btn-bar-link{background:none;border:none;font-size:12.5px;color:var(--teal);cursor:pointer;text-decoration:underline;font-family:inherit;padding:0;white-space:nowrap}
 .btn-bar-link:hover{color:var(--navy)}
+.proposal-panel{background:var(--surface);border-bottom:1.5px solid var(--border);padding:16px 24px;font-size:13.5px;color:var(--ink-2);line-height:1.6}
+.proposal-section{margin-bottom:12px}
+.proposal-section:last-child{margin-bottom:0}
+.proposal-section-label{font-weight:700;color:var(--ink);margin-bottom:3px}
 
 /* ── Chat layout ── */
 .chat-wrap{flex:1;display:flex;flex-direction:column;max-width:820px;width:100%;margin:0 auto;padding:0 20px;min-height:0}
@@ -142,8 +146,12 @@ nav a.active{color:#fff;border-bottom-color:var(--scarlet)}
   <div class="profile-bar-actions">
     <button class="btn-bar-link" onclick="updateProject()">Update my project</button>
     <button class="btn-bar-link" onclick="window.location='/profile'">Edit profile</button>
+    <button class="btn-bar-link" id="btn-view-proposal" style="display:none" onclick="toggleProposalPanel()">View your research proposal</button>
   </div>
 </div>
+
+<!-- Research proposal panel (shown once a proposal exists) -->
+<div id="proposal-panel" class="proposal-panel" style="display:none"></div>
 
 <!-- Chat interface (hidden until profile is confirmed) -->
 <div class="chat-wrap" id="chat-wrap" style="display:none">
@@ -182,6 +190,8 @@ let _profileId  = null;
 let _sessionId  = null;
 let _busy       = false;
 let _profile    = null;
+let _proposal   = null;
+let _proposalPanelOpen = false;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init() {
@@ -262,6 +272,7 @@ async function callAdvisorAPI(message) {
     } else {
       if (data.session_id) _sessionId = data.session_id;
       renderBotReply(data.reply || '');
+      checkProposal();
     }
   } catch (e) {
     addBotRaw('<div style="color:#9B2020">Network error: ' + esc(e.message) + '</div>');
@@ -461,6 +472,48 @@ async function saveUpdatedProject() {
   } catch (e) {
     alert('Could not save: ' + e.message);
   }
+}
+
+// ── Research proposal panel ────────────────────────────────────────────────────
+const PROPOSAL_LABELS = {
+  background: 'Background',
+  objectives: 'Objectives',
+  research_questions: 'Research Questions',
+  related_work: 'Related Work',
+  methodology: 'Methodology',
+  expected_outcomes: 'Expected Outcomes',
+};
+
+async function checkProposal() {
+  if (!_profileId) return;
+  try {
+    const res  = await fetch('/api/profile/' + _profileId + '/proposal');
+    const data = await res.json();
+    _proposal = data;
+    const hasContent = Object.keys(PROPOSAL_LABELS).some(k => (data[k] || '').trim());
+    document.getElementById('btn-view-proposal').style.display = hasContent ? 'inline' : 'none';
+    if (_proposalPanelOpen) renderProposalPanel();
+  } catch (e) {
+    // Network hiccup — the toggle just won't appear/update this turn.
+  }
+}
+
+function renderProposalPanel() {
+  const panel = document.getElementById('proposal-panel');
+  const sections = Object.keys(PROPOSAL_LABELS)
+    .map(k => {
+      const val = (_proposal && _proposal[k]) ? _proposal[k].trim() : '';
+      if (!val) return '';
+      return `<div class="proposal-section"><div class="proposal-section-label">${esc(PROPOSAL_LABELS[k])}</div><div>${esc(val)}</div></div>`;
+    })
+    .join('');
+  panel.innerHTML = sections || '<em>No proposal saved yet.</em>';
+}
+
+function toggleProposalPanel() {
+  _proposalPanelOpen = !_proposalPanelOpen;
+  document.getElementById('proposal-panel').style.display = _proposalPanelOpen ? 'block' : 'none';
+  if (_proposalPanelOpen) renderProposalPanel();
 }
 
 // ── Input events ──────────────────────────────────────────────────────────────
