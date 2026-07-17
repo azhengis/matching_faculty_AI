@@ -7,8 +7,14 @@ FastAPI server — five interfaces:
   GET  /baseline  → SPECTER2 + keyword search (no LLM)
   GET  /search    → Full 3-stage pipeline (SPECTER2 + cross-encoder + LLM)
   GET  /chat      → General conversational chatbot
-  GET  /profile   → Faculty profile setup (step 1 of advisor flow)
-  GET  /advisor   → Personalized AI research advisor (requires profile)
+  GET  /login     → Log in / sign up
+  GET  /profile   → Faculty profile setup (requires login)
+  GET  /advisor   → Personalized AI research advisor (requires login + profile)
+
+  POST /api/auth/signup — create an account
+  POST /api/auth/login  — start a session
+  POST /api/auth/logout — end a session
+  GET  /api/auth/me     — current logged-in user, or 401
 
   POST /api/baseline
   POST /api/search
@@ -30,7 +36,7 @@ Run:
     export CHATBOT_MODEL=claude-haiku-4-5-20251001
 """
 
-import os, sys, json, uuid, re, sqlite3
+import os, sys, json, uuid, re, sqlite3, secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -41,6 +47,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import search as sm
 import doc_extract
+import auth
 
 # ── LiteLLM ───────────────────────────────────────────────────────────────────
 CHATBOT_MODEL = os.environ.get("CHATBOT_MODEL", "")
@@ -61,6 +68,21 @@ TEMPLATES = Path(_ROOT) / "templates"
 # ── Shared in-memory state ────────────────────────────────────────────────────
 _st: dict = {}
 _sessions: dict[str, list] = {}   # session_id → conversation history
+_auth_sessions: dict[str, int] = {}   # session_token → user_id
+
+
+def _current_user(req: Request) -> dict | None:
+    """Resolve the logged-in user from the session cookie, or None."""
+    token = req.cookies.get("session_token")
+    if not token or token not in _auth_sessions:
+        return None
+    user_id = _auth_sessions[token]
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute("SELECT id, email FROM users WHERE id = ?", (user_id,)).fetchone()
+    con.close()
+    if not row:
+        return None
+    return {"id": row[0], "email": row[1]}
 
 
 # ── Profiles table (added to existing faculty.db) ─────────────────────────────
@@ -182,6 +204,86 @@ async def page_profile():
 @app.get("/advisor", response_class=HTMLResponse)
 async def page_advisor():
     return HTMLResponse((TEMPLATES / "advisor.html").read_text())
+
+@app.get("/login", response_class=HTMLResponse)
+async def page_login():
+    return HTMLResponse((TEMPLATES / "login.html").read_text())
+
+
+@app.post("/api/auth/signup")
+async def api_auth_signup(req: Request):
+    """Create a new account and start a session."""
+    body     = await req.json()
+    email    = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    if not email:
+        return JSONResponse({"error": "Email required"}, status_code=400)
+    if len(password) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters."}, status_code=400)
+
+    con = sqlite3.connect(DB_PATH)
+    existing = con.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    if existing:
+        con.close()
+        return JSONResponse({"error": "An account with that email already exists."}, status_code=400)
+
+    password_hash, salt = auth.hash_password(password)
+    cur = con.execute(
+        "INSERT INTO users (email, password_hash, password_salt) VALUES (?, ?, ?)",
+        (email, password_hash, salt)
+    )
+    user_id = cur.lastrowid
+    con.commit()
+    con.close()
+
+    token = secrets.token_urlsafe(32)
+    _auth_sessions[token] = user_id
+    response = JSONResponse({"email": email})
+    response.set_cookie("session_token", token, httponly=True, samesite="lax")
+    return response
+
+
+@app.post("/api/auth/login")
+async def api_auth_login(req: Request):
+    """Verify credentials and start a session."""
+    body     = await req.json()
+    email    = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT id, password_hash, password_salt FROM users WHERE email = ?", (email,)
+    ).fetchone()
+    con.close()
+    if not row or not auth.verify_password(password, row[1], row[2]):
+        return JSONResponse({"error": "Incorrect email or password."}, status_code=401)
+
+    user_id = row[0]
+    token = secrets.token_urlsafe(32)
+    _auth_sessions[token] = user_id
+    response = JSONResponse({"email": email})
+    response.set_cookie("session_token", token, httponly=True, samesite="lax")
+    return response
+
+
+@app.post("/api/auth/logout")
+async def api_auth_logout(req: Request):
+    """End the current session."""
+    token = req.cookies.get("session_token")
+    if token:
+        _auth_sessions.pop(token, None)
+    response = JSONResponse({"status": "logged_out"})
+    response.delete_cookie("session_token")
+    return response
+
+
+@app.get("/api/auth/me")
+async def api_auth_me(req: Request):
+    """Return the logged-in user's {id, email}, or 401."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+    return JSONResponse(user)
 
 
 # ── Shared: format search results ─────────────────────────────────────────────
