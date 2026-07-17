@@ -1011,11 +1011,24 @@ const PROPOSAL_LABELS = {
 function proposalTextToHtml(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const isBulletLine = l => l.startsWith('- ') || l.startsWith('• ');
-  if (lines.some(isBulletLine)) {
-    const items = lines.filter(isBulletLine).map(l => `<li>${esc(l.replace(/^[-•]\s+/, ''))}</li>`).join('');
-    return `<ul>${items}</ul>`;
+  let html = '';
+  let bulletBuffer = [];
+  const flushBullets = () => {
+    if (bulletBuffer.length) {
+      html += '<ul>' + bulletBuffer.map(l => `<li>${esc(l.replace(/^[-•]\s+/, ''))}</li>`).join('') + '</ul>';
+      bulletBuffer = [];
+    }
+  };
+  for (const line of lines) {
+    if (isBulletLine(line)) {
+      bulletBuffer.push(line);
+    } else {
+      flushBullets();
+      html += `<p>${esc(line)}</p>`;
+    }
   }
-  return lines.map(l => `<p>${esc(l)}</p>`).join('');
+  flushBullets();
+  return html;
 }
 
 async function loadProposalSection() {
