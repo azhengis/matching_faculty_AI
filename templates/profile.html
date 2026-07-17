@@ -113,6 +113,19 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
 .btn-group{display:flex;gap:8px;flex-wrap:wrap}
 .btn-scarlet{padding:11px 22px;background:var(--scarlet);color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
 .btn-scarlet:hover{background:#a01828}
+.profile-summary{background:var(--surface);border:1.5px solid var(--border);padding:24px;margin-bottom:24px}
+.profile-field{margin-bottom:16px}
+.profile-field:last-child{margin-bottom:0}
+.profile-text{font-size:14px;color:var(--ink-2);line-height:1.6;white-space:pre-wrap}
+.documents-section{background:var(--surface);border:1.5px solid var(--border);padding:24px;margin-bottom:24px}
+.doc-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.doc-row:last-child{border-bottom:none}
+.doc-label a{color:var(--navy);text-decoration:none;font-size:13.5px}
+.doc-label a:hover{text-decoration:underline}
+.doc-meta{font-size:11.5px;color:var(--ink-3);margin-top:1px}
+.doc-actions button{font-size:12px;color:var(--navy);background:none;border:none;cursor:pointer;text-decoration:underline;font-family:inherit}
+.doc-add-forms{display:flex;gap:16px;flex-wrap:wrap;margin-top:16px}
+.doc-add-form{flex:1;min-width:240px;padding:14px;border:1px dashed var(--border-2)}
 
 /* ── Loading ── */
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
@@ -136,15 +149,57 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
 
 <div class="main">
 
-  <!-- Welcome back (shown if the logged-in user already has a saved profile) -->
-  <div id="welcome-back" style="display:none">
-    <div class="welcome-back">
-      <h3 id="wb-name">Welcome back</h3>
-      <p id="wb-desc">Your profile is saved. Head to the advisor to continue, or update your profile below.</p>
-      <div class="btn-group">
-        <a class="btn-scarlet" href="/advisor">Go to Advisor &rarr;</a>
-        <button class="btn-outline" onclick="startFresh()">Update my profile</button>
+  <!-- Full profile view (shown once the logged-in user has a saved profile) -->
+  <div id="profile-view" style="display:none">
+    <div class="profile-summary">
+      <h2 id="pv-name"></h2>
+      <div class="profile-field">
+        <div class="field-label">Bio</div>
+        <div id="pv-bio" class="profile-text"></div>
       </div>
+      <div class="profile-field">
+        <div class="field-label">Research Interests</div>
+        <div id="pv-interests" class="profile-text"></div>
+      </div>
+      <div class="profile-field">
+        <div class="field-label">Confirmed Publications</div>
+        <div id="pv-papers" class="profile-text"></div>
+      </div>
+      <div class="profile-field">
+        <div class="field-label">Current Project</div>
+        <div id="pv-project" class="profile-text"></div>
+      </div>
+    </div>
+
+    <div class="documents-section">
+      <div class="section-tag">Documents &amp; Links</div>
+      <h2>Add more sources</h2>
+      <p class="section-desc">Upload CVs, papers, or grant documents, or link to your Google Scholar, personal site, or other sources.</p>
+
+      <div id="documents-list"></div>
+
+      <div class="doc-add-forms">
+        <div class="doc-add-form">
+          <div class="field-label">Upload a document</div>
+          <input type="text" class="text-input" id="doc-label-input" placeholder="Label (e.g. 'CV', 'Grant proposal')" style="width:100%;margin-bottom:8px">
+          <input type="file" id="doc-file-input">
+          <button class="btn-primary" onclick="uploadDocument()" style="margin-top:8px">Upload</button>
+          <div class="search-status" id="doc-upload-status"></div>
+        </div>
+
+        <div class="doc-add-form">
+          <div class="field-label">Add a link</div>
+          <input type="text" class="text-input" id="link-label-input" placeholder="Label (e.g. 'Google Scholar')" style="width:100%;margin-bottom:8px">
+          <input type="text" class="text-input" id="link-url-input" placeholder="https://..." style="width:100%;margin-bottom:8px">
+          <button class="btn-primary" onclick="addLink()">Add link</button>
+          <div class="search-status" id="link-add-status"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-group" style="margin-top:24px">
+      <a class="btn-scarlet" href="/advisor">Continue to Advisor &rarr;</a>
+      <button class="btn-outline" onclick="startFresh()">Update my profile</button>
     </div>
   </div>
 
@@ -325,17 +380,32 @@ let _tags        = [];     // current research interest tags
   }
 
   if (existing) {
-    document.getElementById('welcome-back').style.display = 'block';
-    document.getElementById('wb-name').textContent = 'Welcome back' + (existing.name ? ', ' + existing.name : '') + '!';
-    document.getElementById('wb-desc').textContent =
-      'Your profile is saved. Head to the advisor to continue, or update your profile below.';
-    document.getElementById('steps').style.display = 'none';
-    document.getElementById('panel-1').classList.remove('active');
+    showProfileView(existing);
   }
 })();
 
+function showProfileView(profile) {
+  document.getElementById('steps').style.display = 'none';
+  document.getElementById('panel-1').classList.remove('active');
+  document.getElementById('panel-2').classList.remove('active');
+  document.getElementById('panel-3').classList.remove('active');
+
+  document.getElementById('pv-name').textContent = profile.name || '';
+  document.getElementById('pv-bio').textContent = profile.bio || '(no bio yet)';
+  const interests = profile.research_interests || [];
+  document.getElementById('pv-interests').textContent = interests.length ? interests.join(', ') : '(none added yet)';
+  const papers = profile.papers || [];
+  document.getElementById('pv-papers').innerHTML = papers.length
+    ? papers.map(p => `<div>${esc(p.title)}${p.year ? ' (' + p.year + ')' : ''}</div>`).join('')
+    : '(none confirmed yet)';
+  document.getElementById('pv-project').textContent = profile.project_description || '(not described yet)';
+
+  document.getElementById('profile-view').style.display = 'block';
+  loadDocuments();
+}
+
 function startFresh() {
-  document.getElementById('welcome-back').style.display = 'none';
+  document.getElementById('profile-view').style.display = 'none';
   document.getElementById('steps').style.display = 'flex';
   document.getElementById('panel-1').classList.add('active');
 }
@@ -662,8 +732,13 @@ async function saveProfile() {
       return;
     }
 
-    // Redirect to advisor
-    window.location.href = '/advisor';
+    // Show the full profile view (with document upload) instead of jumping
+    // straight to the advisor — the user continues there when ready.
+    const meRes = await fetch('/api/profile/me');
+    if (meRes.ok) {
+      showProfileView(await meRes.json());
+    }
+    btn.disabled = false;
 
   } catch (e) {
     status.textContent = 'Network error: ' + e.message;
@@ -675,6 +750,121 @@ async function saveProfile() {
 async function logout() {
   await fetch('/api/auth/logout', { method: 'POST' });
   window.location.href = '/login';
+}
+
+// ── Documents & links ─────────────────────────────────────────────────────────
+async function loadDocuments() {
+  const list = document.getElementById('documents-list');
+  list.innerHTML = '<span class="spinner"></span> Loading...';
+  try {
+    const res  = await fetch('/api/profile/documents');
+    const data = await res.json();
+    renderDocuments(data.documents || []);
+  } catch (e) {
+    list.innerHTML = '<div style="color:#9B2020;font-size:13px">Could not load documents: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderDocuments(documents) {
+  const list = document.getElementById('documents-list');
+  if (!documents.length) {
+    list.innerHTML = '<div style="color:var(--ink-3);font-size:13.5px;padding:8px 0">No documents or links added yet.</div>';
+    return;
+  }
+  list.innerHTML = documents.map(d => {
+    const link = d.kind === 'file'
+      ? `<a href="/api/profile/documents/${d.id}/file" target="_blank">${esc(d.label)}</a>`
+      : `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.label)}</a>`;
+    return `
+    <div class="doc-row">
+      <div>
+        <div class="doc-label">${link}</div>
+        <div class="doc-meta">${d.kind === 'file' ? (d.has_text ? 'Document · text extracted' : 'Document') : 'Link'}</div>
+      </div>
+      <div class="doc-actions">
+        <button onclick="deleteDocument(${d.id})">Remove</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function uploadDocument() {
+  const fileInput = document.getElementById('doc-file-input');
+  const label     = document.getElementById('doc-label-input').value.trim();
+  const status    = document.getElementById('doc-upload-status');
+  const file      = fileInput.files[0];
+
+  if (!file) {
+    status.textContent = 'Choose a file first.';
+    status.className   = 'search-status err';
+    return;
+  }
+
+  status.innerHTML = '<span class="spinner"></span> Uploading...';
+  status.className = 'search-status';
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('label', label);
+
+  try {
+    const res  = await fetch('/api/profile/documents', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.error) {
+      status.textContent = data.error;
+      status.className   = 'search-status err';
+      return;
+    }
+    fileInput.value = '';
+    document.getElementById('doc-label-input').value = '';
+    status.textContent = 'Uploaded.';
+    loadDocuments();
+  } catch (e) {
+    status.textContent = 'Network error: ' + e.message;
+    status.className   = 'search-status err';
+  }
+}
+
+async function addLink() {
+  const label  = document.getElementById('link-label-input').value.trim();
+  const url    = document.getElementById('link-url-input').value.trim();
+  const status = document.getElementById('link-add-status');
+
+  if (!url) {
+    status.textContent = 'Enter a URL first.';
+    status.className   = 'search-status err';
+    return;
+  }
+
+  try {
+    const res  = await fetch('/api/profile/links', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ label, url })
+    });
+    const data = await res.json();
+    if (data.error) {
+      status.textContent = data.error;
+      status.className   = 'search-status err';
+      return;
+    }
+    document.getElementById('link-label-input').value = '';
+    document.getElementById('link-url-input').value = '';
+    status.textContent = 'Added.';
+    loadDocuments();
+  } catch (e) {
+    status.textContent = 'Network error: ' + e.message;
+    status.className   = 'search-status err';
+  }
+}
+
+async function deleteDocument(id) {
+  try {
+    await fetch('/api/profile/documents/' + id, { method: 'DELETE' });
+    loadDocuments();
+  } catch (e) {
+    alert('Could not remove: ' + e.message);
+  }
 }
 
 // ── Utility ──────────────────────────────────────────────────────────────────
