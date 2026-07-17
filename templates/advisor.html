@@ -186,7 +186,6 @@ nav a.active{color:#fff;border-bottom-color:var(--scarlet)}
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let _profileId  = null;
 let _sessionId  = null;
 let _busy       = false;
 let _profile    = null;
@@ -195,23 +194,20 @@ let _proposalPanelOpen = false;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init() {
-  const pid = localStorage.getItem('advisor_profile_id');
-  if (!pid) {
-    document.getElementById('no-profile').style.display = 'flex';
+  try {
+    const meRes = await fetch('/api/auth/me');
+    if (!meRes.ok) throw new Error('not logged in');
+  } catch (e) {
+    window.location.href = '/login';
     return;
   }
 
-  _profileId = pid;
-
   // Load profile from server
   try {
-    const res  = await fetch('/api/profile/' + pid);
-    if (!res.ok) throw new Error('not found');
+    const res  = await fetch('/api/profile/me');
+    if (!res.ok) throw new Error('no profile yet');
     _profile = await res.json();
   } catch (e) {
-    // Profile ID in localStorage but not in DB (e.g. DB was reset)
-    localStorage.removeItem('advisor_profile_id');
-    localStorage.removeItem('advisor_profile_name');
     document.getElementById('no-profile').style.display = 'flex';
     return;
   }
@@ -260,8 +256,7 @@ async function callAdvisorAPI(message) {
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         message,
-        session_id: _sessionId,
-        profile_id: _profileId
+        session_id: _sessionId
       })
     });
     const data = await res.json();
@@ -437,11 +432,10 @@ async function saveUpdatedProject() {
   const newProj = document.getElementById('update-textarea').value.trim();
   if (!newProj) return;
 
-  // Save a new profile entry with updated description
+  // Update the logged-in user's profile with the new description
   const payload = {
     faculty_id:           _profile ? _profile.faculty_id : null,
     name:                 _profile ? _profile.name : '',
-    email:                _profile ? _profile.email || '' : '',
     bio_text:             _profile ? _profile.bio || '' : '',
     project_description:  newProj,
     confirmed_paper_ids:  _profile ? _profile.confirmed_paper_ids || [] : [],
@@ -455,9 +449,6 @@ async function saveUpdatedProject() {
     });
     const data = await res.json();
     if (data.profile_id) {
-      _profileId = String(data.profile_id);
-      localStorage.setItem('advisor_profile_id',   _profileId);
-      localStorage.setItem('advisor_profile_name', data.name);
       if (_profile) _profile.project_description = newProj;
 
       // Update bar preview
@@ -485,9 +476,8 @@ const PROPOSAL_LABELS = {
 };
 
 async function checkProposal() {
-  if (!_profileId) return;
   try {
-    const res  = await fetch('/api/profile/' + _profileId + '/proposal');
+    const res  = await fetch('/api/profile/me/proposal');
     const data = await res.json();
     _proposal = data;
     const hasContent = Object.keys(PROPOSAL_LABELS).some(k => (data[k] || '').trim());
