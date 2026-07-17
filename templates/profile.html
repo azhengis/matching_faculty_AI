@@ -307,23 +307,35 @@ let _manualName  = null;   // set when the user chose "Not listed? Continue manu
 let _manualEmail = null;
 let _tags        = [];     // current research interest tags
 
-// ── On load: check for existing profile ──────────────────────────────────────
-(function init() {
-  const pid = localStorage.getItem('advisor_profile_id');
-  const pname = localStorage.getItem('advisor_profile_name');
-  if (pid) {
+// ── On load: require login, then check for an existing profile ───────────────
+(async function init() {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) throw new Error('not logged in');
+  } catch (e) {
+    window.location.href = '/login';
+    return;
+  }
+
+  let existing = null;
+  try {
+    const res = await fetch('/api/profile/me');
+    if (res.ok) existing = await res.json();
+  } catch (e) {
+    // Network hiccup — treat as no existing profile.
+  }
+
+  if (existing) {
     document.getElementById('welcome-back').style.display = 'block';
-    document.getElementById('wb-name').textContent = 'Welcome back' + (pname ? ', ' + pname : '') + '!';
+    document.getElementById('wb-name').textContent = 'Welcome back' + (existing.name ? ', ' + existing.name : '') + '!';
     document.getElementById('wb-desc').textContent =
-      'Your profile is saved. Head to the advisor to continue, or create a new profile below.';
+      'Your profile is saved. Head to the advisor to continue, or update your profile below.';
     document.getElementById('steps').style.display = 'none';
     document.getElementById('panel-1').classList.remove('active');
   }
 })();
 
 function startFresh() {
-  localStorage.removeItem('advisor_profile_id');
-  localStorage.removeItem('advisor_profile_name');
   document.getElementById('welcome-back').style.display = 'none';
   document.getElementById('steps').style.display = 'flex';
   document.getElementById('panel-1').classList.add('active');
@@ -650,9 +662,6 @@ async function saveProfile() {
       btn.disabled       = false;
       return;
     }
-
-    localStorage.setItem('advisor_profile_id',   String(data.profile_id));
-    localStorage.setItem('advisor_profile_name', data.name);
 
     // Redirect to advisor
     window.location.href = '/advisor';
