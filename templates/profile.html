@@ -127,6 +127,19 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
 .doc-add-forms{display:flex;gap:16px;flex-wrap:wrap;margin-top:16px}
 .doc-add-form{flex:1;min-width:240px;padding:14px;border:1px dashed var(--border-2)}
 
+.proposal-view-section{background:var(--surface);border:1.5px solid var(--border);padding:24px;margin-bottom:24px}
+.proposal-view-empty{font-size:13.5px;color:var(--ink-3);font-style:italic}
+.proposal-view-item{margin-bottom:16px}
+.proposal-view-item:last-child{margin-bottom:0}
+.proposal-view-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--teal);margin-bottom:6px}
+.proposal-view-body{font-size:14px;color:var(--ink-2);line-height:1.6}
+.proposal-view-body p{margin-bottom:6px}
+.proposal-view-body p:last-child{margin-bottom:0}
+.proposal-view-body ul{padding-left:18px}
+.proposal-view-body li{margin-bottom:3px}
+.btn-download{display:inline-block;margin-top:14px;padding:10px 18px;background:var(--teal);color:#fff;border:none;font-size:13.5px;font-weight:600;cursor:pointer;text-decoration:none}
+.btn-download:hover{background:#0A4A50}
+
 /* ── Loading ── */
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -169,6 +182,13 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
         <div class="field-label">Current Project</div>
         <div id="pv-project" class="profile-text"></div>
       </div>
+    </div>
+
+    <div class="proposal-view-section" id="proposal-view-section">
+      <div class="section-tag">Research Proposal</div>
+      <h2>Your proposal</h2>
+      <p class="section-desc">Built from your conversations with the advisor — always up to date here, whether or not you've downloaded it.</p>
+      <div id="proposal-view-body"></div>
     </div>
 
     <div class="documents-section">
@@ -402,6 +422,7 @@ function showProfileView(profile) {
 
   document.getElementById('profile-view').style.display = 'block';
   loadDocuments();
+  loadProposalSection();
 }
 
 function startFresh() {
@@ -758,6 +779,64 @@ async function saveProfile() {
 async function logout() {
   await fetch('/api/auth/logout', { method: 'POST' });
   window.location.href = '/login';
+}
+
+// ── Research proposal ─────────────────────────────────────────────────────────
+const PROPOSAL_LABELS = {
+  background: 'Background',
+  objectives: 'Objectives',
+  research_questions: 'Research Questions',
+  related_work: 'Related Work',
+  methodology: 'Methodology',
+  expected_outcomes: 'Expected Outcomes',
+};
+
+function proposalTextToHtml(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const isBulletLine = l => l.startsWith('- ') || l.startsWith('• ');
+  let html = '';
+  let bulletBuffer = [];
+  const flushBullets = () => {
+    if (bulletBuffer.length) {
+      html += '<ul>' + bulletBuffer.map(l => `<li>${esc(l.replace(/^[-•]\s+/, ''))}</li>`).join('') + '</ul>';
+      bulletBuffer = [];
+    }
+  };
+  for (const line of lines) {
+    if (isBulletLine(line)) {
+      bulletBuffer.push(line);
+    } else {
+      flushBullets();
+      html += `<p>${esc(line)}</p>`;
+    }
+  }
+  flushBullets();
+  return html;
+}
+
+async function loadProposalSection() {
+  const body = document.getElementById('proposal-view-body');
+  try {
+    const res  = await fetch('/api/profile/me/proposal');
+    const data = await res.json();
+    const hasContent = Object.keys(PROPOSAL_LABELS).some(k => (data[k] || '').trim());
+
+    if (!hasContent) {
+      body.innerHTML = '<div class="proposal-view-empty">Not started yet — build one by talking with the Faculty Advisor.</div>';
+      return;
+    }
+
+    const items = Object.keys(PROPOSAL_LABELS)
+      .map(k => {
+        const val = (data[k] || '').trim();
+        if (!val) return '';
+        return `<div class="proposal-view-item"><div class="proposal-view-label">${esc(PROPOSAL_LABELS[k])}</div><div class="proposal-view-body">${proposalTextToHtml(val)}</div></div>`;
+      })
+      .join('');
+    body.innerHTML = items + '<a class="btn-download" href="/api/profile/me/proposal/download">Download as Word doc</a>';
+  } catch (e) {
+    body.innerHTML = '<div style="color:#9B2020;font-size:13px">Could not load your proposal: ' + esc(e.message) + '</div>';
+  }
 }
 
 // ── Documents & links ─────────────────────────────────────────────────────────
