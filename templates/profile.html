@@ -734,9 +734,17 @@ async function saveProfile() {
 
     // Show the full profile view (with document upload) instead of jumping
     // straight to the advisor — the user continues there when ready.
-    const meRes = await fetch('/api/profile/me');
-    if (meRes.ok) {
-      showProfileView(await meRes.json());
+    try {
+      const meRes = await fetch('/api/profile/me');
+      if (meRes.ok) {
+        showProfileView(await meRes.json());
+      } else {
+        status.textContent = 'Your profile was saved, but we could not reload it. Please reload the page to see your changes.';
+        status.className   = 'search-status err';
+      }
+    } catch (e) {
+      status.textContent = 'Your profile was saved, but we could not reload it. Please reload the page to see your changes.';
+      status.className   = 'search-status err';
     }
     btn.disabled = false;
 
