@@ -25,6 +25,7 @@ FastAPI server — two interfaces (plus auth):
   GET  /api/profile/faculty-overrides/{email} — existing self-edit overlay for a faculty email (requires login)
   POST /api/profile/extract-file — extract text from an uploaded .pdf/.docx
   GET  /api/profile/me/proposal — the logged-in user's saved research proposal, if any (requires login)
+  GET  /api/profile/me/proposal/download — download the saved proposal as a .docx file (requires login)
   POST /api/advisor/chat        — personalized advisor chat turn (requires login)
 
 Run:
@@ -41,7 +42,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, Request, File, UploadFile, Form
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse, Response
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import search as sm
@@ -892,6 +893,83 @@ def _save_proposal(profile_id, args: dict) -> dict:
     con.commit()
     con.close()
     return {"status": "saved"}
+
+
+def _build_proposal_docx(researcher_name: str, proposal: dict) -> bytes:
+    """Render a saved proposal dict into a .docx file's raw bytes.
+
+    Pure function — no DB/request access — so it's independently testable.
+    Sections with empty text are skipped entirely. Within a section, lines
+    starting with "- " or "• " become bulleted list items; other lines
+    become plain paragraphs.
+    """
+    import io
+    from docx import Document
+
+    doc = Document()
+    title = f"Research Proposal: {researcher_name}" if researcher_name else "Research Proposal"
+    doc.add_heading(title, level=1)
+
+    sections = [
+        ("Introduction / Background", proposal.get("background", "")),
+        ("Research Objectives", proposal.get("objectives", "")),
+        ("Possible Research Questions", proposal.get("research_questions", "")),
+        ("Relevant Literature", proposal.get("related_work", "")),
+        ("Methodology", proposal.get("methodology", "")),
+        ("Expected Outcomes", proposal.get("expected_outcomes", "")),
+    ]
+
+    for heading, text in sections:
+        text = (text or "").strip()
+        if not text:
+            continue
+        doc.add_heading(heading, level=2)
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("- ") or line.startswith("• "):
+                doc.add_paragraph(line[2:].strip(), style="List Bullet")
+            else:
+                doc.add_paragraph(line)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+@app.get("/api/profile/me/proposal/download")
+async def api_profile_proposal_download(req: Request):
+    """Download the logged-in user's saved research proposal as a .docx file."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    con = sqlite3.connect(DB_PATH)
+    profile_row = con.execute("SELECT id, name FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not profile_row:
+        con.close()
+        return JSONResponse({"error": "No profile yet"}, status_code=404)
+    profile_id, name = profile_row
+    row = con.execute(
+        "SELECT background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "FROM proposals WHERE profile_id = ?", (profile_id,)
+    ).fetchone()
+    con.close()
+    if not row or not (row[0] or "").strip():
+        return JSONResponse({"error": "No proposal to download yet."}, status_code=404)
+
+    proposal = dict(zip(
+        ["background", "objectives", "research_questions", "related_work", "methodology", "expected_outcomes"], row
+    ))
+    docx_bytes = _build_proposal_docx(name, proposal)
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", name or "proposal").strip("_") or "proposal"
+    filename = f"Research_Proposal_{safe_name}.docx"
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post("/api/advisor/chat")
