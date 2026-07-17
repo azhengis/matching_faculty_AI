@@ -17,6 +17,11 @@ FastAPI server — two interfaces (plus auth):
   GET  /api/profile/papers/{id} — papers already on file for a faculty member
   POST /api/profile/save        — create/update the logged-in user's profile (requires login)
   GET  /api/profile/me          — load the logged-in user's profile (requires login)
+  POST /api/profile/documents   — upload a document attached to the profile (requires login)
+  POST /api/profile/links       — add a link attached to the profile (requires login)
+  GET  /api/profile/documents   — list the profile's documents/links (requires login)
+  DELETE /api/profile/documents/{id} — remove a document/link (requires login)
+  GET  /api/profile/documents/{id}/file — download an uploaded document (requires login)
   GET  /api/profile/faculty-overrides/{email} — existing self-edit overlay for a faculty email (requires login)
   POST /api/profile/extract-file — extract text from an uploaded .pdf/.docx
   GET  /api/profile/me/proposal — the logged-in user's saved research proposal, if any (requires login)
@@ -35,8 +40,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, Request, File, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, Request, File, UploadFile, Form
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import search as sm
@@ -55,9 +60,11 @@ if CHATBOT_MODEL:
         CHATBOT_MODEL = ""
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-_ROOT     = os.path.dirname(os.path.abspath(__file__))
-DB_PATH   = os.path.join(_ROOT, "faculty.db")
-TEMPLATES = Path(_ROOT) / "templates"
+_ROOT       = os.path.dirname(os.path.abspath(__file__))
+DB_PATH     = os.path.join(_ROOT, "faculty.db")
+TEMPLATES   = Path(_ROOT) / "templates"
+UPLOADS_DIR = os.path.join(_ROOT, "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # ── Shared in-memory state ────────────────────────────────────────────────────
 _st: dict = {}
@@ -159,6 +166,24 @@ def _init_profiles_db():
             password_hash  TEXT NOT NULL,
             password_salt  TEXT NOT NULL,
             created_at     TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
+    # Uploaded documents and links attached to a profile (CVs, grant docs,
+    # personal sites, Google Scholar, etc.) — separate from
+    # confirmed_paper_ids (which references the scraped `papers` table)
+    # since these are user-supplied sources, not OpenAlex-derived publications.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS profile_documents (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id       INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+            kind             TEXT NOT NULL,
+            label            TEXT,
+            url              TEXT,
+            filename         TEXT,
+            stored_filename  TEXT,
+            extracted_text   TEXT,
+            created_at       TEXT DEFAULT (datetime('now'))
         )
     """)
     con.commit()
@@ -435,6 +460,160 @@ async def api_profile_me(req: Request):
                          "bio": bio or "", "project_description": proj or "",
                          "confirmed_paper_ids": paper_ids, "research_interests": interests,
                          "papers": papers})
+
+
+@app.post("/api/profile/documents")
+async def api_profile_add_document(req: Request, file: UploadFile = File(...), label: str = Form("")):
+    """Upload a document (PDF, DOCX, or any other file) attached to the logged-in user's profile."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    con = sqlite3.connect(DB_PATH)
+    profile_row = con.execute("SELECT id FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not profile_row:
+        con.close()
+        return JSONResponse({"error": "Save your profile before adding documents."}, status_code=400)
+    profile_id = profile_row[0]
+
+    filename = file.filename or "upload"
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        con.close()
+        return JSONResponse({"error": "File is too large (10MB max)."}, status_code=400)
+
+    ext = os.path.splitext(filename)[1].lower()
+    stored_filename = secrets.token_hex(16) + ext
+    with open(os.path.join(UPLOADS_DIR, stored_filename), "wb") as f:
+        f.write(content)
+
+    extracted_text = None
+    if ext in (".pdf", ".docx"):
+        try:
+            extracted_text = doc_extract.extract_text(filename, content)
+        except ValueError:
+            extracted_text = None  # not every file needs to yield usable text
+
+    label = (label or "").strip() or filename
+    cur = con.execute(
+        """INSERT INTO profile_documents (profile_id, kind, label, filename, stored_filename, extracted_text)
+           VALUES (?, 'file', ?, ?, ?, ?)""",
+        (profile_id, label, filename, stored_filename, extracted_text)
+    )
+    doc_id = cur.lastrowid
+    con.commit()
+    con.close()
+    return JSONResponse({
+        "id": doc_id, "kind": "file", "label": label,
+        "filename": filename, "has_text": extracted_text is not None,
+    })
+
+
+@app.post("/api/profile/links")
+async def api_profile_add_link(req: Request):
+    """Add a link (personal site, Google Scholar, etc.) attached to the logged-in user's profile."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    body  = await req.json()
+    label = (body.get("label") or "").strip()
+    url   = (body.get("url") or "").strip()
+    if not url:
+        return JSONResponse({"error": "URL required"}, status_code=400)
+
+    con = sqlite3.connect(DB_PATH)
+    profile_row = con.execute("SELECT id FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not profile_row:
+        con.close()
+        return JSONResponse({"error": "Save your profile before adding links."}, status_code=400)
+    profile_id = profile_row[0]
+
+    cur = con.execute(
+        "INSERT INTO profile_documents (profile_id, kind, label, url) VALUES (?, 'link', ?, ?)",
+        (profile_id, label or url, url)
+    )
+    doc_id = cur.lastrowid
+    con.commit()
+    con.close()
+    return JSONResponse({"id": doc_id, "kind": "link", "label": label or url, "url": url})
+
+
+@app.get("/api/profile/documents")
+async def api_profile_list_documents(req: Request):
+    """List the logged-in user's uploaded documents and links."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    con = sqlite3.connect(DB_PATH)
+    profile_row = con.execute("SELECT id FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not profile_row:
+        con.close()
+        return JSONResponse({"documents": []})
+    rows = con.execute(
+        "SELECT id, kind, label, url, filename, extracted_text IS NOT NULL FROM profile_documents "
+        "WHERE profile_id = ? ORDER BY created_at DESC", (profile_row[0],)
+    ).fetchall()
+    con.close()
+    documents = [{"id": r[0], "kind": r[1], "label": r[2] or "", "url": r[3] or "",
+                  "filename": r[4] or "", "has_text": bool(r[5])} for r in rows]
+    return JSONResponse({"documents": documents})
+
+
+@app.delete("/api/profile/documents/{doc_id}")
+async def api_profile_delete_document(doc_id: int, req: Request):
+    """Delete a document/link, only if it belongs to the logged-in user's profile."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        """SELECT profile_documents.stored_filename FROM profile_documents
+           JOIN profiles ON profiles.id = profile_documents.profile_id
+           WHERE profile_documents.id = ? AND profiles.user_id = ?""",
+        (doc_id, user["id"])
+    ).fetchone()
+    if not row:
+        con.close()
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    stored_filename = row[0]
+    con.execute("DELETE FROM profile_documents WHERE id = ?", (doc_id,))
+    con.commit()
+    con.close()
+
+    if stored_filename:
+        try:
+            os.remove(os.path.join(UPLOADS_DIR, stored_filename))
+        except FileNotFoundError:
+            pass
+
+    return JSONResponse({"status": "deleted"})
+
+
+@app.get("/api/profile/documents/{doc_id}/file")
+async def api_profile_document_file(doc_id: int, req: Request):
+    """Serve the original uploaded file, only if it belongs to the logged-in user's profile."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        """SELECT profile_documents.stored_filename, profile_documents.filename FROM profile_documents
+           JOIN profiles ON profiles.id = profile_documents.profile_id
+           WHERE profile_documents.id = ? AND profiles.user_id = ? AND profile_documents.kind = 'file'""",
+        (doc_id, user["id"])
+    ).fetchone()
+    con.close()
+    if not row or not row[0]:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    stored_filename, original_filename = row
+    file_path = os.path.join(UPLOADS_DIR, stored_filename)
+    if not os.path.exists(file_path):
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    return FileResponse(file_path, filename=original_filename or stored_filename)
 
 
 @app.get("/api/profile/faculty-overrides/{email}")

@@ -10,6 +10,12 @@ bio_cache/
 # macOS
 .DS_Store
 
+# Virtual environment
+.venv/
+
 # Python
 __pycache__/
 *.pyc
+
+# Uploaded profile documents (local storage, not committed)
+uploads/
