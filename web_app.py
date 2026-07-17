@@ -123,6 +123,18 @@ def _init_profiles_db():
             UNIQUE(profile_id)
         )
     """)
+
+    # User accounts. One profile per user (profiles.user_id, added in a
+    # later migration step) enforces the one-account-one-profile model.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            email          TEXT NOT NULL UNIQUE,
+            password_hash  TEXT NOT NULL,
+            password_salt  TEXT NOT NULL,
+            created_at     TEXT DEFAULT (datetime('now'))
+        )
+    """)
     con.commit()
     con.close()
 
