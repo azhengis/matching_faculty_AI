@@ -129,10 +129,9 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal
 
 <nav>
   <span class="nav-brand"><span>D</span>DePaul Faculty Matcher</span>
-  <a href="/baseline">Baseline Search</a>
-  <a href="/search">LLM Search</a>
-  <a href="/chat">Chatbot</a>
-  <a href="/advisor" class="active">Faculty Advisor</a>
+  <a href="/profile" class="active">Profile</a>
+  <a href="/advisor">Faculty Advisor</a>
+  <a href="#" onclick="logout(); return false;">Log out</a>
 </nav>
 
 <div class="main">
@@ -671,6 +670,11 @@ async function saveProfile() {
     status.className   = 'search-status err';
     btn.disabled       = false;
   }
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
 }
 
 // ── Utility ──────────────────────────────────────────────────────────────────

@@ -2,11 +2,8 @@
 """
 web_app.py
 ----------
-FastAPI server — five interfaces:
+FastAPI server — two interfaces (plus auth):
 
-  GET  /baseline  → SPECTER2 + keyword search (no LLM)
-  GET  /search    → Full 3-stage pipeline (SPECTER2 + cross-encoder + LLM)
-  GET  /chat      → General conversational chatbot
   GET  /login     → Log in / sign up
   GET  /profile   → Faculty profile setup (requires login)
   GET  /advisor   → Personalized AI research advisor (requires login + profile)
@@ -16,9 +13,6 @@ FastAPI server — five interfaces:
   POST /api/auth/logout — end a session
   GET  /api/auth/me     — current logged-in user, or 401
 
-  POST /api/baseline
-  POST /api/search
-  POST /api/chat
   POST /api/profile/search      — fuzzy name search in faculty DB
   GET  /api/profile/papers/{id} — papers already on file for a faculty member
   POST /api/profile/save        — create/update the logged-in user's profile (requires login)
@@ -192,32 +186,20 @@ app = FastAPI(title="DePaul Faculty Matcher", lifespan=lifespan)
 
 # ── Page routes ───────────────────────────────────────────────────────────────
 @app.get("/")
-async def root():
-    return RedirectResponse(url="/baseline")
-
-@app.get("/baseline", response_class=HTMLResponse)
-async def page_baseline():
-    return HTMLResponse((TEMPLATES / "baseline.html").read_text())
-
-@app.get("/search", response_class=HTMLResponse)
-async def page_search():
-    return HTMLResponse((TEMPLATES / "search.html").read_text())
-
-@app.get("/chat", response_class=HTMLResponse)
-async def page_chat():
-    return HTMLResponse((TEMPLATES / "chat.html").read_text())
+async def root(req: Request):
+    return RedirectResponse(url="/profile" if _current_user(req) else "/login")
 
 @app.get("/profile", response_class=HTMLResponse)
 async def page_profile():
     return HTMLResponse((TEMPLATES / "profile.html").read_text())
 
-@app.get("/advisor", response_class=HTMLResponse)
-async def page_advisor():
-    return HTMLResponse((TEMPLATES / "advisor.html").read_text())
-
 @app.get("/login", response_class=HTMLResponse)
 async def page_login():
     return HTMLResponse((TEMPLATES / "login.html").read_text())
+
+@app.get("/advisor", response_class=HTMLResponse)
+async def page_advisor():
+    return HTMLResponse((TEMPLATES / "advisor.html").read_text())
 
 
 @app.post("/api/auth/signup")
@@ -294,213 +276,6 @@ async def api_auth_me(req: Request):
     if not user:
         return JSONResponse({"error": "Not logged in"}, status_code=401)
     return JSONResponse(user)
-
-
-# ── Shared: format search results ─────────────────────────────────────────────
-def _format_results(results: list, qv, query: str, n_papers: int = 2) -> list:
-    out = []
-    for item in results:
-        person = item[0]
-        score  = item[1]
-        summary = person.get("research_summary", "")
-        sents   = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", summary) if len(s.strip()) > 40]
-        non_bio = [s for s in sents if not sm._is_bio_opener(s, person.get("name", ""))]
-        bio     = " ".join(non_bio[:2])[:400] if non_bio else summary[:350]
-        entry = {
-            "name":  person.get("name", ""),
-            "title": person.get("title", ""),
-            "dept":  person.get("department") or person.get("college", ""),
-            "email": person.get("email", ""),
-            "score": round(score * 100),
-            "tier":  sm._score_tier(score),
-            "bio":   bio,
-            "why":   person.get("_llm_reason") or sm.explain_match(query, summary, name=person.get("name", "")),
-        }
-        if _st.get("paper_idx") and qv is not None:
-            pubs = sm.find_top_papers(person.get("id"), qv, _st["paper_idx"], n=n_papers, min_sim=0.55)
-            if pubs:
-                entry["papers"] = [{"title": t, "year": y, "cited": c} for t, y, c, _ in pubs]
-        out.append(entry)
-    return out
-
-
-# ── POST /api/baseline ────────────────────────────────────────────────────────
-@app.post("/api/baseline")
-async def api_baseline(req: Request):
-    body  = await req.json()
-    query = (body.get("query") or "").strip()
-    if not query:
-        return JSONResponse({"error": "Empty query"}, status_code=400)
-    try:
-        clean  = sm.clean_query(query) or query
-        qv     = _st["model"].encode([clean], normalize_embeddings=True)[0]
-        scores = sm.hybrid_scores(clean, qv, _st["emb"], _st["people"])
-        top    = np.argsort(scores)[::-1][:sm.POOL_SIZE_STAGE1]
-        cands  = [(_st["people"][i], float(scores[i]), None) for i in top]
-        cands  = sm.cross_rerank(clean, cands, top_n=sm.POOL_SIZE_STAGE2)
-        results = sm.diversity_filter(cands)
-        return JSONResponse({"query_used": clean, "results": _format_results(results, qv, clean)})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# ── POST /api/search ──────────────────────────────────────────────────────────
-@app.post("/api/search")
-async def api_search(req: Request):
-    body  = await req.json()
-    query = (body.get("query") or "").strip()
-    mode  = body.get("mode", "semantic")
-    if not query:
-        return JSONResponse({"error": "Empty query"}, status_code=400)
-    try:
-        clean     = sm.clean_query(query) or query
-        expansion = sm.expand_query_with_llm(clean)
-        academic  = expansion["academic_jargon"]
-        kw_list   = expansion.get("keywords", [])
-        qv        = _st["model"].encode([academic], normalize_embeddings=True)[0]
-        if mode == "complementary":
-            scores   = sm.hybrid_scores(academic, qv, _st["emb"], _st["people"], kw_list=kw_list)
-            top_idx  = np.argsort(scores)[::-1][:sm.POOL_SIZE_COMP * 2]
-            excluded = {int(_st["labels"][i]) for i in top_idx}
-            cands    = [
-                (_st["people"][i], float(scores[i]), int(_st["labels"][i]))
-                for i in range(len(_st["people"]))
-                if _st["labels"][i] not in excluded
-            ]
-            cands.sort(key=lambda x: x[1], reverse=True)
-            cands = cands[:sm.POOL_SIZE_COMP]
-            cands = sm.llm_rerank(query, cands, expansion, mode="complementary")
-        else:
-            scores = sm.hybrid_scores(academic, qv, _st["emb"], _st["people"], kw_list=kw_list)
-            top    = np.argsort(scores)[::-1][:sm.POOL_SIZE_STAGE1]
-            cands  = [(_st["people"][i], float(scores[i]), None) for i in top]
-            cands  = sm.cross_rerank(academic, cands, top_n=sm.POOL_SIZE_STAGE2)
-            cands  = sm.llm_rerank(query, cands, expansion, mode="semantic")
-        results = sm.diversity_filter(cands)
-        return JSONResponse({
-            "query_used": clean, "expanded": academic,
-            "keywords": kw_list, "mode": mode,
-            "results": _format_results(results, qv, query),
-        })
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# ── General chatbot ───────────────────────────────────────────────────────────
-_CHAT_SYSTEM = """You are a warm, knowledgeable research advisor at DePaul University. \
-You help researchers, students, and external collaborators find the right DePaul faculty member.
-
-Call search_faculty when the user describes a research topic or asks for a collaborator/advisor.
-Before calling, translate the query into 4-8 academic/scientific terms.
-
-After EVERY response showing faculty results, end with EXACTLY:
-
-What would you like to do next?
-  [1] [specific refinement of current search]
-  [2] [find complementary faculty from a different field]
-  [3] Tell me more about [top result name]
-  [4] Start a completely new search
-
-Tone: conversational, warm, direct."""
-
-_CHAT_TOOLS = [{
-    "type": "function",
-    "function": {
-        "name": "search_faculty",
-        "description": "Search DePaul faculty. Translate lay language to academic terms first.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "4-8 academic terms for the topic."},
-                "mode":  {"type": "string", "enum": ["semantic", "complementary"],
-                          "description": "semantic = direct match. complementary = adjacent field."}
-            },
-            "required": ["query"]
-        }
-    }
-}]
-
-def _chat_search(query: str, mode: str = "semantic") -> dict:
-    try:
-        clean     = sm.clean_query(query) or query
-        expansion = sm.expand_query_with_llm(clean)
-        academic  = expansion["academic_jargon"]
-        kw_list   = expansion.get("keywords", [])
-        qv        = _st["model"].encode([academic], normalize_embeddings=True)[0]
-        if mode == "complementary":
-            scores   = sm.hybrid_scores(academic, qv, _st["emb"], _st["people"], kw_list=kw_list)
-            top_idx  = np.argsort(scores)[::-1][:sm.POOL_SIZE_COMP * 2]
-            excluded = {int(_st["labels"][i]) for i in top_idx}
-            cands    = [(_st["people"][i], float(scores[i]), int(_st["labels"][i]))
-                        for i in range(len(_st["people"])) if _st["labels"][i] not in excluded]
-            cands.sort(key=lambda x: x[1], reverse=True)
-            cands = cands[:sm.POOL_SIZE_COMP]
-            cands = sm.llm_rerank(query, cands, expansion, mode="complementary")
-        else:
-            scores = sm.hybrid_scores(academic, qv, _st["emb"], _st["people"], kw_list=kw_list)
-            top    = np.argsort(scores)[::-1][:sm.POOL_SIZE_STAGE1]
-            cands  = [(_st["people"][i], float(scores[i]), None) for i in top]
-            cands  = sm.cross_rerank(academic, cands, top_n=sm.POOL_SIZE_STAGE2)
-            cands  = sm.llm_rerank(query, cands, expansion, mode="semantic")
-        results = sm.diversity_filter(cands)
-        out = []
-        for item in results:
-            person, score = item[0], item[1]
-            summary = person.get("research_summary", "")
-            sents   = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", summary) if len(s.strip()) > 40]
-            non_bio = [s for s in sents if not sm._is_bio_opener(s, person.get("name", ""))]
-            bio     = " ".join(non_bio[:3])[:500] if non_bio else summary[:400]
-            entry = {
-                "name": person.get("name", ""), "title": person.get("title", ""),
-                "department": person.get("department") or person.get("college", ""),
-                "email": person.get("email", ""), "match_tier": sm._score_tier(score),
-                "match_pct": round(score * 100), "bio_summary": bio,
-                "why_match": person.get("_llm_reason") or sm.explain_match(query, summary, name=person.get("name", "")),
-            }
-            if _st.get("paper_idx"):
-                pubs = sm.find_top_papers(person.get("id"), qv, _st["paper_idx"], n=2, min_sim=0.55)
-                if pubs:
-                    entry["relevant_papers"] = [{"title": t, "year": y, "cited_by": c} for t, y, c, _ in pubs]
-            out.append(entry)
-        return {"query_used": clean, "mode": mode, "result_count": len(out), "results": out}
-    except Exception as e:
-        return {"error": str(e), "results": []}
-
-
-@app.post("/api/chat")
-async def api_chat(req: Request):
-    if not CHATBOT_MODEL or not _litellm:
-        return JSONResponse({"error": "Chatbot requires CHATBOT_MODEL env variable."}, status_code=503)
-    body       = await req.json()
-    message    = (body.get("message") or "").strip()
-    session_id = body.get("session_id") or str(uuid.uuid4())
-    if not message:
-        return JSONResponse({"error": "Empty message"}, status_code=400)
-    if session_id not in _sessions:
-        _sessions[session_id] = []
-    history  = _sessions[session_id]
-    history.append({"role": "user", "content": message})
-    messages = [{"role": "system", "content": _CHAT_SYSTEM}] + history
-    try:
-        while True:
-            resp   = _litellm.completion(model=CHATBOT_MODEL, max_tokens=1200, tools=_CHAT_TOOLS, messages=messages)
-            msg    = resp.choices[0].message
-            reason = resp.choices[0].finish_reason
-            entry: dict = {"role": "assistant", "content": msg.content}
-            if msg.tool_calls:
-                entry["tool_calls"] = [{"id": tc.id, "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                    for tc in msg.tool_calls]
-            history.append(entry); messages.append(entry)
-            if reason != "tool_calls":
-                return JSONResponse({"reply": msg.content or "", "session_id": session_id})
-            for tc in msg.tool_calls:
-                args = json.loads(tc.function.arguments)
-                result = _chat_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
-                tool_entry = {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)}
-                history.append(tool_entry); messages.append(tool_entry)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ── Profile APIs ──────────────────────────────────────────────────────────────

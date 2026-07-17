@@ -124,10 +124,9 @@ nav a.active{color:#fff;border-bottom-color:var(--scarlet)}
 
 <nav>
   <span class="nav-brand"><span>D</span>DePaul Faculty Matcher</span>
-  <a href="/baseline">Baseline Search</a>
-  <a href="/search">LLM Search</a>
-  <a href="/chat">Chatbot</a>
+  <a href="/profile">Profile</a>
   <a href="/advisor" class="active">Faculty Advisor</a>
+  <a href="#" onclick="logout(); return false;">Log out</a>
 </nav>
 
 <!-- No-profile screen (shown if no localStorage entry) -->
@@ -463,6 +462,11 @@ async function saveUpdatedProject() {
   } catch (e) {
     alert('Could not save: ' + e.message);
   }
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
 }
 
 // ── Research proposal panel ────────────────────────────────────────────────────
