@@ -3,7 +3,7 @@ import json
 import sqlite3
 
 import web_app
-from web_app import api_profile_save, api_profile_faculty_overrides, api_profile_get
+from web_app import api_profile_save, api_profile_faculty_overrides, api_profile_me
 
 
 def _run(coro):
@@ -15,11 +15,17 @@ def _body(response):
 
 
 class _FakeRequest:
-    def __init__(self, body):
-        self._body = body
+    def __init__(self, body=None, cookies=None):
+        self._body = body or {}
+        self.cookies = cookies or {}
 
     async def json(self):
         return self._body
+
+
+def _signup(email, password="hunter222"):
+    _run(web_app.api_auth_signup(_FakeRequest({"email": email, "password": password})))
+    return list(web_app._auth_sessions.keys())[-1]
 
 
 def _make_db(tmp_path):
@@ -46,17 +52,18 @@ def test_save_profile_persists_research_interests_and_upserts_override(tmp_path,
     db_path = _make_db(tmp_path)
     monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
     web_app._init_profiles_db()
+    web_app._auth_sessions.clear()
+    token = _signup("jane@depaul.edu")
 
     body = {
         "faculty_id": 1,
         "name": "Jane Doe",
-        "email": "jane@depaul.edu",
         "bio_text": "I study reinforcement learning.",
         "project_description": "A project.",
         "confirmed_paper_ids": [],
         "research_interests": ["reinforcement learning", "robotics"],
     }
-    response = _run(api_profile_save(_FakeRequest(body)))
+    response = _run(api_profile_save(_FakeRequest(body, cookies={"session_token": token})))
     assert response.status_code == 200
     profile_id = _body(response)["profile_id"]
 
@@ -81,17 +88,18 @@ def test_save_profile_skips_override_when_faculty_id_is_none(tmp_path, monkeypat
     db_path = _make_db(tmp_path)
     monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
     web_app._init_profiles_db()
+    web_app._auth_sessions.clear()
+    token = _signup("manual@example.com")
 
     body = {
         "faculty_id": None,
         "name": "Manual Person",
-        "email": "manual@example.com",
         "bio_text": "I am not in the directory.",
         "project_description": "A project.",
         "confirmed_paper_ids": [],
         "research_interests": ["ethics"],
     }
-    response = _run(api_profile_save(_FakeRequest(body)))
+    response = _run(api_profile_save(_FakeRequest(body, cookies={"session_token": token})))
     assert response.status_code == 200
 
     con = sqlite3.connect(db_path)
@@ -104,17 +112,18 @@ def test_save_profile_skips_override_when_faculty_email_is_blank(tmp_path, monke
     db_path = _make_db(tmp_path)
     monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
     web_app._init_profiles_db()
+    web_app._auth_sessions.clear()
+    token = _signup("noemail@example.com")
 
     body = {
         "faculty_id": 2,
         "name": "No Email Guy",
-        "email": "",
         "bio_text": "I study things.",
         "project_description": "A project.",
         "confirmed_paper_ids": [],
         "research_interests": [],
     }
-    response = _run(api_profile_save(_FakeRequest(body)))
+    response = _run(api_profile_save(_FakeRequest(body, cookies={"session_token": token})))
     assert response.status_code == 200  # profile save still succeeds
 
     con = sqlite3.connect(db_path)
@@ -127,8 +136,10 @@ def test_faculty_overrides_endpoint_returns_defaults_when_no_row(tmp_path, monke
     db_path = tmp_path / "test_faculty.db"
     monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
     web_app._init_profiles_db()
+    web_app._auth_sessions.clear()
+    token = _signup("someone@example.com")
 
-    response = _run(api_profile_faculty_overrides("nobody@example.com"))
+    response = _run(api_profile_faculty_overrides("nobody@example.com", _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
     assert _body(response) == {"self_bio": "", "self_research_interests": []}
 
@@ -137,6 +148,8 @@ def test_faculty_overrides_endpoint_returns_existing_row_case_insensitively(tmp_
     db_path = tmp_path / "test_faculty.db"
     monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
     web_app._init_profiles_db()
+    web_app._auth_sessions.clear()
+    token = _signup("someone@example.com")
     con = sqlite3.connect(db_path)
     con.execute(
         "INSERT INTO faculty_overrides (email, self_bio, self_research_interests) VALUES (?, ?, ?)",
@@ -145,7 +158,7 @@ def test_faculty_overrides_endpoint_returns_existing_row_case_insensitively(tmp_
     con.commit()
     con.close()
 
-    response = _run(api_profile_faculty_overrides("JANE@DEPAUL.EDU"))
+    response = _run(api_profile_faculty_overrides("JANE@DEPAUL.EDU", _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
     body = _body(response)
     assert body["self_bio"] == "I study RL."
@@ -156,18 +169,19 @@ def test_get_profile_includes_research_interests(tmp_path, monkeypatch):
     db_path = _make_db(tmp_path)
     monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
     web_app._init_profiles_db()
+    web_app._auth_sessions.clear()
+    token = _signup("jane@depaul.edu")
 
     save_response = _run(api_profile_save(_FakeRequest({
         "faculty_id": 1,
         "name": "Jane Doe",
-        "email": "jane@depaul.edu",
         "bio_text": "I study reinforcement learning.",
         "project_description": "A project.",
         "confirmed_paper_ids": [],
         "research_interests": ["reinforcement learning"],
-    })))
-    profile_id = _body(save_response)["profile_id"]
+    }, cookies={"session_token": token})))
+    assert save_response.status_code == 200
 
-    get_response = _run(api_profile_get(profile_id))
+    get_response = _run(api_profile_me(_FakeRequest(cookies={"session_token": token})))
     assert get_response.status_code == 200
     assert _body(get_response)["research_interests"] == ["reinforcement learning"]

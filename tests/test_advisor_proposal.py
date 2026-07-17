@@ -14,6 +14,20 @@ def _body(response):
     return json.loads(response.body)
 
 
+class _FakeRequest:
+    def __init__(self, body=None, cookies=None):
+        self._body = body or {}
+        self.cookies = cookies or {}
+
+    async def json(self):
+        return self._body
+
+
+def _signup(email, password="hunter222"):
+    _run(web_app.api_auth_signup(_FakeRequest({"email": email, "password": password})))
+    return list(web_app._auth_sessions.keys())[-1]
+
+
 def test_save_proposal_upserts_and_preserves_omitted_optional_fields(tmp_path, monkeypatch):
     db_path = tmp_path / "test_faculty.db"
     monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
@@ -85,8 +99,10 @@ def test_get_proposal_returns_empty_defaults_when_none_saved(tmp_path, monkeypat
     db_path = tmp_path / "test_faculty.db"
     monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
     web_app._init_profiles_db()
+    web_app._auth_sessions.clear()
+    token = _signup("nobody@depaul.edu")
 
-    response = _run(api_profile_proposal(1))
+    response = _run(api_profile_proposal(_FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
     assert _body(response) == {
         "background": "", "objectives": "", "research_questions": "",
@@ -98,8 +114,12 @@ def test_get_proposal_returns_saved_values(tmp_path, monkeypatch):
     db_path = tmp_path / "test_faculty.db"
     monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
     web_app._init_profiles_db()
+    web_app._auth_sessions.clear()
+    token = _signup("john@depaul.edu")
+    user_id = web_app._auth_sessions[token]
+
     con = sqlite3.connect(db_path)
-    con.execute("INSERT INTO profiles (id, name) VALUES (2, 'John Smith')")
+    con.execute("INSERT INTO profiles (id, name, user_id) VALUES (2, 'John Smith', ?)", (user_id,))
     con.execute(
         "INSERT INTO proposals (profile_id, background, objectives, research_questions, methodology) "
         "VALUES (2, 'bg', 'obj', 'rq', 'method')"
@@ -107,7 +127,7 @@ def test_get_proposal_returns_saved_values(tmp_path, monkeypatch):
     con.commit()
     con.close()
 
-    response = _run(api_profile_proposal(2))
+    response = _run(api_profile_proposal(_FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
     body = _body(response)
     assert body["background"] == "bg"

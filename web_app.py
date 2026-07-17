@@ -21,12 +21,12 @@ FastAPI server — five interfaces:
   POST /api/chat
   POST /api/profile/search      — fuzzy name search in faculty DB
   GET  /api/profile/papers/{id} — papers already on file for a faculty member
-  POST /api/profile/save        — create/update profile
-  GET  /api/profile/{id}        — load a saved profile
-  GET  /api/profile/faculty-overrides/{email} — existing self-edit overlay for a faculty email
+  POST /api/profile/save        — create/update the logged-in user's profile (requires login)
+  GET  /api/profile/me          — load the logged-in user's profile (requires login)
+  GET  /api/profile/faculty-overrides/{email} — existing self-edit overlay for a faculty email (requires login)
   POST /api/profile/extract-file — extract text from an uploaded .pdf/.docx
-  GET  /api/profile/{id}/proposal — saved research proposal for a profile, if any
-  POST /api/advisor/chat        — personalized advisor chat turn
+  GET  /api/profile/me/proposal — the logged-in user's saved research proposal, if any (requires login)
+  POST /api/advisor/chat        — personalized advisor chat turn (requires login)
 
 Run:
     uvicorn web_app:app --host 0.0.0.0 --port 8000
@@ -109,6 +109,16 @@ def _init_profiles_db():
         con.execute("ALTER TABLE profiles ADD COLUMN research_interests TEXT DEFAULT '[]'")
     except sqlite3.OperationalError:
         pass  # column already exists from a prior run
+
+    try:
+        con.execute("ALTER TABLE profiles ADD COLUMN user_id INTEGER REFERENCES users(id)")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+    # SQLite disallows `ALTER TABLE ... ADD COLUMN ... UNIQUE` outright (even on
+    # an empty table), so the UNIQUE constraint is enforced via a separate
+    # unique index instead. This still works as the ON CONFLICT(user_id)
+    # target for the upsert in api_profile_save.
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id)")
 
     # Self-edited overlay for faculty-facing profile editing. Keyed by email,
     # not faculty.id, because pipeline/4_db_setup.py deletes and re-inserts
@@ -530,35 +540,49 @@ async def api_faculty_papers(faculty_id: int):
 
 @app.post("/api/profile/save")
 async def api_profile_save(req: Request):
-    """Create a new profile. Returns profile_id stored in browser localStorage."""
+    """Create or update the logged-in user's profile (one profile per account)."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
     body         = await req.json()
     faculty_id   = body.get("faculty_id")
     name         = (body.get("name") or "").strip()
-    email        = (body.get("email") or "").strip()
     bio_text     = (body.get("bio_text") or "").strip()
     project_desc = (body.get("project_description") or "").strip()
     paper_ids    = json.dumps(body.get("confirmed_paper_ids", []))
     interests    = json.dumps(body.get("research_interests", []))
     if not name:
         return JSONResponse({"error": "Name required"}, status_code=400)
+
+    email = user["email"]
     con = sqlite3.connect(DB_PATH)
-    cur = con.execute(
+    con.execute(
         """INSERT INTO profiles
-           (faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-        (faculty_id, name, email, bio_text, project_desc, paper_ids, interests)
+               (user_id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(user_id) DO UPDATE SET
+               faculty_id = excluded.faculty_id,
+               name = excluded.name,
+               email = excluded.email,
+               bio_text = excluded.bio_text,
+               project_description = excluded.project_description,
+               confirmed_paper_ids = excluded.confirmed_paper_ids,
+               research_interests = excluded.research_interests,
+               updated_at = excluded.updated_at""",
+        (user["id"], faculty_id, name, email, bio_text, project_desc, paper_ids, interests)
     )
-    profile_id = cur.lastrowid
     con.commit()
+    profile_id = con.execute("SELECT id FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()[0]
 
     # Faculty self-edit overlay: only when this profile is linked to a real
-    # faculty record with a usable email. The key is the faculty record's own
-    # (authoritative) email, not the client-submitted `email` field, which is
-    # only trusted as an audit note (self_editor_email).
+    # faculty record AND the logged-in user's own account email matches that
+    # record's email — closing the earlier gap where anyone could edit
+    # anyone's listing now that real identity exists.
     if faculty_id:
         row = con.execute("SELECT email FROM faculty WHERE id = ?", (faculty_id,)).fetchone()
         faculty_email = (row[0] or "").strip().lower() if row else ""
-        if faculty_email:
+        if faculty_email and faculty_email == email.strip().lower():
             con.execute(
                 """INSERT INTO faculty_overrides
                        (email, self_bio, self_research_interests, self_editor_email, updated_at)
@@ -601,17 +625,21 @@ async def api_profile_extract_file(file: UploadFile = File(...)):
     return JSONResponse({"text": text})
 
 
-@app.get("/api/profile/{profile_id}")
-async def api_profile_get(profile_id: int):
-    """Load a saved profile by ID."""
+@app.get("/api/profile/me")
+async def api_profile_me(req: Request):
+    """Load the logged-in user's profile, if one exists yet."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
         "SELECT id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests "
-        "FROM profiles WHERE id = ?", (profile_id,)
+        "FROM profiles WHERE user_id = ?", (user["id"],)
     ).fetchone()
     con.close()
     if not row:
-        return JSONResponse({"error": "Profile not found"}, status_code=404)
+        return JSONResponse({"error": "No profile yet"}, status_code=404)
     pid, fid, name, email, bio, proj, papers_json, interests_json = row
     try:
         paper_ids = json.loads(papers_json or "[]")
@@ -635,8 +663,10 @@ async def api_profile_get(profile_id: int):
 
 
 @app.get("/api/profile/faculty-overrides/{email}")
-async def api_profile_faculty_overrides(email: str):
+async def api_profile_faculty_overrides(email: str, req: Request):
     """Look up any existing self-edit overlay for a faculty email, to pre-fill Step 2."""
+    if not _current_user(req):
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
         "SELECT self_bio, self_research_interests FROM faculty_overrides WHERE email = ?",
@@ -653,20 +683,29 @@ async def api_profile_faculty_overrides(email: str):
     return JSONResponse({"self_bio": self_bio or "", "self_research_interests": interests})
 
 
-@app.get("/api/profile/{profile_id}/proposal")
-async def api_profile_proposal(profile_id: int):
-    """Load the saved research proposal for a profile, if any."""
+@app.get("/api/profile/me/proposal")
+async def api_profile_proposal(req: Request):
+    """Load the logged-in user's saved research proposal, if any."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    empty = {
+        "background": "", "objectives": "", "research_questions": "",
+        "related_work": "", "methodology": "", "expected_outcomes": "",
+    }
     con = sqlite3.connect(DB_PATH)
+    profile_row = con.execute("SELECT id FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not profile_row:
+        con.close()
+        return JSONResponse(empty)
     row = con.execute(
         "SELECT background, objectives, research_questions, related_work, methodology, expected_outcomes "
-        "FROM proposals WHERE profile_id = ?", (profile_id,)
+        "FROM proposals WHERE profile_id = ?", (profile_row[0],)
     ).fetchone()
     con.close()
     if not row:
-        return JSONResponse({
-            "background": "", "objectives": "", "research_questions": "",
-            "related_work": "", "methodology": "", "expected_outcomes": "",
-        })
+        return JSONResponse(empty)
     background, objectives, research_questions, related_work, methodology, expected_outcomes = row
     return JSONResponse({
         "background": background or "", "objectives": objectives or "",
@@ -900,43 +939,44 @@ def _save_proposal(profile_id, args: dict) -> dict:
 
 @app.post("/api/advisor/chat")
 async def api_advisor_chat(req: Request):
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
     if not CHATBOT_MODEL or not _litellm:
         return JSONResponse({"error": "Advisor requires CHATBOT_MODEL env variable."}, status_code=503)
 
     body       = await req.json()
     message    = (body.get("message") or "").strip()
     session_id = body.get("session_id") or str(uuid.uuid4())
-    profile_id = body.get("profile_id")
 
     if not message:
         return JSONResponse({"error": "Empty message"}, status_code=400)
 
-    # Load profile from DB
+    # Load profile from DB (one profile per user, looked up by session identity)
     profile: dict = {}
-    if profile_id:
+    profile_id = None
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids "
+        "FROM profiles WHERE user_id = ?", (user["id"],)
+    ).fetchone()
+    con.close()
+    if row:
+        pid, fid, name, email, bio, proj, papers_json = row
+        profile_id = pid
         try:
-            con = sqlite3.connect(DB_PATH)
-            row = con.execute(
-                "SELECT id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids "
-                "FROM profiles WHERE id = ?", (int(profile_id),)
-            ).fetchone()
-            con.close()
-            if row:
-                pid, fid, name, email, bio, proj, papers_json = row
-                try:
-                    paper_ids = json.loads(papers_json or "[]")
-                except Exception:
-                    paper_ids = []
-                papers = []
-                if paper_ids:
-                    con = sqlite3.connect(DB_PATH)
-                    ph    = ",".join("?" * len(paper_ids))
-                    prows = con.execute(f"SELECT id, title, year FROM papers WHERE id IN ({ph})", paper_ids).fetchall()
-                    con.close()
-                    papers = [{"id": r[0], "title": r[1] or "", "year": r[2]} for r in prows]
-                profile = {"name": name, "bio": bio or "", "project_description": proj or "", "papers": papers}
+            paper_ids = json.loads(papers_json or "[]")
         except Exception:
-            pass
+            paper_ids = []
+        papers = []
+        if paper_ids:
+            con = sqlite3.connect(DB_PATH)
+            ph    = ",".join("?" * len(paper_ids))
+            prows = con.execute(f"SELECT id, title, year FROM papers WHERE id IN ({ph})", paper_ids).fetchall()
+            con.close()
+            papers = [{"id": r[0], "title": r[1] or "", "year": r[2]} for r in prows]
+        profile = {"name": name, "bio": bio or "", "project_description": proj or "", "papers": papers}
 
     system_prompt = _advisor_system_prompt(profile)
     session_key   = f"advisor_{session_id}"
