@@ -135,6 +135,28 @@ def test_add_document_without_extractable_text_still_stores_file(tmp_path, monke
     assert os.path.exists(os.path.join(uploads_dir, row[0]))
 
 
+def test_add_document_with_corrupted_pdf_still_stores_file(tmp_path, monkeypatch):
+    db_path, uploads_dir = _init_db(tmp_path, monkeypatch)
+    token = _signup_and_save_profile()
+
+    upload = UploadFile(file=io.BytesIO(b"not a real pdf"), filename="broken.pdf")
+
+    response = _run(web_app.api_profile_add_document(
+        req=_FakeRequest(cookies={"session_token": token}), file=upload, label=""
+    ))
+    assert response.status_code == 200
+    body = _body(response)
+    assert body["has_text"] is False
+
+    con = sqlite3.connect(db_path)
+    row = con.execute(
+        "SELECT stored_filename, extracted_text FROM profile_documents"
+    ).fetchone()
+    con.close()
+    assert row[1] is None
+    assert os.path.exists(os.path.join(uploads_dir, row[0]))
+
+
 def test_list_documents_returns_both_kinds(tmp_path, monkeypatch):
     _init_db(tmp_path, monkeypatch)
     token = _signup_and_save_profile()
@@ -213,3 +235,16 @@ def test_get_document_file_serves_only_owned_files(tmp_path, monkeypatch):
 
     response_401 = _run(web_app.api_profile_document_file(doc_id, _FakeRequest(cookies={})))
     assert response_401.status_code == 401
+
+    _run(web_app.api_auth_signup(_FakeRequest({"email": "other@depaul.edu", "password": "hunter222"})))
+    token_b = list(web_app._auth_sessions.keys())[-1]
+    _run(web_app.api_profile_save(_FakeRequest(
+        {"name": "Other User", "bio_text": "", "project_description": "",
+         "confirmed_paper_ids": [], "research_interests": []},
+        cookies={"session_token": token_b}
+    )))
+
+    response_cross_user = _run(web_app.api_profile_document_file(
+        doc_id, _FakeRequest(cookies={"session_token": token_b})
+    ))
+    assert response_cross_user.status_code == 404
