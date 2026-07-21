@@ -6,51 +6,73 @@
 <title>Log In — DePaul Faculty Matcher</title>
 <style>
 :root {
-  --navy:#003366; --scarlet:#C41E2E;
-  --ground:#EEF2F7; --surface:#FFFFFF;
-  --border:#CED6E2; --border-2:#B0BECE;
-  --ink:#16202E; --ink-2:#4C5B72; --ink-3:#8594A8;
+  --navy:#003366; --navy-lift:#0B4E92; --scarlet:#C41E2E;
+  --canvas:#F4F6FA; --surface:#FFFFFF; --paper:#FCFAF5;
+  --border:#E2E8F1; --border-2:#CBD5E4;
+  --ink:#111C2E; --ink-2:#55657E; --ink-3:#8D9AAE;
+  --r-sm:8px; --r-md:12px; --r-lg:16px;
+  --sh-sm:0 1px 2px rgba(17,28,46,.05);
+  --sh-lg:0 16px 40px rgba(17,28,46,.10);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--ground);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.65;min-height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:var(--surface);border:1.5px solid var(--border);padding:36px 40px;max-width:400px;width:calc(100% - 40px)}
-h2{font-family:Georgia,"Times New Roman",serif;font-size:21px;font-weight:normal;margin-bottom:6px}
-.sub{font-size:13.5px;color:var(--ink-2);margin-bottom:20px}
-.tabs{display:flex;gap:20px;margin-bottom:20px;border-bottom:1.5px solid var(--border)}
-.tab{padding:8px 2px;background:none;border:none;border-bottom:2px solid transparent;font-size:13.5px;font-weight:600;color:var(--ink-3);cursor:pointer;font-family:inherit}
-.tab.active{color:var(--navy);border-bottom-color:var(--navy)}
-.field{margin-bottom:14px}
-.field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em}
-.field input{width:100%;padding:10px 12px;font-size:14.5px;border:1.5px solid var(--border);background:var(--surface);color:var(--ink);outline:none;font-family:inherit}
-.field input:focus{border-color:var(--navy)}
-.btn{width:100%;padding:11px;background:var(--navy);color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px}
-.btn:hover{background:#004488}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-.status{min-height:18px;font-size:13px;color:#9B2020;margin-top:10px}
+body{background:var(--canvas);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.65;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+:focus-visible{outline:2px solid var(--navy-lift);outline-offset:2px;border-radius:4px}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+.shell{max-width:412px;width:100%}
+.brand{display:flex;align-items:center;gap:9px;margin-bottom:18px;padding-left:2px}
+.brand-mark{background:var(--scarlet);color:#fff;font-size:12px;font-weight:800;padding:4px 9px;border-radius:7px;letter-spacing:-.01em}
+.brand-name{font-size:14px;font-weight:700;color:var(--navy);letter-spacing:-.01em}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-lg);padding:34px 36px}
+h2{font-family:Georgia,"Times New Roman",serif;font-size:24px;font-weight:normal;margin-bottom:6px;letter-spacing:-.015em}
+.sub{font-size:14px;color:var(--ink-2);margin-bottom:22px}
+.tabs{display:flex;gap:4px;margin-bottom:22px;background:var(--canvas);border-radius:10px;padding:4px}
+.tab{flex:1;padding:8px 10px;background:none;border:none;border-radius:7px;font-size:13.5px;font-weight:600;color:var(--ink-2);cursor:pointer;font-family:inherit;transition:background .15s,color .15s}
+.tab.active{color:var(--navy);background:var(--surface);box-shadow:var(--sh-sm)}
+.field{margin-bottom:15px}
+.field label{display:block;font-size:11.5px;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em}
+.field input{width:100%;padding:11px 13px;font-size:14.5px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;transition:border-color .15s,box-shadow .15s}
+.field input:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
+.btn{width:100%;padding:12px;background:var(--navy);color:#fff;border:none;border-radius:var(--r-sm);font-size:14.5px;font-weight:600;cursor:pointer;margin-top:6px;box-shadow:var(--sh-sm);transition:background .15s,transform .1s}
+.btn:hover{background:var(--navy-lift)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.status{min-height:18px;font-size:13px;color:#9B2020;margin-top:11px}
+.footnote{text-align:center;font-size:12.5px;color:var(--ink-3);margin-top:16px}
 </style>
 </head>
 <body>
 
-<div class="card">
-  <h2 id="form-title">Log in</h2>
-  <p class="sub" id="form-sub">Welcome back to the DePaul Faculty Matcher.</p>
-
-  <div class="tabs">
-    <button type="button" class="tab active" id="tab-login" onclick="setMode('login')">Log in</button>
-    <button type="button" class="tab" id="tab-signup" onclick="setMode('signup')">Sign up</button>
+<div class="shell">
+  <div class="brand">
+    <span class="brand-mark">D</span>
+    <span class="brand-name">DePaul Faculty Matcher</span>
   </div>
 
-  <div class="field">
-    <label>Email</label>
-    <input type="email" id="email-input" placeholder="you@depaul.edu">
-  </div>
-  <div class="field">
-    <label>Password</label>
-    <input type="password" id="password-input" placeholder="••••••••">
+  <div class="card">
+    <h2 id="form-title">Log in</h2>
+    <p class="sub" id="form-sub">Welcome back to the DePaul Faculty Matcher.</p>
+
+    <div class="tabs">
+      <button type="button" class="tab active" id="tab-login" onclick="setMode('login')">Log in</button>
+      <button type="button" class="tab" id="tab-signup" onclick="setMode('signup')">Sign up</button>
+    </div>
+
+    <div class="field">
+      <label for="email-input">Email</label>
+      <input type="email" id="email-input" placeholder="you@depaul.edu" autocomplete="email">
+    </div>
+    <div class="field">
+      <label for="password-input">Password</label>
+      <input type="password" id="password-input" placeholder="••••••••" autocomplete="current-password">
+    </div>
+
+    <button class="btn" id="btn-submit" onclick="submitForm()">Log in</button>
+    <div class="status" id="status"></div>
   </div>
 
-  <button class="btn" id="btn-submit" onclick="submitForm()">Log in</button>
-  <div class="status" id="status"></div>
+  <p class="footnote">Find collaborators across DePaul, and build your research proposal as you talk.</p>
 </div>
 
 <script>

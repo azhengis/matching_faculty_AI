@@ -3,293 +3,219 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Faculty Advisor — DePaul Faculty Matcher</title>
+<title>Advisor — DePaul Faculty Matcher</title>
 <style>
-:root {
-  --navy:#003366; --scarlet:#C41E2E;
-  --ground:#EEF2F7; --surface:#FFFFFF;
-  --border:#CED6E2; --border-2:#B0BECE;
-  --ink:#16202E; --ink-2:#4C5B72; --ink-3:#8594A8;
-  --green:#1A6B3A; --green-bg:#E8F5ED;
-  --amber:#7A4F00; --amber-bg:#FDF5E5;
-  --teal:#0D5C63; --teal-bg:#E4F4F5;
-}
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{background:var(--ground);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+{{SHELL_CSS}}
 
-/* ── Nav ── */
-nav{background:var(--navy);display:flex;align-items:stretch;padding:0 28px;gap:0;flex-shrink:0}
-.nav-brand{color:#fff;font-size:13.5px;font-weight:700;display:flex;align-items:center;padding-right:20px;margin-right:4px;border-right:1px solid rgba(255,255,255,.15);white-space:nowrap}
-.nav-brand span{background:var(--scarlet);color:#fff;font-size:11px;font-weight:800;padding:2px 6px;margin-right:8px}
-nav a{color:rgba(255,255,255,.6);text-decoration:none;font-size:13px;padding:0 16px;display:flex;align-items:center;border-bottom:2px solid transparent}
-nav a:hover{color:#fff}
-nav a.active{color:#fff;border-bottom-color:var(--scarlet)}
+/* ── Project bar ── */
+.project-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:11px 26px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;flex-shrink:0}
+.project-bar-eyebrow{font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3)}
+.project-bar-title{font-size:14px;font-weight:700;color:var(--navy);flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.project-bar a{font-size:12.5px;text-decoration:none;border:1px solid var(--border);border-radius:999px;padding:5px 13px;color:var(--navy-lift);white-space:nowrap}
+.project-bar a:hover{background:var(--canvas)}
 
-/* ── No profile screen ── */
-.no-profile{flex:1;display:flex;align-items:center;justify-content:center;padding:40px 28px}
-.no-profile-card{background:var(--surface);border:1.5px solid var(--border);padding:36px 40px;max-width:480px;text-align:center}
-.no-profile-card h2{font-family:Georgia,serif;font-size:20px;font-weight:normal;margin-bottom:10px}
-.no-profile-card p{font-size:14px;color:var(--ink-2);line-height:1.6;margin-bottom:22px}
-.btn-scarlet{padding:12px 28px;background:var(--scarlet);color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block}
-.btn-scarlet:hover{background:#a01828}
-
-/* ── Profile bar (shown when profile is loaded) ── */
-.profile-bar{background:var(--teal-bg);border-bottom:1.5px solid #B3D9DB;padding:10px 24px;flex-shrink:0;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.profile-bar-name{font-size:13.5px;font-weight:700;color:var(--teal)}
-.profile-bar-meta{font-size:12.5px;color:var(--ink-2);flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.profile-bar-actions{display:flex;gap:10px;flex-shrink:0}
-.btn-bar-link{background:none;border:none;font-size:12.5px;color:var(--teal);cursor:pointer;text-decoration:underline;font-family:inherit;padding:0;white-space:nowrap}
-.btn-bar-link:hover{color:var(--navy)}
-
-.topic-blocks{flex:1;display:flex;align-items:center;justify-content:center;padding:40px 28px}
-.topic-blocks-inner{max-width:520px;width:100%}
-.topic-blocks-inner h2{font-family:Georgia,serif;font-size:22px;font-weight:normal;margin-bottom:8px;color:var(--ink)}
-.topic-blocks-desc{font-size:14px;color:var(--ink-2);margin-bottom:24px}
-.topic-block-list{display:flex;flex-direction:column;gap:10px}
-.topic-block{background:var(--surface);border:1.5px solid var(--border);padding:16px 18px;text-align:left;cursor:pointer;font-family:inherit}
-.topic-block:hover{border-color:var(--teal);background:var(--teal-bg)}
-.topic-block-title{font-size:15px;font-weight:700;color:var(--ink);margin-bottom:4px}
-.topic-block-desc{font-size:13px;color:var(--ink-2)}
-
-/* ── Two-column layout: chat + live proposal panel ── */
+/* ── Two-column: proposal document (left) + chat (right) ──
+   The proposal is the artifact; the chat is how it gets made. */
 .advisor-layout{flex:1;display:flex;min-height:0}
-.chat-wrap{flex:1;display:flex;flex-direction:column;max-width:820px;width:100%;margin:0 auto;padding:0 20px;min-height:0}
+.chat-wrap{flex:1;display:flex;flex-direction:column;max-width:760px;width:100%;margin:0 auto;padding:0 24px;min-height:0}
+.advisor-shell{display:flex;flex-direction:column;height:100vh}
 
-.proposal-sidepanel{width:380px;flex-shrink:0;border-left:1.5px solid var(--border);background:var(--surface);overflow-y:auto;padding:22px;display:none}
-.proposal-sidepanel.visible{display:block}
-.proposal-sidepanel h3{font-family:Georgia,serif;font-size:17px;font-weight:normal;color:var(--ink);margin-bottom:4px}
-.proposal-sidepanel-sub{font-size:12px;color:var(--ink-3);margin-bottom:18px}
-.proposal-section{margin-bottom:18px}
-.proposal-section:last-child{margin-bottom:0}
-.proposal-section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--teal);margin-bottom:6px}
-.proposal-section-body{font-size:13.5px;color:var(--ink-2);line-height:1.6}
-.proposal-section-body p{margin-bottom:6px}
+.proposal-sidepanel{width:min(44vw,600px);flex-shrink:0;border-right:1px solid var(--border);background:var(--paper);overflow-y:auto;padding:28px 32px 40px}
+.proposal-doc-head{margin-bottom:24px;padding-bottom:18px;border-bottom:1px solid var(--paper-line)}
+.proposal-sidepanel h3{font-family:Georgia,serif;font-size:22px;font-weight:normal;margin-bottom:5px;letter-spacing:-.01em}
+.proposal-sidepanel-sub{font-size:12.5px;color:var(--ink-3)}
+
+.proposal-section{margin-bottom:26px;position:relative}
+.proposal-section:last-of-type{margin-bottom:0}
+.proposal-section-head{display:flex;align-items:center;gap:9px;margin-bottom:9px;flex-wrap:wrap}
+.proposal-section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--navy)}
+.proposal-section-body{font-family:Georgia,serif;font-size:15.5px;color:#2A3648;line-height:1.75}
+.proposal-section-body.typing::after{content:'';display:inline-block;width:2px;height:1em;background:var(--scarlet);margin-left:2px;vertical-align:text-bottom;animation:caret-blink .8s steps(1) infinite}
+@keyframes caret-blink{50%{opacity:0}}
+.proposal-section-body p{margin-bottom:9px}
 .proposal-section-body p:last-child{margin-bottom:0}
-.proposal-section-body ul{padding-left:18px}
-.proposal-section-body li{margin-bottom:3px}
-.proposal-empty{font-size:13px;color:var(--ink-3);font-style:italic}
-.btn-download{display:block;margin-top:20px;padding:11px 16px;background:var(--teal);color:#fff;border:none;font-size:13.5px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center}
-.btn-download:hover{background:#0A4A50}
-.btn-download.disabled{opacity:.4;pointer-events:none}
+.proposal-section-body ul{padding-left:20px;margin:0}
+.proposal-section-body li{margin-bottom:5px}
+.proposal-empty{font-family:Georgia,serif;font-size:14.5px;color:var(--ink-3);font-style:italic;line-height:1.7}
 
-@media(max-width:900px){.advisor-layout{flex-direction:column}.proposal-sidepanel{width:100%;border-left:none;border-top:1.5px solid var(--border);max-height:40vh}}
+.btn-edit-section{background:none;border:none;padding:2px 7px;border-radius:6px;font-family:inherit;font-size:11.5px;color:var(--ink-3);cursor:pointer;opacity:0;transition:opacity .15s,background .15s,color .15s}
+.proposal-section:hover .btn-edit-section,.btn-edit-section:focus-visible{opacity:1}
+.btn-edit-section:hover{background:#EFE9DC;color:var(--navy)}
+.edited-chip{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--teal);background:var(--teal-bg);border-radius:999px;padding:2px 8px;white-space:nowrap}
+.btn-release{background:none;border:none;padding:0;font-family:inherit;font-size:11.5px;color:var(--navy-lift);text-decoration:underline;cursor:pointer}
+.btn-release:hover{color:var(--navy)}
+
+.section-editor{width:100%;font-family:Georgia,serif;font-size:15.5px;line-height:1.75;color:#2A3648;background:var(--surface);border:1.5px solid var(--navy-lift);border-radius:var(--r-sm);padding:11px 13px;outline:none;resize:vertical;min-height:130px;box-shadow:var(--sh-sm)}
+.editor-actions{display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap}
+.btn-save-section{padding:7px 15px;background:var(--navy);color:#fff;border:none;border-radius:var(--r-sm);font-size:13px;font-weight:600;font-family:inherit;cursor:pointer}
+.btn-save-section:hover{background:var(--navy-lift)}
+.btn-cancel-section{padding:7px 13px;background:none;border:1px solid var(--border-2);border-radius:var(--r-sm);font-size:13px;color:var(--ink-2);font-family:inherit;cursor:pointer}
+.btn-cancel-section:hover{background:var(--canvas)}
+.editor-hint{font-size:11.5px;color:var(--ink-3);margin-left:auto}
+
+.btn-download{display:block;margin-top:30px;padding:12px 16px;background:var(--navy);color:#fff;border:none;border-radius:var(--r-sm);font-size:13.5px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center;box-shadow:var(--sh-sm);transition:background .15s}
+.btn-download:hover{background:var(--navy-lift)}
+.btn-download.disabled{opacity:.35;pointer-events:none}
 
 /* ── Messages ── */
-.messages{flex:1;overflow-y:auto;padding:24px 0 16px;display:flex;flex-direction:column;gap:16px;min-height:0}
-
-/* ── Bubbles ── */
+.messages{flex:1;overflow-y:auto;padding:24px 0 16px;display:flex;flex-direction:column;gap:18px;min-height:0}
 .msg{display:flex;gap:10px;align-items:flex-start;max-width:100%}
 .msg.user{flex-direction:row-reverse}
-
-.bubble{padding:12px 16px;max-width:74%;line-height:1.6;font-size:14.5px}
-.msg.user .bubble{background:var(--navy);color:#fff;border-radius:2px 0 2px 2px}
-.msg.bot  .bubble{background:var(--surface);color:var(--ink);border:1.5px solid var(--border);border-radius:0 2px 2px 2px}
-
-.avatar{width:30px;height:30px;border-radius:2px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-top:2px}
+.bubble{padding:13px 17px;max-width:74%;line-height:1.65;font-size:14.5px;border-radius:var(--r-md)}
+.msg.user .bubble{background:var(--navy);color:#fff;border-bottom-right-radius:4px}
+.msg.bot  .bubble{background:var(--surface);color:var(--ink);border:1px solid var(--border);box-shadow:var(--sh-sm);border-bottom-left-radius:4px}
+.avatar{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-top:2px}
 .msg.user .avatar{background:var(--scarlet);color:#fff}
-.msg.bot  .avatar{background:var(--teal);color:#fff}
-
-/* ── Bubble text formatting ── */
+.msg.bot  .avatar{background:var(--navy);color:#fff}
 .bubble p{margin-bottom:8px}
 .bubble p:last-child{margin-bottom:0}
 .bubble strong{font-weight:600}
-.msg.bot .bubble strong{color:var(--ink)}
 .bubble em{font-style:italic}
 .bubble ul,.bubble ol{padding-left:18px;margin-bottom:8px}
 .bubble li{margin-bottom:3px}
 .bubble h3{font-size:14.5px;font-weight:700;margin:10px 0 4px}
 
-/* ── Faculty result cards (rendered inside chat) ── */
-.result-cards{display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:100%}
-.rc{background:var(--ground);border:1.5px solid var(--border);padding:13px 15px}
-.rc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:5px}
-.rc-name{font-size:14px;font-weight:700;color:var(--ink)}
-.rc-meta{font-size:12px;color:var(--ink-2);margin-bottom:4px}
-.rc-tier{padding:2px 7px;font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;border-radius:2px;white-space:nowrap;flex-shrink:0}
-.tier-Strong{background:var(--green-bg);color:var(--green)}
-.tier-Good{background:#E5EEF8;color:var(--navy)}
-.tier-Possible{background:var(--amber-bg);color:var(--amber)}
-.tier-Weak{background:#F5EAEA;color:#7A3030}
-.rc-why{font-size:12.5px;color:var(--ink-2);line-height:1.5;padding:7px 10px;background:var(--surface);border-left:2px solid var(--scarlet);margin-bottom:6px}
-.rc-papers{font-size:11.5px;color:var(--ink-3);line-height:1.5}
-.rc-papers span{display:block;padding:2px 0}
-.rc-email{font-size:12px;color:var(--navy);text-decoration:none}
-.rc-email:hover{text-decoration:underline}
+.result-cards{display:flex;flex-direction:column;gap:9px;margin-top:12px;max-width:100%}
 
-/* ── Typing indicator ── */
 .typing{display:none}
-.typing .bubble{padding:12px 16px}
 .dot{display:inline-block;width:6px;height:6px;background:var(--border-2);border-radius:50%;margin:0 2px;animation:bounce .9s infinite}
 .dot:nth-child(2){animation-delay:.15s}
 .dot:nth-child(3){animation-delay:.3s}
 @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
 
-/* ── Input bar ── */
-.input-bar{padding:14px 0 20px;flex-shrink:0;display:flex;gap:8px}
-.chat-input{flex:1;padding:11px 14px;font-size:15px;border:1.5px solid var(--border);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;resize:none;max-height:120px;overflow-y:auto}
-.chat-input:focus{border-color:var(--teal)}
-.btn-send{padding:11px 20px;background:var(--teal);color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;align-self:flex-end;white-space:nowrap;flex-shrink:0}
-.btn-send:hover{background:#0A4A50}
-.btn-send:disabled{opacity:.5;cursor:not-allowed}
+.input-bar{padding:14px 0 20px;flex-shrink:0;display:flex;gap:9px}
+.chat-input{flex:1;padding:12px 15px;font-size:15px;border:1px solid var(--border-2);border-radius:var(--r-md);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;resize:none;max-height:120px;overflow-y:auto;box-shadow:var(--sh-sm);transition:border-color .15s,box-shadow .15s}
+.chat-input:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
+.btn-send{padding:12px 22px;background:var(--navy);color:#fff;border:none;border-radius:var(--r-md);font-size:14px;font-weight:600;cursor:pointer;align-self:flex-end;white-space:nowrap;flex-shrink:0;box-shadow:var(--sh-sm);transition:background .15s}
+.btn-send:hover{background:var(--navy-lift)}
+.btn-send:disabled{opacity:.45;cursor:not-allowed}
 
-/* ── Option buttons ── */
-.options{display:flex;flex-direction:column;gap:6px;margin-top:10px}
-.opt-btn{background:var(--surface);border:1.5px solid var(--border);padding:9px 14px;text-align:left;font-size:13.5px;color:var(--ink);cursor:pointer;font-family:inherit;display:flex;gap:10px;align-items:baseline}
-.opt-btn:hover{background:var(--teal-bg);border-color:var(--teal)}
-.opt-num{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;color:var(--ink-3);flex-shrink:0;min-width:18px}
+.options{display:flex;flex-direction:column;gap:7px;margin-top:11px}
+.opt-btn{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 15px;text-align:left;font-size:13.5px;color:var(--ink);cursor:pointer;font-family:inherit;display:flex;gap:11px;align-items:baseline;box-shadow:var(--sh-sm);transition:border-color .15s,background .15s}
+.opt-btn:hover{background:var(--canvas);border-color:var(--navy-lift)}
+.opt-num{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;color:var(--scarlet);flex-shrink:0;min-width:18px}
 
-/* ── Misc ── */
-.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
-
-@media(max-width:560px){.bubble{max-width:92%}.profile-bar{flex-direction:column;align-items:flex-start}}
+@media(max-width:1080px){
+  .advisor-shell{height:auto;min-height:100vh}
+  .advisor-layout{flex-direction:column-reverse}
+  .proposal-sidepanel{width:100%;border-right:none;border-top:1px solid var(--border);max-height:44vh;padding:22px 20px 28px}
+  .chat-wrap{min-height:60vh}
+}
+@media(max-width:560px){.bubble{max-width:92%}}
 </style>
 </head>
 <body>
+<div class="app">
+{{SIDEBAR}}
+<div class="content page-wide">
+  <div class="advisor-shell">
 
-<nav>
-  <span class="nav-brand"><span>D</span>DePaul Faculty Matcher</span>
-  <a href="/profile">Profile</a>
-  <a href="/advisor" class="active">Faculty Advisor</a>
-  <a href="#" onclick="logout(); return false;">Log out</a>
-</nav>
-
-<!-- No-profile screen (shown if logged in but no profile saved yet) -->
-<div class="no-profile" id="no-profile" style="display:none">
-  <div class="no-profile-card">
-    <h2>Set up your faculty profile first</h2>
-    <p>The Faculty Advisor is personalized for each researcher. It reads your bio, your confirmed publications, and your current project — then gives targeted AI integration suggestions and finds the right collaborators across all of DePaul.</p>
-    <a class="btn-scarlet" href="/profile">Create my profile &rarr;</a>
-  </div>
-</div>
-
-<!-- Profile bar (injected once profile loads) -->
-<div id="profile-bar" style="display:none" class="profile-bar">
-  <span class="profile-bar-name" id="pb-name"></span>
-  <span class="profile-bar-meta" id="pb-meta"></span>
-  <div class="profile-bar-actions">
-    <button class="btn-bar-link" onclick="updateProject()">Update my project</button>
-    <button class="btn-bar-link" onclick="window.location='/profile'">Edit profile</button>
-  </div>
-</div>
-
-<!-- Topic blocks (shown after profile loads, before entering a conversation) -->
-<div class="topic-blocks" id="topic-blocks" style="display:none">
-  <div class="topic-blocks-inner">
-    <h2>What would you like to talk about?</h2>
-    <p class="topic-blocks-desc">Pick a topic to start a focused conversation with the advisor.</p>
-    <div class="topic-block-list">
-      <button class="topic-block" onclick="startBlock('research')">
-        <div class="topic-block-title">Tell me about my new research</div>
-        <div class="topic-block-desc">Build out a research proposal and find AI/data-science collaborators.</div>
-      </button>
+    <div class="project-bar" id="project-bar" style="display:none">
+      <span class="project-bar-eyebrow">Project</span>
+      <span class="project-bar-title" id="pb-title"></span>
+      <a id="pb-open" href="#">Open project</a>
+      <a href="/projects">All projects</a>
     </div>
-  </div>
-</div>
 
-<!-- Chat + live proposal panel (hidden until a topic block is chosen) -->
-<div class="advisor-layout" id="advisor-layout" style="display:none">
-  <div class="chat-wrap" id="chat-wrap" style="display:none">
-    <div class="messages" id="messages">
-      <!-- Typing indicator -->
-      <div class="msg bot typing" id="typing">
-        <div class="avatar">AI</div>
-        <div class="bubble">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    <div id="loading" style="padding:40px"><span class="spinner"></span>Loading…</div>
+
+    <div class="advisor-layout" id="advisor-layout" style="display:none">
+      <div class="proposal-sidepanel" id="proposal-sidepanel">
+        <div class="proposal-doc-head">
+          <h3>Research Proposal</h3>
+          <div class="proposal-sidepanel-sub">Sections appear as you settle them. Edit any section to make it your own.</div>
+        </div>
+        <div id="proposal-sections"></div>
+        <a class="btn-download disabled" id="btn-download-proposal" href="#" onclick="return onDownloadProposal(event)">Download as Word doc</a>
+      </div>
+
+      <div class="chat-wrap" id="chat-wrap">
+        <div class="messages" id="messages">
+          <div class="msg bot typing" id="typing">
+            <div class="avatar">AI</div>
+            <div class="bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+          </div>
+        </div>
+        <div class="input-bar">
+          <textarea class="chat-input" id="chat-input" rows="1"
+                    placeholder="Answer the advisor, or ask anything about your research…"></textarea>
+          <button class="btn-send" id="btn-send" onclick="sendMessage()">Send</button>
         </div>
       </div>
     </div>
 
-    <div class="input-bar">
-      <textarea class="chat-input" id="chat-input" rows="1"
-                placeholder="Ask anything about your research, AI integration, or potential collaborators..."></textarea>
-      <button class="btn-send" id="btn-send" onclick="sendMessage()">Send</button>
-    </div>
-  </div>
-
-  <div class="proposal-sidepanel" id="proposal-sidepanel">
-    <h3>Your Research Proposal</h3>
-    <div class="proposal-sidepanel-sub">Updates live as you talk with the advisor.</div>
-    <div id="proposal-sections"></div>
-    <a class="btn-download disabled" id="btn-download-proposal" href="/api/profile/me/proposal/download" onclick="return onDownloadProposal(event)">Download as Word doc</a>
   </div>
 </div>
-
-<!-- Update project mini-form (hidden by default) -->
-<div id="update-panel" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:none;align-items:center;justify-content:center">
-  <div style="background:#fff;padding:28px;max-width:520px;width:calc(100% - 40px);border:1.5px solid var(--border)">
-    <div style="font-size:16px;font-weight:700;margin-bottom:12px">Update your research project</div>
-    <textarea id="update-textarea" style="width:100%;min-height:130px;padding:11px 14px;font-size:14px;border:1.5px solid var(--border);font-family:inherit;outline:none;resize:vertical;margin-bottom:12px" placeholder="Describe what you're working on..."></textarea>
-    <div style="display:flex;gap:10px">
-      <button onclick="saveUpdatedProject()" style="padding:10px 20px;background:var(--teal);color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer">Save &amp; Continue</button>
-      <button onclick="closeUpdatePanel()" style="padding:10px 20px;background:var(--surface);border:1.5px solid var(--border);font-size:14px;cursor:pointer;font-family:inherit">Cancel</button>
-    </div>
-  </div>
 </div>
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let _sessionId  = null;
-let _busy       = false;
-let _profile    = null;
-let _proposal   = null;
+let _busy      = false;
+let _projectId = null;
+let _proposal  = null;
+
+const PROPOSAL_LABELS = {
+  background:'Background', objectives:'Objectives', research_questions:'Research Questions',
+  related_work:'Related Work', methodology:'Methodology', expected_outcomes:'Expected Outcomes',
+};
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init() {
+  let me;
   try {
-    const meRes = await fetch('/api/auth/me');
-    if (!meRes.ok) throw new Error('not logged in');
-  } catch (e) {
-    window.location.href = '/login';
-    return;
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) throw new Error('not logged in');
+    me = await res.json();
+  } catch (e) { window.location.href = '/login'; return; }
+  document.getElementById('sidebar-email').textContent = me.email || '';
+
+  try {
+    const res = await fetch('/api/profile/me');
+    if (!res.ok) { window.location.href = '/profile'; return; }
+  } catch (e) { window.location.href = '/profile'; return; }
+
+  // The advisor always works on one project. Without one, go pick or make one.
+  _projectId = new URLSearchParams(location.search).get('project');
+  if (!_projectId) {
+    try {
+      const res  = await fetch('/api/projects');
+      const data = await res.json();
+      const list = data.projects || [];
+      if (!list.length) { window.location.href = '/projects'; return; }
+      _projectId = list[0].id;                       // most recently touched
+      history.replaceState({}, '', '/advisor?project=' + _projectId);
+    } catch (e) { window.location.href = '/projects'; return; }
   }
 
-  // Load profile from server
+  let project;
   try {
-    const res  = await fetch('/api/profile/me');
-    if (!res.ok) throw new Error('no profile yet');
-    _profile = await res.json();
-  } catch (e) {
-    document.getElementById('no-profile').style.display = 'flex';
-    return;
-  }
+    const res = await fetch('/api/projects/' + _projectId);
+    project   = await res.json();
+    if (!res.ok) throw new Error(project.error || 'no project');
+  } catch (e) { window.location.href = '/projects'; return; }
 
-  // Show profile bar
-  const bar  = document.getElementById('profile-bar');
-  const pname = document.getElementById('pb-name');
-  const pmeta = document.getElementById('pb-meta');
-  pname.textContent = _profile.name;
-  const projPreview = (_profile.project_description || '').slice(0, 120);
-  pmeta.textContent = projPreview ? 'Project: ' + projPreview + (projPreview.length >= 120 ? '…' : '') : 'No project description yet.';
-  bar.style.display = 'flex';
+  document.getElementById('pb-title').textContent = project.title;
+  document.getElementById('pb-open').href = '/projects?open=' + _projectId;
+  document.getElementById('project-bar').style.display = 'flex';
+  document.getElementById('btn-download-proposal').href =
+    `/api/projects/${_projectId}/proposal/download`;
 
-  // Show the topic-blocks menu instead of jumping straight into a conversation
-  document.getElementById('topic-blocks').style.display = 'flex';
-})();
-
-// ── Topic blocks ──────────────────────────────────────────────────────────────
-function startBlock(block) {
-  document.getElementById('topic-blocks').style.display = 'none';
+  document.getElementById('loading').style.display        = 'none';
   document.getElementById('advisor-layout').style.display = 'flex';
-  document.getElementById('chat-wrap').style.display = 'flex';
-  if (block === 'research') {
-    document.getElementById('proposal-sidepanel').classList.add('visible');
-  }
-  sendInitialGreeting();
-}
 
-// ── Initial greeting (sent automatically on page load) ────────────────────────
-async function sendInitialGreeting() {
-  await callAdvisorAPI('hello');
-}
+  _proposal = project.proposal || null;
+  renderProposalPanel();
+
+  await callAdvisorAPI(project.session_id
+    ? 'I’m back — where were we?'
+    : 'Hello — I just filled in the intake for this project.');
+})();
 
 // ── Send a message ─────────────────────────────────────────────────────────────
 async function sendMessage(text) {
   const input = document.getElementById('chat-input');
   const msg   = (text !== undefined ? text : input.value).trim();
   if (!msg || _busy) return;
-
   input.value = '';
   input.style.height = 'auto';
   addUserBubble(msg);
@@ -300,28 +226,20 @@ async function callAdvisorAPI(message) {
   _busy = true;
   document.getElementById('btn-send').disabled = true;
   showTyping(true);
-
   try {
     const res  = await fetch('/api/advisor/chat', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        message,
-        session_id: _sessionId
-      })
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ message, project_id: _projectId })
     });
     const data = await res.json();
-
     if (data.error) {
-      addBotRaw('<div style="color:#9B2020;font-size:13.5px;padding:2px 0">' +
-        esc(data.error) + '</div>');
+      addBotRaw('<div class="bubble" style="color:#9B2020">' + esc(data.error) + '</div>');
     } else {
-      if (data.session_id) _sessionId = data.session_id;
       renderBotReply(data.reply || '');
       checkProposal();
     }
   } catch (e) {
-    addBotRaw('<div style="color:#9B2020">Network error: ' + esc(e.message) + '</div>');
+    addBotRaw('<div class="bubble" style="color:#9B2020">Network error: ' + esc(e.message) + '</div>');
   } finally {
     _busy = false;
     document.getElementById('btn-send').disabled = false;
@@ -329,133 +247,63 @@ async function callAdvisorAPI(message) {
   }
 }
 
-// ── Render a bot reply with inline faculty cards if present ───────────────────
+// ── Rendering the reply ───────────────────────────────────────────────────────
 function renderBotReply(raw) {
-  const { main, options, cards } = parseReply(raw);
-
-  // Main text bubble
-  let html = markdownToHtml(main);
-
-  // Faculty cards block
-  let cardsHtml = '';
-  if (cards.length) {
-    cardsHtml = '<div class="result-cards">' + cards.map(facultyCard).join('') + '</div>';
-  }
-
-  // Option buttons
+  const { main, options } = parseReply(raw);
   let optsHtml = '';
   if (options.length) {
-    optsHtml = '<div class="options">' +
-      options.map(o =>
-        `<button class="opt-btn" onclick="sendMessage(${JSON.stringify(o.text)})">` +
-        `<span class="opt-num">[${o.num}]</span>${esc(o.text)}</button>`
-      ).join('') + '</div>';
+    optsHtml = '<div class="options">' + options.map(o =>
+      `<button class="opt-btn" onclick="sendMessage(${esc(JSON.stringify(o.text))})">` +
+      `<span class="opt-num">[${o.num}]</span>${esc(o.text)}</button>`
+    ).join('') + '</div>';
   }
-
-  addBotRaw(`<div class="bubble">${html}</div>${cardsHtml}${optsHtml}`);
+  addBotRaw(`<div class="bubble">${markdownToHtml(main)}</div>${optsHtml}`);
 }
 
-// ── Parse the reply text: extract faculty JSON blocks and option lines ─────────
 function parseReply(text) {
-  const options = [];
-  const cards   = [];
-  const mainLines = [];
-  const lines   = text.split('\n');
-  let inJson    = false;
-  let jsonBuf   = [];
-  let inOpts    = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // Detect JSON fence for faculty cards: ```json or a line that starts with [{ or {
-    // The advisor returns faculty as structured JSON in the tool, but the LLM may
-    // describe them in plain text. We look for numbered result patterns instead.
-    const optMatch = line.match(/^\s*\[(\d+)\]\s*(.+)$/);
-    if (optMatch) {
-      inOpts = true;
-      options.push({ num: optMatch[1], text: optMatch[2].trim() });
-      continue;
-    }
-
-    if (!inOpts) {
-      mainLines.push(line);
-    }
+  const options = [], mainLines = [];
+  let inOpts = false;
+  for (const line of String(text || '').split('\n')) {
+    const m = line.match(/^\s*\[(\d+)\]\s*(.+)$/);
+    if (m) { inOpts = true; options.push({ num: m[1], text: m[2].trim() }); continue; }
+    if (!inOpts) mainLines.push(line);
   }
-
-  const mainText = mainLines.join('\n')
-    .replace(/What would you like to do next\?\s*$/i, '')
-    .trimEnd();
-
-  return { main: mainText, options, cards };
+  const main = mainLines.join('\n').replace(/What would you like to do next\?\s*$/i, '').trimEnd();
+  return { main, options };
 }
 
 function markdownToHtml(text) {
-  // Escape HTML first, then restore markdown formatting
   let h = esc(text);
-  // Headers: ### → bold paragraph
-  h = h.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
-  h = h.replace(/^##\s+(.+)$/gm, '<h3>$1</h3>');
-  // Bold, italic
-  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  h = h.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  // Bullet lists
+  h = h.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>').replace(/^##\s+(.+)$/gm, '<h3>$1</h3>');
+  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>');
   h = h.replace(/^[-•]\s+(.+)$/gm, '<li>$1</li>');
   h = h.replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>' + m + '</ul>');
-  // Numbered lists
   h = h.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
-  // Double newline → paragraph break
-  h = h.replace(/\n{2,}/g, '</p><p>');
-  // Single newline → line break
-  h = h.replace(/\n/g, '<br>');
+  h = h.replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>');
   return '<p>' + h + '</p>';
-}
-
-// ── Faculty card HTML (for cards returned from search results in bot message) ─
-function facultyCard(p) {
-  const why = p.why_match ? `<div class="rc-why">${esc(p.why_match)}</div>` : '';
-  const papers = (p.relevant_papers || []).map(pub =>
-    `<span>› ${esc(pub.title)}${pub.year ? ' (' + pub.year + ')' : ''}${pub.cited_by ? ' · ' + pub.cited_by + ' citations' : ''}</span>`
-  ).join('');
-  return `
-  <div class="rc">
-    <div class="rc-top">
-      <div>
-        <div class="rc-name">${esc(p.name || '')}</div>
-        <div class="rc-meta">${esc(p.title || '')}${p.title && p.department ? ' · ' : ''}${esc(p.department || '')}</div>
-      </div>
-      <span class="rc-tier tier-${p.match_tier || 'Possible'}">${p.match_tier || ''} · ${p.match_pct || ''}%</span>
-    </div>
-    ${why}
-    ${papers ? `<div class="rc-papers">${papers}</div>` : ''}
-    ${p.email ? `<div style="margin-top:6px"><a class="rc-email" href="mailto:${esc(p.email)}">${esc(p.email)}</a></div>` : ''}
-  </div>`;
 }
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 function addUserBubble(text) {
   const messages = document.getElementById('messages');
-  const typing   = document.getElementById('typing');
   const div = document.createElement('div');
   div.className = 'msg user';
   div.innerHTML = `<div class="avatar">You</div><div class="bubble">${esc(text)}</div>`;
-  messages.insertBefore(div, typing);
+  messages.insertBefore(div, document.getElementById('typing'));
   scrollBottom();
 }
 
 function addBotRaw(html) {
   const messages = document.getElementById('messages');
-  const typing   = document.getElementById('typing');
   const div = document.createElement('div');
   div.className = 'msg bot';
   div.innerHTML = `<div class="avatar">AI</div><div>${html}</div>`;
-  messages.insertBefore(div, typing);
+  messages.insertBefore(div, document.getElementById('typing'));
   scrollBottom();
 }
 
 function showTyping(show) {
-  const t = document.getElementById('typing');
-  t.style.display = show ? 'flex' : 'none';
+  document.getElementById('typing').style.display = show ? 'flex' : 'none';
   if (show) scrollBottom();
 }
 
@@ -465,55 +313,8 @@ function scrollBottom() {
 }
 
 function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-// ── Update project panel ──────────────────────────────────────────────────────
-function updateProject() {
-  const panel = document.getElementById('update-panel');
-  document.getElementById('update-textarea').value = _profile ? _profile.project_description || '' : '';
-  panel.style.display = 'flex';
-}
-
-function closeUpdatePanel() {
-  document.getElementById('update-panel').style.display = 'none';
-}
-
-async function saveUpdatedProject() {
-  const newProj = document.getElementById('update-textarea').value.trim();
-  if (!newProj) return;
-
-  // Update the logged-in user's profile with the new description
-  const payload = {
-    faculty_id:           _profile ? _profile.faculty_id : null,
-    name:                 _profile ? _profile.name : '',
-    bio_text:             _profile ? _profile.bio || '' : '',
-    project_description:  newProj,
-    confirmed_paper_ids:  _profile ? _profile.confirmed_paper_ids || [] : [],
-  };
-
-  try {
-    const res  = await fetch('/api/profile/save', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (data.profile_id) {
-      if (_profile) _profile.project_description = newProj;
-
-      // Update bar preview
-      const pmeta = document.getElementById('pb-meta');
-      pmeta.textContent = 'Project: ' + newProj.slice(0, 120) + (newProj.length > 120 ? '…' : '');
-
-      closeUpdatePanel();
-
-      // Tell the advisor the project was updated
-      sendMessage('I just updated my project description. It now reads: "' + newProj + '"');
-    }
-  } catch (e) {
-    alert('Could not save: ' + e.message);
-  }
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 async function logout() {
@@ -521,79 +322,218 @@ async function logout() {
   window.location.href = '/login';
 }
 
-// ── Research proposal panel ────────────────────────────────────────────────────
-const PROPOSAL_LABELS = {
-  background: 'Background',
-  objectives: 'Objectives',
-  research_questions: 'Research Questions',
-  related_work: 'Related Work',
-  methodology: 'Methodology',
-  expected_outcomes: 'Expected Outcomes',
-};
+// ── Research proposal panel ───────────────────────────────────────────────────
+let _proposalPrev    = {};
+let _proposalTimers  = {};
+let _editingSections = new Set();   // open editors — never re-render these out from under the writer
+let _noAnimate       = new Set();   // your own edits appear instantly, not typed back at you
 
 async function checkProposal() {
   try {
-    const res  = await fetch('/api/profile/me/proposal');
-    const data = await res.json();
-    _proposal = data;
+    const res  = await fetch(`/api/projects/${_projectId}/proposal`);
+    _proposal  = await res.json();
     renderProposalPanel();
-  } catch (e) {
-    // Network hiccup — the panel just won't update this turn.
-  }
+  } catch (e) { /* network hiccup — the panel just won't update this turn */ }
 }
 
-function proposalTextToHtml(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const isBulletLine = l => l.startsWith('- ') || l.startsWith('• ');
-  let html = '';
-  let bulletBuffer = [];
-  const flushBullets = () => {
-    if (bulletBuffer.length) {
-      html += '<ul>' + bulletBuffer.map(l => `<li>${esc(l.replace(/^[-•]\s+/, ''))}</li>`).join('') + '</ul>';
-      bulletBuffer = [];
-    }
-  };
-  for (const line of lines) {
-    if (isBulletLine(line)) {
-      bulletBuffer.push(line);
-    } else {
-      flushBullets();
-      html += `<p>${esc(line)}</p>`;
-    }
-  }
-  flushBullets();
-  return html;
+function isLocked(k) {
+  return !!(_proposal && Array.isArray(_proposal.edited_sections) && _proposal.edited_sections.includes(k));
 }
 
 function renderProposalPanel() {
-  const container = document.getElementById('proposal-sections');
-  const sections = Object.keys(PROPOSAL_LABELS)
-    .map(k => {
-      const val = (_proposal && _proposal[k]) ? _proposal[k].trim() : '';
-      if (!val) return '';
-      return `<div class="proposal-section"><div class="proposal-section-label">${esc(PROPOSAL_LABELS[k])}</div><div class="proposal-section-body">${proposalTextToHtml(val)}</div></div>`;
-    })
-    .join('');
-  container.innerHTML = sections || '<div class="proposal-empty">Nothing yet — it will appear here as we talk.</div>';
+  const container  = document.getElementById('proposal-sections');
+  const keys       = Object.keys(PROPOSAL_LABELS);
+  const hasContent = keys.some(k => (_proposal && _proposal[k] || '').trim());
 
-  const hasContent = Object.keys(PROPOSAL_LABELS).some(k => (_proposal && _proposal[k] || '').trim());
   document.getElementById('btn-download-proposal').classList.toggle('disabled', !hasContent);
+
+  if (!hasContent && !_editingSections.size) {
+    container.innerHTML = '<div class="proposal-empty">Nothing yet. As you and the advisor settle each part — the background, your objectives, the methodology — it appears here.</div>';
+    _proposalPrev = {};
+    return;
+  }
+  const placeholder = container.querySelector('.proposal-empty');
+  if (placeholder) placeholder.remove();
+
+  for (const k of keys) {
+    if (_editingSections.has(k)) continue;   // you're writing in it — hands off
+
+    const val = (_proposal && _proposal[k]) ? _proposal[k].trim() : '';
+    let sectionEl = document.getElementById('proposal-section-' + k);
+
+    if (!val) {
+      if (sectionEl) sectionEl.remove();
+      delete _proposalPrev[k];
+      continue;
+    }
+
+    const locked = isLocked(k);
+    if (!sectionEl) {
+      sectionEl = document.createElement('div');
+      sectionEl.className = 'proposal-section';
+      sectionEl.id = 'proposal-section-' + k;
+      sectionEl.innerHTML = `<div class="proposal-section-head">${sectionHeadInner(k, locked)}</div><div class="proposal-section-body"></div>`;
+      insertSectionInOrder(container, sectionEl, k, keys);
+      paintBody(sectionEl.querySelector('.proposal-section-body'), val, k, locked);
+      _proposalPrev[k] = val;
+      continue;
+    }
+
+    sectionEl.querySelector('.proposal-section-head').innerHTML = sectionHeadInner(k, locked);
+    if (val !== _proposalPrev[k]) {
+      paintBody(sectionEl.querySelector('.proposal-section-body'), val, k, locked);
+      _proposalPrev[k] = val;
+    }
+  }
+}
+
+function sectionHeadInner(k, locked) {
+  const label = `<span class="proposal-section-label">${esc(PROPOSAL_LABELS[k])}</span>`;
+  if (locked) {
+    return label + `<span class="edited-chip">Edited by you</span>` +
+      `<button class="btn-release" onclick="releaseSection('${k}')">let the advisor update this</button>`;
+  }
+  return label + `<button class="btn-edit-section" onclick="editSection('${k}')">Edit</button>`;
+}
+
+// Keep sections in order even though they arrive out of order.
+function insertSectionInOrder(container, sectionEl, key, keys) {
+  const idx = keys.indexOf(key);
+  for (let i = idx + 1; i < keys.length; i++) {
+    const next = document.getElementById('proposal-section-' + keys[i]);
+    if (next) { container.insertBefore(sectionEl, next); return; }
+  }
+  container.appendChild(sectionEl);
+}
+
+// Advisor-written text types itself in; your own text appears immediately.
+function paintBody(body, val, k, locked) {
+  if (locked || _noAnimate.has(k)) {
+    if (_proposalTimers[k]) { clearTimeout(_proposalTimers[k]); delete _proposalTimers[k]; }
+    body.classList.remove('typing');
+    body.innerHTML = proposalTextToHtml(val);
+    _noAnimate.delete(k);
+    return;
+  }
+  typewriterReveal(body, val, k);
+}
+
+function typewriterReveal(el, fullText, key) {
+  if (_proposalTimers[key]) clearTimeout(_proposalTimers[key]);
+  el.classList.add('typing');
+
+  const totalMs      = Math.min(1800, Math.max(400, fullText.length * 9));
+  const steps        = Math.min(fullText.length, 60);
+  const charsPerStep = Math.max(1, Math.ceil(fullText.length / steps));
+  const intervalMs   = totalMs / steps;
+
+  let i = 0;
+  const tick = () => {
+    i += charsPerStep;
+    if (i >= fullText.length) {
+      el.innerHTML = proposalTextToHtml(fullText);
+      el.classList.remove('typing');
+      delete _proposalTimers[key];
+      return;
+    }
+    el.textContent = fullText.slice(0, i);
+    _proposalTimers[key] = setTimeout(tick, intervalMs);
+  };
+  tick();
+}
+
+function proposalTextToHtml(text) {
+  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const isBullet = l => l.startsWith('- ') || l.startsWith('• ');
+  let html = '', buf = [];
+  const flush = () => {
+    if (buf.length) {
+      html += '<ul>' + buf.map(l => `<li>${esc(l.replace(/^[-•]\s+/, ''))}</li>`).join('') + '</ul>';
+      buf = [];
+    }
+  };
+  for (const line of lines) {
+    if (isBullet(line)) buf.push(line);
+    else { flush(); html += `<p>${esc(line)}</p>`; }
+  }
+  flush();
+  return html;
+}
+
+// ── Editing a section by hand ─────────────────────────────────────────────────
+function editSection(k) {
+  const sectionEl = document.getElementById('proposal-section-' + k);
+  if (!sectionEl) return;
+  if (_proposalTimers[k]) { clearTimeout(_proposalTimers[k]); delete _proposalTimers[k]; }
+
+  _editingSections.add(k);
+  const current = (_proposal && _proposal[k]) ? _proposal[k].trim() : '';
+  const body    = sectionEl.querySelector('.proposal-section-body');
+  body.classList.remove('typing');
+  body.innerHTML =
+    `<textarea class="section-editor" id="editor-${k}"></textarea>
+     <div class="editor-actions">
+       <button class="btn-save-section" onclick="saveSection('${k}')">Save</button>
+       <button class="btn-cancel-section" onclick="cancelSection('${k}')">Cancel</button>
+       <span class="editor-hint">Once you save, the advisor stops rewriting this.</span>
+     </div>`;
+
+  const ta = document.getElementById('editor-' + k);
+  ta.value = current;                        // set as value, never as HTML
+  ta.style.height = 'auto';
+  ta.style.height = Math.max(130, ta.scrollHeight + 2) + 'px';
+  ta.focus();
+}
+
+function cancelSection(k) {
+  _editingSections.delete(k);
+  _noAnimate.add(k);
+  _proposalPrev[k] = null;
+  renderProposalPanel();
+}
+
+async function saveSection(k) {
+  const ta = document.getElementById('editor-' + k);
+  if (!ta) return;
+  const text = ta.value.trim();
+  try {
+    const res  = await fetch(`/api/projects/${_projectId}/proposal`, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ section: k, text })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not save');
+    if (!_proposal) _proposal = {};
+    _proposal[k] = text;
+    _proposal.edited_sections = data.edited_sections || [];
+  } catch (e) {
+    alert('Could not save this section: ' + e.message);
+    return;
+  }
+  _editingSections.delete(k);
+  _noAnimate.add(k);
+  _proposalPrev[k] = null;
+  renderProposalPanel();
+}
+
+async function releaseSection(k) {
+  try {
+    const res  = await fetch(`/api/projects/${_projectId}/proposal`, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ section: k, release: true })
+    });
+    const data = await res.json();
+    if (!res.ok) return;
+    if (!_proposal) _proposal = {};
+    _proposal.edited_sections = data.edited_sections || [];
+  } catch (e) { return; }
+  _noAnimate.add(k);
+  renderProposalPanel();
 }
 
 function onDownloadProposal(event) {
   const hasContent = Object.keys(PROPOSAL_LABELS).some(k => (_proposal && _proposal[k] || '').trim());
-  if (!hasContent) {
-    event.preventDefault();
-    return false;
-  }
-  // Let the browser's normal navigation to the download URL proceed
-  // (the server sends Content-Disposition: attachment, so this downloads
-  // the file rather than navigating away). Hide the panel shortly after
-  // so the chat gets the full width back — the proposal itself is never
-  // deleted, it's always still viewable on the profile page.
-  setTimeout(() => {
-    document.getElementById('proposal-sidepanel').classList.remove('visible');
-  }, 300);
+  if (!hasContent) { event.preventDefault(); return false; }
   return true;
 }
 
@@ -604,10 +544,7 @@ chatInput.addEventListener('input', () => {
   chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
 });
 chatInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 </script>
 </body>
