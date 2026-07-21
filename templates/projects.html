@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projects — DePaul Faculty Matcher</title>
+<style>
+{{SHELL_CSS}}
+
+.project-row{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:20px 22px;margin-bottom:13px;transition:border-color .15s,box-shadow .15s}
+.project-row:hover{border-color:var(--border-2);box-shadow:var(--sh-md)}
+.project-row-top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:13px}
+.project-row-title{font-family:Georgia,serif;font-size:19px;line-height:1.35;letter-spacing:-.01em}
+.project-row-actions{display:flex;gap:8px;flex-shrink:0}
+.project-row-people{font-size:13px;color:var(--ink-2);margin-top:13px;padding-top:13px;border-top:1px solid var(--border)}
+.btn-danger-quiet{background:none;border:none;font-size:12.5px;color:var(--ink-3);cursor:pointer;font-family:inherit;text-decoration:underline;padding:0}
+.btn-danger-quiet:hover{color:var(--scarlet)}
+
+/* ── Intake: each question names the section it becomes ── */
+.intake-head{margin-bottom:26px}
+.feeds{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--teal);background:var(--teal-bg);border-radius:999px;padding:3px 10px;margin-left:9px;vertical-align:2px}
+.intake-q{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:20px 22px;margin-bottom:14px}
+.intake-q label{display:block;font-size:15.5px;font-weight:650;margin-bottom:4px;line-height:1.45}
+.intake-hint{font-size:13px;color:var(--ink-3);margin-bottom:12px}
+.intake-actions{display:flex;gap:11px;align-items:center;margin-top:22px;flex-wrap:wrap}
+.intake-note{font-size:13px;color:var(--ink-3)}
+.err{color:#9B2020;font-size:13.5px;min-height:19px;margin-top:10px}
+
+/* ── Detail view ── */
+.detail-proposal{background:var(--paper);border:1px solid var(--paper-line);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:28px 30px}
+.detail-section{margin-bottom:22px}
+.detail-section:last-child{margin-bottom:0}
+.detail-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--navy);margin-bottom:7px}
+.detail-body{font-family:Georgia,serif;font-size:15.5px;color:#2A3648;line-height:1.75}
+.detail-body p{margin-bottom:9px}
+.detail-body p:last-child{margin-bottom:0}
+.detail-body ul{padding-left:20px;margin:0}
+.detail-body li{margin-bottom:5px}
+.back-link{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;text-decoration:none;margin-bottom:18px}
+.back-link:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="app">
+{{SIDEBAR}}
+<div class="content">
+  <div class="page">
+    <div id="loading"><span class="spinner"></span>Loading…</div>
+
+    <!-- ── List view ── -->
+    <div id="list-view" style="display:none">
+      <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap">
+        <div>
+          <h1>Projects</h1>
+          <p class="lede">Each project has its own proposal, its own conversation, and its own collaborators.</p>
+        </div>
+        <button class="btn btn-accent" onclick="showIntake()">New project</button>
+      </div>
+      <div id="list-slot"></div>
+    </div>
+
+    <!-- ── Intake view ── -->
+    <div id="intake-view" style="display:none">
+      <a class="back-link" href="#" onclick="showList(); return false;">← All projects</a>
+      <div class="page-head intake-head">
+        <div class="eyebrow">New project</div>
+        <h1>Tell us about the research</h1>
+        <p class="lede">Each answer becomes a section of your proposal. Rough notes are fine — the advisor works through them with you next, and you can edit anything later.</p>
+      </div>
+      <div id="intake-slot"></div>
+      <div class="intake-actions">
+        <button class="btn btn-accent" id="btn-create" onclick="createProject()">Start the conversation →</button>
+        <span class="intake-note">You can leave questions blank and fill them in while you talk.</span>
+      </div>
+      <div class="err" id="intake-err"></div>
+    </div>
+
+    <!-- ── Detail view ── -->
+    <div id="detail-view" style="display:none">
+      <a class="back-link" href="#" onclick="showList(); return false;">← All projects</a>
+      <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap">
+        <div>
+          <div class="eyebrow">Project</div>
+          <h1 id="detail-title"></h1>
+        </div>
+        <div style="display:flex;gap:9px;flex-shrink:0">
+          <a class="btn btn-accent" id="detail-chat">Continue the conversation</a>
+          <a class="btn btn-quiet" id="detail-download">Download</a>
+        </div>
+      </div>
+      <div class="split">
+        <div id="detail-proposal-slot"></div>
+        <aside class="rail" id="detail-people-section" style="display:none">
+          <div>
+            <div class="section-head"><h2>People this matched</h2></div>
+            <div id="detail-people-slot" style="display:flex;flex-direction:column;gap:12px"></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+  </div>
+</div>
+</div>
+
+<script>
+const SECTION_LABELS = {
+  background:'Background', objectives:'Objectives', research_questions:'Research questions',
+  related_work:'Related work', methodology:'Methodology', expected_outcomes:'Expected outcomes',
+};
+const SECTION_ORDER = Object.keys(SECTION_LABELS);
+
+let _projects = [], _intake = [];
+
+(async function init() {
+  let me;
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) throw new Error('not logged in');
+    me = await res.json();
+  } catch (e) { window.location.href = '/login'; return; }
+  document.getElementById('sidebar-email').textContent = me.email || '';
+
+  try {
+    const res = await fetch('/api/profile/me');
+    if (!res.ok) { window.location.href = '/profile'; return; }
+  } catch (e) { window.location.href = '/profile'; return; }
+
+  await loadProjects();
+  document.getElementById('loading').style.display = 'none';
+
+  const open = new URLSearchParams(location.search).get('open');
+  if (open) { showDetail(open); return; }
+  if (!_projects.length) { showIntake(); return; }
+  showList();
+})();
+
+async function loadProjects() {
+  try {
+    const res  = await fetch('/api/projects');
+    const data = await res.json();
+    _projects  = data.projects || [];
+    _intake    = data.intake   || [];
+  } catch (e) { _projects = []; }
+}
+
+function hideAll() {
+  ['list-view','intake-view','detail-view'].forEach(id =>
+    document.getElementById(id).style.display = 'none');
+}
+
+// ── List ─────────────────────────────────────────────────────────────────────
+function showList() {
+  hideAll();
+  document.getElementById('list-view').style.display = 'block';
+  history.replaceState({}, '', '/projects');
+
+  const slot = document.getElementById('list-slot');
+  if (!_projects.length) {
+    slot.innerHTML = `
+      <div class="empty">
+        <h3>No projects yet</h3>
+        <p>A project is one piece of research. Answer a few questions about it, talk it through with the advisor, and it becomes a proposal — with collaborators attached.</p>
+        <button class="btn btn-accent" onclick="showIntake()">Start your first project</button>
+      </div>`;
+    return;
+  }
+  slot.innerHTML = _projects.map(p => `
+    <div class="project-row">
+      <div class="project-row-top">
+        <div class="project-row-title">${esc(p.title)}</div>
+        <div class="project-row-actions">
+          <a class="btn btn-primary btn-sm" href="/advisor?project=${p.id}">
+            ${p.started_chat ? 'Continue' : 'Talk it through'}</a>
+          <button class="btn btn-quiet btn-sm" onclick="showDetail(${p.id})">Open</button>
+        </div>
+      </div>
+      <div class="chips">${sectionChips(p.sections_written)}</div>
+      <div class="project-row-people">
+        ${peopleLine(p)}
+        <button class="btn-danger-quiet" style="float:right" onclick="deleteProject(${p.id})">Delete</button>
+      </div>
+    </div>`).join('');
+}
+
+function peopleLine(p) {
+  if (!p.match_names || !p.match_names.length) {
+    return p.started_chat ? 'No collaborators surfaced yet.'
+                          : 'Not started yet — the advisor finds collaborators once you talk it through.';
+  }
+  const shown = p.match_names.slice(0, 3).map(esc).join(', ');
+  return `Matched with ${shown}${p.match_names.length > 3 ? ' and others' : ''}.`;
+}
+
+function sectionChips(written) {
+  const set = new Set(written || []);
+  return SECTION_ORDER.map(k =>
+    `<span class="chip ${set.has(k) ? 'chip-on' : 'chip-off'}">${SECTION_LABELS[k]}</span>`
+  ).join('');
+}
+
+// ── Intake ───────────────────────────────────────────────────────────────────
+function showIntake() {
+  hideAll();
+  document.getElementById('intake-view').style.display = 'block';
+  document.getElementById('intake-err').textContent = '';
+
+  document.getElementById('intake-slot').innerHTML = _intake.map(q => `
+    <div class="intake-q">
+      <label for="q-${q.key}">${esc(q.label)}<span class="feeds">${esc(q.feeds)}</span></label>
+      <div class="intake-hint">${esc(q.hint)}</div>
+      <textarea class="textarea" id="q-${q.key}" placeholder="Your notes…"></textarea>
+    </div>`).join('');
+}
+
+async function createProject() {
+  const btn = document.getElementById('btn-create');
+  const err = document.getElementById('intake-err');
+  const intake = {};
+  _intake.forEach(q => {
+    const el = document.getElementById('q-' + q.key);
+    if (el) intake[q.key] = el.value;
+  });
+
+  if (!Object.values(intake).some(v => (v || '').trim())) {
+    err.textContent = 'Answer at least one question so the advisor has somewhere to start.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  err.textContent = '';
+  try {
+    const res  = await fetch('/api/projects', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ intake })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not start the project');
+    window.location.href = `/advisor?project=${data.project_id}`;
+  } catch (e) {
+    err.textContent = e.message;
+    btn.disabled = false;
+    btn.textContent = 'Start the conversation →';
+  }
+}
+
+async function deleteProject(id) {
+  if (!confirm('Delete this project, its proposal, and its matches? This cannot be undone.')) return;
+  try {
+    await fetch('/api/projects/' + id, { method: 'DELETE' });
+    await loadProjects();
+    showList();
+  } catch (e) { alert('Could not delete: ' + e.message); }
+}
+
+// ── Detail ───────────────────────────────────────────────────────────────────
+async function showDetail(id) {
+  let data;
+  try {
+    const res = await fetch('/api/projects/' + id);
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Not found');
+  } catch (e) { showList(); return; }
+
+  hideAll();
+  document.getElementById('detail-view').style.display = 'block';
+  history.replaceState({}, '', '/projects?open=' + id);
+
+  document.getElementById('detail-title').textContent = data.title;
+  document.getElementById('detail-chat').href = `/advisor?project=${id}`;
+  document.getElementById('detail-chat').textContent =
+    data.session_id ? 'Continue the conversation' : 'Talk it through';
+
+  const dl = document.getElementById('detail-download');
+  const hasContent = SECTION_ORDER.some(k => (data.proposal[k] || '').trim());
+  dl.href = `/api/projects/${id}/proposal/download`;
+  dl.style.display = hasContent ? '' : 'none';
+
+  const written = SECTION_ORDER.filter(k => (data.proposal[k] || '').trim());
+  document.getElementById('detail-proposal-slot').innerHTML = written.length
+    ? '<div class="detail-proposal">' + written.map(k => `
+        <div class="detail-section">
+          <div class="detail-label">${SECTION_LABELS[k]}</div>
+          <div class="detail-body">${textToHtml(data.proposal[k])}</div>
+        </div>`).join('') + '</div>'
+    : `<div class="empty"><h3>Nothing written yet</h3>
+         <p>Talk this project through with the advisor and the proposal builds itself here.</p>
+         <a class="btn btn-accent" href="/advisor?project=${id}">Talk it through</a></div>`;
+
+  const people = data.matches || [];
+  // '' restores the .rail class's flex layout; 'block' would flatten its gaps.
+  document.getElementById('detail-people-section').style.display = people.length ? '' : 'none';
+  document.getElementById('detail-people-slot').innerHTML = people.map(m => `
+    <div class="person">
+      <div class="person-top">
+        <div class="person-name">${esc(m.name)}</div>
+        ${m.match_tier ? `<span class="tier tier-${esc(m.match_tier)}">${esc(m.match_tier)}</span>` : ''}
+      </div>
+      <div class="person-meta">${esc(m.title || '')}${m.title && m.department ? ' · ' : ''}${esc(m.department || '')}</div>
+      ${m.why_match ? `<div class="person-why">${esc(m.why_match)}</div>` : ''}
+      ${m.email ? `<a class="person-email" href="mailto:${esc(m.email)}">${esc(m.email)}</a>` : ''}
+    </div>`).join('');
+}
+
+function textToHtml(text) {
+  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const isBullet = l => l.startsWith('- ') || l.startsWith('• ');
+  let html = '', buf = [];
+  const flush = () => {
+    if (buf.length) {
+      html += '<ul>' + buf.map(l => `<li>${esc(l.replace(/^[-•]\s+/, ''))}</li>`).join('') + '</ul>';
+      buf = [];
+    }
+  };
+  for (const l of lines) {
+    if (isBullet(l)) buf.push(l);
+    else { flush(); html += `<p>${esc(l)}</p>`; }
+  }
+  flush();
+  return html;
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+</script>
+</body>
+</html>

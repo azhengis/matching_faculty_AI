@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard — DePaul Faculty Matcher</title>
+<style>
+{{SHELL_CSS}}
+
+/* ── Resume card: the one thing you most likely came back for ── */
+.resume{background:var(--navy);color:#fff;border-radius:var(--r-lg);padding:26px 28px;box-shadow:var(--sh-md);display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
+.resume-label{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:rgba(255,255,255,.6);margin-bottom:8px}
+.resume-title{font-family:Georgia,serif;font-size:23px;letter-spacing:-.015em;margin-bottom:12px;max-width:52ch}
+.resume .chips{margin-bottom:0}
+.resume .chip-on{background:rgba(255,255,255,.94);color:var(--navy)}
+.resume .chip-off{background:rgba(255,255,255,.09);color:rgba(255,255,255,.62);border-color:rgba(255,255,255,.18)}
+.resume-actions{display:flex;gap:10px;flex-shrink:0}
+.resume .btn-quiet{background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.28)}
+.resume .btn-quiet:hover{background:rgba(255,255,255,.2)}
+
+/* ── Quick access (stacks in the rail, spreads when the rail collapses) ── */
+.quick{display:grid;grid-template-columns:1fr;gap:11px}
+@media(max-width:1180px){.quick{grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}}
+.quick a{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:18px 20px;text-decoration:none;color:inherit;display:block;transition:border-color .15s,box-shadow .15s,transform .1s}
+.quick a:hover{border-color:var(--navy-lift);box-shadow:var(--sh-md);transform:translateY(-1px)}
+.quick-title{font-size:14.5px;font-weight:700;margin-bottom:3px;display:flex;align-items:center;gap:9px}
+.quick-title .ico{color:var(--navy);opacity:1}
+.quick-desc{font-size:13px;color:var(--ink-2);line-height:1.5}
+
+/* ── Project cards ── */
+.project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:14px}
+.project{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:19px 21px;display:flex;flex-direction:column;gap:12px;text-decoration:none;color:inherit;transition:border-color .15s,box-shadow .15s,transform .1s}
+.project:hover{border-color:var(--navy-lift);box-shadow:var(--sh-md);transform:translateY(-1px)}
+.project-title{font-family:Georgia,serif;font-size:17px;line-height:1.4;letter-spacing:-.01em}
+.project-people{font-size:12.5px;color:var(--ink-2);display:flex;align-items:center;gap:7px}
+.dot-sep{color:var(--border-2)}
+.people-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(275px,1fr));gap:13px}
+.person-project{font-size:11px;font-weight:600;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px}
+</style>
+</head>
+<body>
+<div class="app">
+{{SIDEBAR}}
+<div class="content">
+  <div class="page">
+
+    <div class="page-head">
+      <h1 id="greeting">Welcome back</h1>
+      <p class="lede" id="lede">Pick up a project, or start a new one and talk it through with the advisor.</p>
+    </div>
+
+    <div id="loading"><span class="spinner"></span>Loading your work…</div>
+
+    <div id="dash" style="display:none">
+      <!-- Resume the most recent project -->
+      <div id="resume-slot"></div>
+
+      <div class="split" style="margin-top:26px">
+        <div>
+          <!-- Projects -->
+          <div class="section" id="projects-section" style="margin-top:0">
+            <div class="section-head">
+              <h2>Your projects</h2>
+              <a href="/projects">See all</a>
+            </div>
+            <div id="projects-slot"></div>
+          </div>
+
+          <!-- Matched people -->
+          <div class="section" id="people-section" style="display:none">
+            <div class="section-head">
+              <h2>People you matched with</h2>
+              <a href="/projects">See all</a>
+            </div>
+            <div class="people-grid" id="people-slot"></div>
+          </div>
+        </div>
+
+        <!-- Right rail: easy access -->
+        <aside class="rail">
+          <div>
+            <div class="section-head"><h2>Jump to</h2></div>
+            <div class="quick">
+              <a href="/projects">
+                <div class="quick-title">
+                  <svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M10 4.5v11M4.5 10h11"/></svg>
+                  Start a new project</div>
+                <div class="quick-desc">Answer a few questions, then talk it through.</div>
+              </a>
+              <a href="/projects">
+                <div class="quick-title">
+                  <svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5h5l1.5 2h6.5v7h-13z"/></svg>
+                  All your projects</div>
+                <div class="quick-desc">Every proposal, and who it matched.</div>
+              </a>
+              <a href="/profile">
+                <div class="quick-title">
+                  <svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="2.8"/><path d="M4 16.5c.6-3 3-4.5 6-4.5s5.4 1.5 6 4.5"/></svg>
+                  Your profile</div>
+                <div class="quick-desc">Bio, publications, and sources.</div>
+              </a>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+  </div>
+</div>
+</div>
+
+<script>
+const SECTION_LABELS = {
+  background:'Background', objectives:'Objectives', research_questions:'Research questions',
+  related_work:'Related work', methodology:'Methodology', expected_outcomes:'Expected outcomes',
+};
+const SECTION_ORDER = Object.keys(SECTION_LABELS);
+
+let _projects = [];
+
+(async function init() {
+  let me;
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) throw new Error('not logged in');
+    me = await res.json();
+  } catch (e) { window.location.href = '/login'; return; }
+  document.getElementById('sidebar-email').textContent = me.email || '';
+
+  // No profile yet → the profile page owns first-run setup.
+  let profile = null;
+  try {
+    const res = await fetch('/api/profile/me');
+    if (res.ok) profile = await res.json();
+  } catch (e) {}
+  if (!profile) { window.location.href = '/profile'; return; }
+
+  const first = (profile.name || '').trim().split(/\s+/)[0];
+  if (first) document.getElementById('greeting').textContent = `Welcome back, ${first}`;
+
+  try {
+    const res  = await fetch('/api/projects');
+    const data = await res.json();
+    _projects  = data.projects || [];
+  } catch (e) { _projects = []; }
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('dash').style.display    = 'block';
+  renderResume();
+  renderProjects();
+  renderPeople();
+})();
+
+function renderResume() {
+  const slot = document.getElementById('resume-slot');
+  if (!_projects.length) { slot.innerHTML = ''; return; }
+
+  const p = _projects[0];
+  slot.innerHTML = `
+    <div class="resume">
+      <div style="min-width:0">
+        <div class="resume-label">Pick up where you left off</div>
+        <div class="resume-title">${esc(p.title)}</div>
+        <div class="chips">${sectionChips(p.sections_written)}</div>
+      </div>
+      <div class="resume-actions">
+        <a class="btn btn-accent" href="/advisor?project=${p.id}">
+          ${p.started_chat ? 'Continue the conversation' : 'Talk it through'}</a>
+        <a class="btn btn-quiet" href="/projects?open=${p.id}">Open project</a>
+      </div>
+    </div>`;
+}
+
+function renderProjects() {
+  const slot = document.getElementById('projects-slot');
+  if (!_projects.length) {
+    slot.innerHTML = `
+      <div class="empty">
+        <h3>No projects yet</h3>
+        <p>A project is one piece of research. Answer a few questions about it, talk it through with the advisor, and it becomes a proposal — with collaborators attached.</p>
+        <a class="btn btn-accent" href="/projects">Start your first project</a>
+      </div>`;
+    return;
+  }
+  slot.innerHTML = '<div class="project-grid">' + _projects.slice(0, 4).map(p => `
+    <a class="project" href="/projects?open=${p.id}">
+      <div class="project-title">${esc(p.title)}</div>
+      <div class="chips">${sectionChips(p.sections_written)}</div>
+      <div class="project-people">${peopleLine(p)}</div>
+    </a>`).join('') + '</div>';
+}
+
+function peopleLine(p) {
+  if (!p.match_names || !p.match_names.length) {
+    return p.started_chat
+      ? 'No collaborators surfaced yet'
+      : '<span style="color:var(--scarlet);font-weight:600">Not started — talk it through</span>';
+  }
+  const shown = p.match_names.slice(0, 2).map(esc).join(', ');
+  const more  = p.match_names.length > 2 ? ' and others' : '';
+  return `Matched with ${shown}${more}`;
+}
+
+function sectionChips(written) {
+  const set = new Set(written || []);
+  return SECTION_ORDER.map(k =>
+    `<span class="chip ${set.has(k) ? 'chip-on' : 'chip-off'}">${SECTION_LABELS[k]}</span>`
+  ).join('');
+}
+
+async function renderPeople() {
+  // Show collaborators from the most recently touched projects.
+  const withMatches = _projects.filter(p => p.match_names && p.match_names.length).slice(0, 2);
+  if (!withMatches.length) return;
+
+  const groups = [];
+  for (const p of withMatches) {
+    try {
+      const res  = await fetch(`/api/projects/${p.id}/matches`);
+      const data = await res.json();
+      (data.matches || []).slice(0, 3).forEach(m => groups.push({ project: p.title, m }));
+    } catch (e) {}
+  }
+  if (!groups.length) return;
+
+  document.getElementById('people-section').style.display = 'block';
+  document.getElementById('people-slot').innerHTML = groups.map(({project, m}) => `
+    <div class="person">
+      <div class="person-project">${esc(project)}</div>
+      <div class="person-top">
+        <div class="person-name">${esc(m.name)}</div>
+        ${m.match_tier ? `<span class="tier tier-${esc(m.match_tier)}">${esc(m.match_tier)}</span>` : ''}
+      </div>
+      <div class="person-meta">${esc(m.title || '')}${m.title && m.department ? ' · ' : ''}${esc(m.department || '')}</div>
+      ${m.why_match ? `<div class="person-why">${esc(m.why_match)}</div>` : ''}
+      ${m.email ? `<a class="person-email" href="mailto:${esc(m.email)}">${esc(m.email)}</a>` : ''}
+    </div>`).join('');
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+</script>
+</body>
+</html>
