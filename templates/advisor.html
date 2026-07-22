@@ -20,7 +20,11 @@
 .chat-wrap{flex:1;display:flex;flex-direction:column;max-width:760px;width:100%;margin:0 auto;padding:0 24px;min-height:0}
 .advisor-shell{display:flex;flex-direction:column;height:100vh}
 
-.proposal-sidepanel{width:min(44vw,600px);flex-shrink:0;border-right:1px solid var(--border);background:var(--paper);overflow-y:auto;padding:28px 32px 40px}
+/* Hidden until the proposal has something in it — the page opens as a
+   conversation, and the document appears once there is a document. */
+.proposal-sidepanel{width:min(44vw,600px);flex-shrink:0;border-right:1px solid var(--border);background:var(--paper);overflow-y:auto;padding:28px 32px 40px;display:none}
+.proposal-sidepanel.visible{display:block;animation:panel-in .45s ease-out}
+@keyframes panel-in{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
 .proposal-doc-head{margin-bottom:24px;padding-bottom:18px;border-bottom:1px solid var(--paper-line)}
 .proposal-sidepanel h3{font-family:var(--serif);font-size:24px;font-weight:normal;margin-bottom:5px;letter-spacing:-.01em}
 .proposal-sidepanel-sub{font-size:12.5px;color:var(--ink-3)}
@@ -94,6 +98,19 @@
 .opt-btn{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 15px;text-align:left;font-size:13.5px;color:var(--ink);cursor:pointer;font-family:inherit;display:flex;gap:11px;align-items:baseline;box-shadow:var(--sh-sm);transition:border-color .15s,background .15s}
 .opt-btn:hover{background:var(--canvas);border-color:var(--navy-lift)}
 .opt-num{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;color:var(--scarlet);flex-shrink:0;min-width:18px}
+/* The last option is always "let me write my own" — styled as an escape, not a pick. */
+.opt-btn.opt-own{border-style:dashed;color:var(--ink-2)}
+.opt-btn.opt-own .opt-num{color:var(--ink-3)}
+
+/* Opening menu: pick a project or start one. Local actions, not chat replies. */
+.start-menu{display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px}
+.start-btn{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:14px 17px;text-align:left;cursor:pointer;font-family:inherit;transition:border-color .15s,box-shadow .15s,transform .1s}
+.start-btn:hover{border-color:var(--navy-lift);box-shadow:var(--sh-md);transform:translateY(-1px)}
+.start-btn-title{font-size:14.5px;font-weight:700;color:var(--ink);margin-bottom:2px}
+.start-btn-desc{font-size:12.5px;color:var(--ink-2)}
+.start-btn.primary{background:var(--navy);border-color:var(--navy)}
+.start-btn.primary .start-btn-title{color:#fff}
+.start-btn.primary .start-btn-desc{color:rgba(255,255,255,.72)}
 
 @media(max-width:1080px){
   .advisor-shell{height:auto;min-height:100vh}
@@ -174,42 +191,99 @@ const PROPOSAL_LABELS = {
     if (!res.ok) { window.location.href = '/profile'; return; }
   } catch (e) { window.location.href = '/profile'; return; }
 
-  // The advisor always works on one project. Without one, go pick or make one.
-  _projectId = new URLSearchParams(location.search).get('project');
-  if (!_projectId) {
-    try {
-      const res  = await fetch('/api/projects');
-      const data = await res.json();
-      const list = data.projects || [];
-      if (!list.length) { window.location.href = '/projects'; return; }
-      _projectId = list[0].id;                       // most recently touched
-      history.replaceState({}, '', '/advisor?project=' + _projectId);
-    } catch (e) { window.location.href = '/projects'; return; }
-  }
+  document.getElementById('loading').style.display        = 'none';
+  document.getElementById('advisor-layout').style.display = 'flex';
 
+  // Land in a conversation, not a document. A project named in the URL opens
+  // straight away; otherwise the advisor opens with a menu.
+  const requested = new URLSearchParams(location.search).get('project');
+  if (requested) { await openProject(requested); return; }
+  await showStartMenu();
+})();
+
+// ── Opening menu ──────────────────────────────────────────────────────────────
+async function showStartMenu() {
+  let projects = [];
+  try {
+    const res  = await fetch('/api/projects');
+    projects   = (await res.json()).projects || [];
+  } catch (e) { /* offer the new-project path regardless */ }
+
+  const resume = projects.slice(0, 4).map(p => `
+    <button class="start-btn" onclick="openProject(${p.id})">
+      <div class="start-btn-title">${esc(p.title)}</div>
+      <div class="start-btn-desc">${p.started_chat ? 'Continue the conversation' : 'Not talked through yet'}</div>
+    </button>`).join('');
+
+  addBotRaw(`
+    <div class="bubble">
+      <p>Hi — I'm your research advisor. We'll talk through your research together, and
+      I'll write it up into a proposal as we go.</p>
+      <p>What would you like to do?</p>
+    </div>
+    <div class="start-menu">
+      <button class="start-btn primary" onclick="startNewProject(this)">
+        <div class="start-btn-title">Start a new project</div>
+        <div class="start-btn-desc">I'll ask about your research, one question at a time</div>
+      </button>
+      ${resume}
+    </div>`);
+}
+
+async function startNewProject(btn) {
+  if (_busy) return;
+  if (btn) {
+    btn.disabled = true;
+    btn.querySelector('.start-btn-title').textContent = 'Starting…';
+  }
+  try {
+    const res  = await fetch('/api/projects', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ start_blank: true })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not start a project');
+    await openProject(data.project_id, { fresh: true });
+  } catch (e) {
+    addBotRaw('<div class="bubble" style="color:#9B2020">' + esc(e.message) + '</div>');
+  }
+}
+
+// ── Open a project and start (or resume) its conversation ─────────────────────
+async function openProject(projectId, opts = {}) {
   let project;
   try {
-    const res = await fetch('/api/projects/' + _projectId);
+    const res = await fetch('/api/projects/' + projectId);
     project   = await res.json();
     if (!res.ok) throw new Error(project.error || 'no project');
   } catch (e) { window.location.href = '/projects'; return; }
 
+  _projectId = projectId;
+  history.replaceState({}, '', '/advisor?project=' + projectId);
+
   document.getElementById('pb-title').textContent = project.title;
-  document.getElementById('pb-open').href = '/projects?open=' + _projectId;
+  document.getElementById('pb-open').href = '/projects?open=' + projectId;
   document.getElementById('project-bar').style.display = 'flex';
   document.getElementById('btn-download-proposal').href =
-    `/api/projects/${_projectId}/proposal/download`;
+    `/api/projects/${projectId}/proposal/download`;
 
-  document.getElementById('loading').style.display        = 'none';
-  document.getElementById('advisor-layout').style.display = 'flex';
-
+  clearStartMenu();
   _proposal = project.proposal || null;
-  renderProposalPanel();
+  renderProposalPanel();   // reveals the panel only if there's already content
 
-  await callAdvisorAPI(project.session_id
-    ? 'I’m back — where were we?'
-    : 'Hello — I just filled in the intake for this project.');
-})();
+  await callAdvisorAPI(
+    opts.fresh        ? "Let's start a new project."
+    : project.session_id ? 'I’m back — where were we?'
+                         : 'Hello — I just filled in the intake for this project.');
+}
+
+// Once a project is chosen the menu is stale — drop it so it can't be re-clicked.
+function clearStartMenu() {
+  document.querySelectorAll('.start-menu').forEach(el => {
+    const wrapper = el.closest('.msg');
+    if (wrapper) wrapper.remove(); else el.remove();
+  });
+}
 
 // ── Send a message ─────────────────────────────────────────────────────────────
 async function sendMessage(text) {
@@ -252,10 +326,21 @@ function renderBotReply(raw) {
   const { main, options } = parseReply(raw);
   let optsHtml = '';
   if (options.length) {
-    optsHtml = '<div class="options">' + options.map(o =>
+    // The advisor is told to end with a write-your-own escape, but it forgets.
+    // Guarantee one here rather than leaving someone stuck picking from a menu
+    // that doesn't fit — clicking it just moves the cursor to the composer.
+    const ownRe = /\b(my own|myself|something else|none of these|describe|i'?ll explain|write)\b/i;
+    const picks = options.filter((o, i) => !(i === options.length - 1 && ownRe.test(o.text)));
+
+    const buttons = picks.map(o =>
       `<button class="opt-btn" onclick="sendMessage(${esc(JSON.stringify(o.text))})">` +
       `<span class="opt-num">[${o.num}]</span>${esc(o.text)}</button>`
-    ).join('') + '</div>';
+    ).join('');
+
+    optsHtml = '<div class="options">' + buttons +
+      `<button class="opt-btn opt-own" onclick="focusComposer()">` +
+      `<span class="opt-num">[${picks.length + 1}]</span>None of these — I'll write my own</button>` +
+      '</div>';
   }
   addBotRaw(`<div class="bubble">${markdownToHtml(main)}</div>${optsHtml}`);
 }
@@ -302,6 +387,14 @@ function addBotRaw(html) {
   scrollBottom();
 }
 
+// "Let me write my own" puts the cursor in the composer rather than sending the
+// option text back as if it were an answer.
+function focusComposer() {
+  const input = document.getElementById('chat-input');
+  input.focus();
+  input.scrollIntoView({ block: 'nearest' });
+}
+
 function showTyping(show) {
   document.getElementById('typing').style.display = show ? 'flex' : 'none';
   if (show) scrollBottom();
@@ -346,6 +439,11 @@ function renderProposalPanel() {
   const hasContent = keys.some(k => (_proposal && _proposal[k] || '').trim());
 
   document.getElementById('btn-download-proposal').classList.toggle('disabled', !hasContent);
+
+  // The panel stays out of the way until there is a proposal to show. Once it
+  // appears it stays — a section being emptied shouldn't yank it away mid-edit.
+  const panel = document.getElementById('proposal-sidepanel');
+  if (hasContent || _editingSections.size) panel.classList.add('visible');
 
   if (!hasContent && !_editingSections.size) {
     container.innerHTML = '<div class="proposal-empty">Nothing yet. As you and the advisor settle each part — the background, your objectives, the methodology — it appears here.</div>';

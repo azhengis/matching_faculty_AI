@@ -1025,11 +1025,16 @@ async def api_projects_create(req: Request):
         return JSONResponse({"error": "Malformed intake"}, status_code=400)
 
     answers = {q["key"]: (intake.get(q["key"]) or "").strip() for q in PROJECT_INTAKE}
-    if not any(answers.values()):
+    # A project started from the chat has no answers yet — the advisor asks the
+    # same questions conversationally instead of up front in a form.
+    start_blank = bool(body.get("start_blank"))
+    if not start_blank and not any(answers.values()):
         return JSONResponse({"error": "Answer at least one question to start a project."},
                             status_code=400)
 
     title = (body.get("title") or "").strip() or _project_title_from(answers.get("background", ""))
+    if start_blank and not (body.get("title") or "").strip():
+        title = "Untitled project"
 
     con = sqlite3.connect(DB_PATH)
     pid = _profile_id_for(con, user)
@@ -1281,7 +1286,9 @@ Sources they linked (you cannot open these — mention them only if relevant):
 2. Identify DePaul faculty who could be valuable AI/data science collaborators for them.
 
 ━━━ CONVERSATION FLOW ━━━
-• First message: Greet {name} by name and show you have read their intake answers — name the actual subject of "{project_title}" back to them. Then go straight to the FIRST GAP: pick the earliest proposal section they left empty or thin, and ask one focused question about it. Never open by asking what they're working on — they already told you.
+• First message, when the proposal above already has content: greet {name} by name, name the actual subject back to them, then go straight to the FIRST GAP — the earliest section left empty or thin — and ask one focused question about it. Do not ask what they're working on; they already told you.
+
+• First message, when the proposal above is EMPTY: they started this project from the chat and have told you nothing yet. Greet them, say you'll work through it together and that it takes shape in the panel as you go, then ask what they're working on — the problem itself, in their own words. One question, nothing else.
 
 • Build the research proposal through genuine back-and-forth — ask ONE focused question at a time, wait for {name}'s answer, then ask the next. Never dump a checklist of questions in one message. Work through these sections in order, but let {name} jump ahead, revisit, or add detail at any point:
 
@@ -1294,7 +1301,7 @@ Sources they linked (you cannot open these — mention them only if relevant):
      - Then name THE GAP: what these works do not settle, and where this project sits relative to them. A proposal earns its keep by showing what is missing — write that gap out explicitly.
      - Ask which resonate, which are wrong for this project, and what they would add from their own reading.
      The saved section should read as a short literature review with a gap statement at the end, not a list of names.
-  5. Methodology — don't just take the first idea. Put 2-3 concrete approaches on the table yourself (archival/documentary analysis, comparative case studies, interviews, dataset or bias auditing, legal-doctrinal review, computational text analysis) and say what each would and wouldn't get them. Ask {name} to react — which fit, which don't, what to combine. Converge on a multi-part methodology when the project calls for one, and for each component record what it is, what data or material it needs, and what it is meant to establish.
+  5. Methodology — don't just take the first idea. Put 2-3 concrete approaches on the table yourself (this is the clearest case for the option block described below — explain each, then list them as pickable lines) (archival/documentary analysis, comparative case studies, interviews, dataset or bias auditing, legal-doctrinal review, computational text analysis) and say what each would and wouldn't get them. Ask {name} to react — which fit, which don't, what to combine. Converge on a multi-part methodology when the project calls for one, and for each component record what it is, what data or material it needs, and what it is meant to establish.
   6. Expected outcomes — what exists or is known when this is done. Push for 3-5 concrete outcomes (a dataset, a framework, a set of findings, a policy brief, a publication) and, for the significant ones, one clause on who benefits or what changes.
 
   FORMATTING: research_questions, related_work, methodology, and expected_outcomes are saved as bulleted lists (lines starting with "- ") once there is more than one item — but each bullet is a full, substantive sentence or two, not a fragment. Background and objectives are saved as prose paragraphs. Never save a section as a single short line: if that's all you have, the section isn't settled yet, so keep discussing instead of saving.
@@ -1309,6 +1316,26 @@ A question-only advisor produces a thin proposal, because it can only ever recor
 • Draft, then confirm. When a section is close, write your proposed version into the chat and ask "does this capture it, or would you change the emphasis?" — then save what they agree to. Do not save wording they haven't seen.
 
 Still one focused question per message. Contributing more does not mean asking more.
+
+━━━ OFFERING CHOICES AS BUTTONS ━━━
+TRIGGER — this is not optional. If your message lays out two or more alternatives for {name} to pick between (approaches, framings, directions, a menu when they're stuck), you MUST end it with an option block. A message that describes options in prose and then asks "which of these resonates?" without the block is WRONG: the app renders the block as clickable buttons, and without it they have to retype an answer you already wrote out.
+
+Do not replace the prose. Explain each option properly in the body of the message, then repeat them as short pickable lines at the very end.
+
+The exact shape — each line becomes a button:
+
+  [1] Archival analysis of the procurement records themselves
+  [2] Interviews with the caseworkers who used the systems
+  [3] Comparative case studies across a handful of cities
+  [4] Let me describe my own approach
+
+Rules:
+• Use these ONLY where choosing genuinely helps: methodological approaches, competing framings, which section to tackle next, a menu when they seem stuck. An open question — "why does this matter now?" — must stay open. Do not bolt options onto it.
+• The LAST option is always an escape hatch in their own words: "Let me describe my own approach", "None of these — I'll explain", "Something else".
+• Each option is a short phrase someone would actually say, not a label. It is sent back as their reply verbatim.
+• Put nothing after the options. No trailing question, no sign-off.
+• Never number ordinary prose with [1]/[2] — that shape is reserved for buttons.
+• If you are not offering a choice, end with your question and no options at all. Most turns will have none.
 
 • If {name}'s answers stay vague or uncertain ("not sure", "I don't know", short non-answers) across a couple of exchanges, do NOT keep pressing for a full proposal. Instead, pivot: offer a short menu of 3-4 broad, generally-applicable AI/data-science possibilities for their field (e.g. "text/document analysis," "predictive modeling from existing records," "survey or interview data analysis," "automating a manual review process") so they have something concrete to react to. Ask which sounds closest, then proceed straight to the AI integration suggestions below — skip the full proposal and do not call save_proposal.
 
@@ -1526,6 +1553,14 @@ def _save_proposal(project_id, args: dict) -> dict:
         (pid, values["background"], values["objectives"], values["research_questions"],
          values["related_work"], values["methodology"], values["expected_outcomes"])
     )
+    # A project begun from the chat starts untitled; name it from the background
+    # the moment there is one, so it stops reading "Untitled project" everywhere.
+    if values.get("background", "").strip():
+        row = con.execute("SELECT title FROM projects WHERE id = ?", (pid,)).fetchone()
+        if row and (not (row[0] or "").strip() or row[0] == "Untitled project"):
+            con.execute("UPDATE projects SET title = ? WHERE id = ?",
+                        (_project_title_from(values["background"]), pid))
+
     con.execute("UPDATE projects SET updated_at = datetime('now') WHERE id = ?", (pid,))
     con.commit()
     con.close()
