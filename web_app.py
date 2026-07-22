@@ -319,6 +319,18 @@ def _init_profiles_db():
         )
     """)
 
+    # Matches recorded before the search results carried a faculty id have a
+    # NULL faculty_id and can't be opened. Names are unique in `faculty`, so
+    # they can be resolved after the fact.
+    try:
+        con.execute("""
+            UPDATE project_matches SET faculty_id = (
+                SELECT f.id FROM faculty f WHERE LOWER(TRIM(f.name)) = LOWER(TRIM(project_matches.name))
+            ) WHERE faculty_id IS NULL
+        """)
+    except sqlite3.OperationalError:
+        pass  # project_matches not created yet on a fresh install
+
     _migrate_proposals_to_projects(con)
 
     con.commit()
@@ -548,6 +560,78 @@ async def api_profile_search(req: Request):
     results = [{"id": r[0], "name": r[1], "title": r[2] or "", "dept": r[3] or r[4] or "",
                 "email": r[5] or "", "bio": (r[6] or "")[:500]} for r in rows]
     return JSONResponse({"results": results})
+
+
+@app.get("/api/faculty/{faculty_id}")
+async def api_faculty_profile(faculty_id: int, req: Request):
+    """Everything on file about one faculty member, for the profile view.
+
+    Prefers anything they wrote about themselves over the scraped page, and
+    surfaces links they added to their own profile — that is the only place a
+    Google Scholar or personal-site URL exists; none is scraped.
+    """
+    if not _current_user(req):
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT id, name, title, department, college, email, bio_url, "
+        "research_summary, publications_text, classes_taught "
+        "FROM faculty WHERE id = ?", (faculty_id,)
+    ).fetchone()
+    if not row:
+        con.close()
+        return JSONResponse({"error": "No such faculty member"}, status_code=404)
+
+    (fid, name, title, department, college, email, bio_url,
+     summary, pubs_text, courses) = row
+
+    # A self-written bio beats the scraped page.
+    interests = []
+    if email:
+        ov = con.execute(
+            "SELECT self_bio, self_research_interests FROM faculty_overrides WHERE email = ?",
+            (email.strip().lower(),)
+        ).fetchone()
+        if ov:
+            if (ov[0] or "").strip():
+                summary = ov[0]
+            try:
+                interests = json.loads(ov[1] or "[]")
+            except ValueError:
+                interests = []
+
+    papers = [
+        {"title": t, "year": y, "cited_by": c or 0}
+        for t, y, c in con.execute(
+            "SELECT title, year, cited_by_count FROM papers WHERE faculty_id = ? "
+            "ORDER BY cited_by_count DESC, year DESC LIMIT 40", (faculty_id,)
+        ).fetchall()
+    ]
+    paper_total = con.execute(
+        "SELECT COUNT(*) FROM papers WHERE faculty_id = ?", (faculty_id,)).fetchone()[0]
+
+    # Links only exist if this person claimed their own profile and added them.
+    links = [
+        {"label": l or u, "url": u}
+        for l, u in con.execute(
+            "SELECT d.label, d.url FROM profile_documents d "
+            "JOIN profiles p ON p.id = d.profile_id "
+            "WHERE p.faculty_id = ? AND d.kind = 'link' AND TRIM(COALESCE(d.url,'')) != ''",
+            (faculty_id,)
+        ).fetchall()
+    ]
+    con.close()
+
+    return JSONResponse({
+        "id": fid, "name": name, "title": title or "", "department": department or "",
+        "college": college or "", "email": email or "", "bio_url": bio_url or "",
+        "research_summary": (summary or "").strip(),
+        "research_interests": interests,
+        "publications_text": (pubs_text or "").strip(),
+        "classes_taught": (courses or "").strip(),
+        "papers": papers, "paper_total": paper_total, "links": links,
+    })
 
 
 @app.get("/api/profile/papers/{faculty_id}")
@@ -1517,6 +1601,10 @@ def _advisor_search(query: str, mode: str = "semantic") -> dict:
             non_bio = [s for s in sents if not sm._is_bio_opener(s, person.get("name", ""))]
             bio     = " ".join(non_bio[:3])[:500] if non_bio else summary[:400]
             entry = {
+                # The faculty id was missing here, so every match was recorded
+                # with a NULL faculty_id and could never be linked back to the
+                # person it named.
+                "id": person.get("id"),
                 "name": person.get("name", ""), "title": person.get("title", ""),
                 "department": person.get("department") or person.get("college", ""),
                 "email": person.get("email", ""), "match_tier": sm._score_tier(score),

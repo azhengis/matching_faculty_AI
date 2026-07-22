@@ -292,14 +292,14 @@ async function showDetail(id) {
   // '' restores the .rail class's flex layout; 'block' would flatten its gaps.
   document.getElementById('detail-people-section').style.display = people.length ? '' : 'none';
   document.getElementById('detail-people-slot').innerHTML = people.map(m => `
-    <div class="person">
+    <div class="person" data-faculty="${m.faculty_id||''}" onclick="openFacultyProfile(${m.faculty_id||0})">
       <div class="person-top">
         <div class="person-name">${esc(m.name)}</div>
         ${m.match_tier ? `<span class="tier tier-${esc(m.match_tier)}">${esc(m.match_tier)}</span>` : ''}
       </div>
       <div class="person-meta">${esc(m.title || '')}${m.title && m.department ? ' · ' : ''}${esc(m.department || '')}</div>
       ${m.why_match ? `<div class="person-why">${esc(m.why_match)}</div>` : ''}
-      ${m.email ? `<a class="person-email" href="mailto:${esc(m.email)}">${esc(m.email)}</a>` : ''}
+      ${m.email ? `<a class="person-email" href="mailto:${esc(m.email)}" onclick="event.stopPropagation()">${esc(m.email)}</a>` : ''}
     </div>`).join('');
 }
 

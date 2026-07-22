@@ -119,6 +119,33 @@ h2{font-family:var(--serif);font-size:24px;font-weight:normal;letter-spacing:-.0
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:7px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* ── Faculty profile overlay ── */
+.person[data-faculty]{cursor:pointer}
+.person[data-faculty]:hover .person-name{text-decoration:underline}
+.fp-backdrop{position:fixed;inset:0;background:rgba(9,17,30,.55);z-index:200;display:none;align-items:flex-start;justify-content:center;padding:44px 20px;overflow-y:auto}
+.fp-backdrop.open{display:flex}
+.fp{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--sh-lg);max-width:760px;width:100%;animation:fp-in .2s ease-out}
+@keyframes fp-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.fp-head{padding:28px 32px 22px;border-bottom:1px solid var(--border);position:relative}
+.fp-name{font-family:var(--serif);font-size:27px;letter-spacing:-.015em;margin-bottom:4px;padding-right:40px}
+.fp-meta{font-size:14px;color:var(--ink-2)}
+.fp-close{position:absolute;top:20px;right:22px;background:none;border:none;font-size:24px;line-height:1;color:var(--ink-3);cursor:pointer;padding:4px 8px;border-radius:8px}
+.fp-close:hover{background:var(--canvas);color:var(--ink)}
+.fp-body{padding:24px 32px 30px}
+.fp-sec{margin-bottom:24px}
+.fp-sec:last-child{margin-bottom:0}
+.fp-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--navy);margin-bottom:8px}
+.fp-text{font-size:14.5px;color:var(--ink-2);line-height:1.7;white-space:pre-wrap}
+.fp-links{display:flex;flex-wrap:wrap;gap:8px}
+.fp-link{display:inline-flex;align-items:center;gap:7px;font-size:13px;text-decoration:none;border:1px solid var(--border-2);border-radius:999px;padding:7px 14px;color:var(--navy-lift);background:var(--surface)}
+.fp-link:hover{background:var(--canvas);border-color:var(--navy-lift)}
+.fp-pub{padding:10px 0;border-bottom:1px solid var(--border);font-size:14px;line-height:1.55}
+.fp-pub:last-child{border-bottom:none}
+.fp-pub-meta{font-size:12px;color:var(--ink-3);margin-top:2px}
+.fp-more{font-size:12.5px;color:var(--ink-3);padding-top:10px}
+.fp-empty{font-size:13.5px;color:var(--ink-3);font-style:italic}
+@media(max-width:560px){.fp-head,.fp-body{padding-left:20px;padding-right:20px}}
+
 @media(max-width:860px){
   .sidebar{position:static;width:100%;flex-direction:row;align-items:center;inset:auto}
   .app{flex-direction:column}
@@ -153,4 +180,97 @@ h2{font-family:var(--serif);font-size:24px;font-weight:normal;letter-spacing:-.0
     <button onclick="logout()">Log out</button>
   </div>
 </aside>
+
+<!-- Faculty profile overlay, opened by clicking a matched person -->
+<div class="fp-backdrop" id="fp-backdrop" onclick="if(event.target===this) closeFacultyProfile()">
+  <div class="fp" role="dialog" aria-modal="true" aria-labelledby="fp-name">
+    <div class="fp-head">
+      <button class="fp-close" onclick="closeFacultyProfile()" aria-label="Close">&times;</button>
+      <div class="fp-name" id="fp-name">&nbsp;</div>
+      <div class="fp-meta" id="fp-meta"></div>
+    </div>
+    <div class="fp-body" id="fp-body"></div>
+  </div>
+</div>
+
+<script>
+// Shared by every page that renders matched people.
+function fpEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function openFacultyProfile(facultyId) {
+  if (!facultyId) return;
+  const back = document.getElementById('fp-backdrop');
+  document.getElementById('fp-name').textContent = 'Loading…';
+  document.getElementById('fp-meta').textContent = '';
+  document.getElementById('fp-body').innerHTML = '<span class="spinner"></span>';
+  back.classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  let d;
+  try {
+    const res = await fetch('/api/faculty/' + facultyId);
+    d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Could not load this profile');
+  } catch (e) {
+    document.getElementById('fp-name').textContent = 'Could not load profile';
+    document.getElementById('fp-body').innerHTML =
+      '<div class="fp-empty">' + fpEsc(e.message) + '</div>';
+    return;
+  }
+
+  document.getElementById('fp-name').textContent = d.name;
+  document.getElementById('fp-meta').textContent =
+    [d.title, d.department, d.college].filter(Boolean).join(' · ');
+
+  const sec = (label, inner) =>
+    `<div class="fp-sec"><div class="fp-label">${label}</div>${inner}</div>`;
+
+  let html = '';
+
+  const contact = [];
+  if (d.email)   contact.push(`<a class="fp-link" href="mailto:${fpEsc(d.email)}">${fpEsc(d.email)}</a>`);
+  if (d.bio_url) contact.push(`<a class="fp-link" href="${fpEsc(d.bio_url)}" target="_blank" rel="noopener">DePaul profile ↗</a>`);
+  (d.links || []).forEach(l =>
+    contact.push(`<a class="fp-link" href="${fpEsc(l.url)}" target="_blank" rel="noopener">${fpEsc(l.label)} ↗</a>`));
+  if (contact.length) html += sec('Contact and links', `<div class="fp-links">${contact.join('')}</div>`);
+
+  if ((d.research_interests || []).length)
+    html += sec('Research interests',
+      `<div class="fp-links">${d.research_interests.map(i =>
+        `<span class="fp-link" style="color:var(--teal);border-color:#BEE0E2">${fpEsc(i)}</span>`).join('')}</div>`);
+
+  if (d.research_summary)
+    html += sec('Research', `<div class="fp-text">${fpEsc(d.research_summary)}</div>`);
+
+  if ((d.papers || []).length) {
+    const pubs = d.papers.map(p => `
+      <div class="fp-pub">${fpEsc(p.title)}
+        <div class="fp-pub-meta">${p.year ? p.year : 'year unknown'}${
+          p.cited_by ? ' · ' + p.cited_by + ' citations' : ''}</div>
+      </div>`).join('');
+    const more = d.paper_total > d.papers.length
+      ? `<div class="fp-more">Showing ${d.papers.length} of ${d.paper_total}, most cited first.</div>` : '';
+    html += sec('Publications', pubs + more);
+  } else {
+    html += sec('Publications', '<div class="fp-empty">No publications on file for this person.</div>');
+  }
+
+  if (d.classes_taught)
+    html += sec('Courses taught', `<div class="fp-text">${fpEsc(d.classes_taught)}</div>`);
+
+  document.getElementById('fp-body').innerHTML = html;
+}
+
+function closeFacultyProfile() {
+  document.getElementById('fp-backdrop').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeFacultyProfile();
+});
+</script>
 <!--/NAV-->

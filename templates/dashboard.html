@@ -225,7 +225,7 @@ async function renderPeople() {
 
   document.getElementById('people-section').style.display = 'block';
   document.getElementById('people-slot').innerHTML = groups.map(({project, m}) => `
-    <div class="person">
+    <div class="person" data-faculty="${m.faculty_id||''}" onclick="openFacultyProfile(${m.faculty_id||0})">
       <div class="person-project">${esc(project)}</div>
       <div class="person-top">
         <div class="person-name">${esc(m.name)}</div>
@@ -233,7 +233,7 @@ async function renderPeople() {
       </div>
       <div class="person-meta">${esc(m.title || '')}${m.title && m.department ? ' · ' : ''}${esc(m.department || '')}</div>
       ${m.why_match ? `<div class="person-why">${esc(m.why_match)}</div>` : ''}
-      ${m.email ? `<a class="person-email" href="mailto:${esc(m.email)}">${esc(m.email)}</a>` : ''}
+      ${m.email ? `<a class="person-email" href="mailto:${esc(m.email)}" onclick="event.stopPropagation()">${esc(m.email)}</a>` : ''}
     </div>`).join('');
 }
 
