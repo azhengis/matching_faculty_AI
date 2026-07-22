@@ -253,52 +253,65 @@ async function startNewProject(btn) {
 async function openProject(projectId, opts = {}) {
   let project;
   try {
-    const res = await fetch(‘/api/projects/’ + projectId);
+    const res = await fetch('/api/projects/' + projectId);
     project   = await res.json();
-    if (!res.ok) throw new Error(project.error || ‘no project’);
-  } catch (e) { window.location.href = ‘/projects’; return; }
+    if (!res.ok) throw new Error(project.error || 'no project');
+  } catch (e) { window.location.href = '/projects'; return; }
 
   _projectId = projectId;
-  history.replaceState({}, ‘’, ‘/advisor?project=’ + projectId);
+  history.replaceState({}, '', '/advisor?project=' + projectId);
 
-  document.getElementById(‘pb-title’).textContent = project.title;
-  document.getElementById(‘pb-open’).href = ‘/projects?open=’ + projectId;
-  document.getElementById(‘project-bar’).style.display = ‘flex’;
-  document.getElementById(‘btn-download-proposal’).href =
+  document.getElementById('pb-title').textContent = project.title;
+  document.getElementById('pb-open').href = '/projects?open=' + projectId;
+  document.getElementById('project-bar').style.display = 'flex';
+  document.getElementById('btn-download-proposal').href =
     `/api/projects/${projectId}/proposal/download`;
 
   clearStartMenu();
   _proposal = project.proposal || null;
-  renderProposalPanel();   // reveals the panel only if there’s already content
+  renderProposalPanel();   // reveals the panel only if there's already content
 
   // Load and display stored chat history if resuming a project
   if (project.chat_history && project.chat_history.length > 0) {
-    const messagesEl = document.getElementById(‘messages’);
-    const typingEl = document.getElementById(‘typing’);
+    const messagesEl = document.getElementById('messages');
+    const typingEl = document.getElementById('typing');
+
+    // Scripted kickoff messages are sent to the API without ever being shown,
+    // so don't show them on replay either.
+    const scripted = [
+      "Let's start a new project.",
+      'I’m back — where were we?',
+      'Hello — I just filled in the intake for this project.',
+    ];
 
     // Render each stored message (except tool messages)
     project.chat_history.forEach(msg => {
-      if (msg.role === ‘user’) {
-        const div = document.createElement(‘div’);
-        div.className = ‘msg user’;
+      if (msg.role === 'user' && scripted.includes(msg.content)) return;
+      if (msg.role === 'user') {
+        const div = document.createElement('div');
+        div.className = 'msg user';
         div.innerHTML = `<div class="avatar">You</div><div class="bubble">${esc(msg.content)}</div>`;
         messagesEl.insertBefore(div, typingEl);
-      } else if (msg.role === ‘assistant’) {
-        const div = document.createElement(‘div’);
-        div.className = ‘msg bot’;
-        div.innerHTML = `<div class="avatar">AI</div><div><div class="bubble">${markdownToHtml(msg.content || ‘’)}</div></div>`;
+      } else if (msg.role === 'assistant' && msg.content) {
+        const div = document.createElement('div');
+        div.className = 'msg bot';
+        div.innerHTML = `<div class="avatar">AI</div><div><div class="bubble">${markdownToHtml(msg.content)}</div></div>`;
         messagesEl.insertBefore(div, typingEl);
       }
-      // Skip tool messages — they’re internal implementation details
+      // Skip tool messages — they're internal implementation details
     });
 
     scrollBottom();
   }
 
+  // With history on screen there's nothing to re-ask — only greet when the
+  // conversation is actually starting (fresh project or empty history).
+  if (project.chat_history && project.chat_history.length > 0) return;
+
   await callAdvisorAPI(
-    opts.fresh        ? "Let’s start a new project."
-    : project.session_id ? ‘I’m back — where were we?’
-                         : ‘Hello — I just filled in the intake for this project.’);
+    opts.fresh        ? "Let's start a new project."
+    : project.session_id ? 'I’m back — where were we?'
+                         : 'Hello — I just filled in the intake for this project.');
 }
 
 // Once a project is chosen the menu is stale — drop it so it can't be re-clicked.
