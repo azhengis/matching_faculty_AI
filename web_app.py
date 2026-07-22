@@ -74,15 +74,62 @@ _sessions: dict[str, list] = {}   # session_id → conversation history (mirrors
 MAX_STORED_TURNS = 80             # transcript tail kept per project; the proposal is the durable record
 MAX_PROMPT_DOCUMENTS = 3          # newest uploaded documents shown to the advisor
 MAX_DOCUMENT_CHARS   = 6000       # per document — a full CV blows the context window otherwise
-_auth_sessions: dict[str, int] = {}   # session_token → user_id
+_auth_sessions: dict[str, int] = {}   # session_token → user_id (cache over auth_sessions)
+SESSION_DAYS = 30                     # login lifetime; swept on startup
+
+
+def _start_session(token: str, user_id: int) -> None:
+    """Record a login in memory and on disk, so a restart doesn't sign them out."""
+    _auth_sessions[token] = user_id
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute(
+            "INSERT OR REPLACE INTO auth_sessions (token, user_id, expires_at) "
+            "VALUES (?, ?, datetime('now', ?))",
+            (token, user_id, f"+{SESSION_DAYS} days")
+        )
+        con.commit()
+        con.close()
+    except sqlite3.OperationalError:
+        pass  # table not created yet; the in-memory session still works
+
+
+def _end_session(token: str) -> None:
+    _auth_sessions.pop(token, None)
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute("DELETE FROM auth_sessions WHERE token = ?", (token,))
+        con.commit()
+        con.close()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _lookup_session(token: str) -> int | None:
+    """user_id for a session token, from memory or falling back to disk."""
+    if token in _auth_sessions:
+        return _auth_sessions[token]
+    try:
+        con = sqlite3.connect(DB_PATH)
+        row = con.execute(
+            "SELECT user_id FROM auth_sessions "
+            "WHERE token = ? AND datetime(expires_at) > datetime('now')", (token,)
+        ).fetchone()
+        con.close()
+    except sqlite3.OperationalError:
+        return None
+    if not row:
+        return None
+    _auth_sessions[token] = row[0]     # warm the cache for subsequent requests
+    return row[0]
 
 
 def _current_user(req: Request) -> dict | None:
     """Resolve the logged-in user from the session cookie, or None."""
     token = req.cookies.get("session_token")
-    if not token or token not in _auth_sessions:
+    user_id = _lookup_session(token) if token else None
+    if user_id is None:
         return None
-    user_id = _auth_sessions[token]
     con = sqlite3.connect(DB_PATH)
     row = con.execute("SELECT id, email FROM users WHERE id = ?", (user_id,)).fetchone()
     con.close()
@@ -170,6 +217,21 @@ def _init_profiles_db():
         con.execute("ALTER TABLE proposals ADD COLUMN edited_sections TEXT DEFAULT '[]'")
     except sqlite3.OperationalError:
         pass  # column already exists from a prior run
+
+    # Login sessions. These lived only in a module-level dict, so every restart
+    # signed everyone out — invisible in local use beyond the annoyance, but it
+    # also meant a deploy logged out every user mid-task.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            token       TEXT PRIMARY KEY,
+            user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at  TEXT DEFAULT (datetime('now')),
+            expires_at  TEXT NOT NULL
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id)")
+    # Sweep expired rows on startup so the table can't grow without bound.
+    con.execute("DELETE FROM auth_sessions WHERE datetime(expires_at) <= datetime('now')")
 
     # The advisor conversation, as the JSON message list the model is sent.
     # Previously this lived only in a module-level dict, so every server
@@ -418,7 +480,7 @@ async def api_auth_signup(req: Request):
     con.close()
 
     token = secrets.token_urlsafe(32)
-    _auth_sessions[token] = user_id
+    _start_session(token, user_id)
     response = JSONResponse({"email": email})
     response.set_cookie("session_token", token, httponly=True, samesite="lax")
     return response
@@ -441,7 +503,7 @@ async def api_auth_login(req: Request):
 
     user_id = row[0]
     token = secrets.token_urlsafe(32)
-    _auth_sessions[token] = user_id
+    _start_session(token, user_id)
     response = JSONResponse({"email": email})
     response.set_cookie("session_token", token, httponly=True, samesite="lax")
     return response
@@ -452,7 +514,7 @@ async def api_auth_logout(req: Request):
     """End the current session."""
     token = req.cookies.get("session_token")
     if token:
-        _auth_sessions.pop(token, None)
+        _end_session(token)
     response = JSONResponse({"status": "logged_out"})
     response.delete_cookie("session_token")
     return response
