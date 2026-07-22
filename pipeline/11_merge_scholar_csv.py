@@ -49,6 +49,43 @@ def first_name_agrees(a: str, b: str) -> bool:
     return a == b or a.startswith(b) or b.startswith(a)
 
 
+def stage_scholar_papers(con, by_profile):
+    """Keep every Scholar row keyed by its profile id, matched or not.
+
+    Name matching leaves a long tail unclaimed — real faculty the roster spells
+    differently, or misses entirely. Retaining the rows by `scholar_id` means
+    someone can later paste their Google Scholar link into their profile and
+    claim their own publications directly, without anyone fixing the roster.
+    """
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS scholar_papers (
+            scholar_id      TEXT NOT NULL,
+            professor_name  TEXT,
+            title           TEXT NOT NULL,
+            year            INTEGER,
+            citations       INTEGER DEFAULT 0,
+            UNIQUE(scholar_id, title)
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_scholar_papers_id ON scholar_papers(scholar_id)")
+
+    rows = []
+    for profile, pubs in by_profile.items():
+        for r in pubs:
+            title = (r["title"] or "").strip()
+            sid   = (r["scholar_id"] or "").strip()
+            if title and sid:
+                rows.append((sid, profile, title, as_int(r["year"]), as_int(r["citations"]) or 0))
+    con.executemany(
+        "INSERT OR IGNORE INTO scholar_papers (scholar_id, professor_name, title, year, citations) "
+        "VALUES (?, ?, ?, ?, ?)", rows)
+    con.commit()
+    n_profiles = con.execute("SELECT COUNT(DISTINCT scholar_id) FROM scholar_papers").fetchone()[0]
+    n_rows     = con.execute("SELECT COUNT(*) FROM scholar_papers").fetchone()[0]
+    print(f"Staged {n_rows} publications across {n_profiles} Scholar profiles "
+          f"(claimable by pasting a Scholar link into a profile).")
+
+
 def load_faculty(con):
     by_last = collections.defaultdict(list)
     for fid, name in con.execute("SELECT id, name FROM faculty"):
@@ -87,6 +124,7 @@ def main():
     print(f"Read {len(rows)} publications across {len(by_profile)} Scholar profiles.")
 
     con     = sqlite3.connect(DB)
+    stage_scholar_papers(con, by_profile)
     by_last = load_faculty(con)
 
     # Titles already on file, so re-running this is harmless and the three
