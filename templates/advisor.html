@@ -271,20 +271,28 @@ async function openProject(projectId, opts = {}) {
   _proposal = project.proposal || null;
   renderProposalPanel();   // reveals the panel only if there’s already content
 
-  const messages = document.getElementById(‘messages’);
-  messages.innerHTML = ‘<div class="msg bot typing" id="typing"><div class="avatar">AI</div><div class="bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>’;
-
   // Load and display stored chat history if resuming a project
   if (project.chat_history && project.chat_history.length > 0) {
+    const messagesEl = document.getElementById(‘messages’);
+    const typingEl = document.getElementById(‘typing’);
+
+    // Render each stored message (except tool messages)
     project.chat_history.forEach(msg => {
       if (msg.role === ‘user’) {
-        addUserBubble(msg.content);
+        const div = document.createElement(‘div’);
+        div.className = ‘msg user’;
+        div.innerHTML = `<div class="avatar">You</div><div class="bubble">${esc(msg.content)}</div>`;
+        messagesEl.insertBefore(div, typingEl);
       } else if (msg.role === ‘assistant’) {
-        // Only display the text content; tool_calls are internal implementation details
-        renderBotReply(msg.content || ‘’);
+        const div = document.createElement(‘div’);
+        div.className = ‘msg bot’;
+        div.innerHTML = `<div class="avatar">AI</div><div><div class="bubble">${markdownToHtml(msg.content || ‘’)}</div></div>`;
+        messagesEl.insertBefore(div, typingEl);
       }
-      // Skip tool messages — they’re not meant for display
+      // Skip tool messages — they’re internal implementation details
     });
+
+    scrollBottom();
   }
 
   await callAdvisorAPI(
