@@ -198,7 +198,7 @@ def test_get_proposal_returns_empty_defaults_when_none_saved(tmp_path, monkeypat
     response = _run(api_project_proposal(1, _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
     assert _body(response) == {
-        "background": "", "objectives": "", "research_questions": "",
+        "problem_statement": "", "background": "", "objectives": "", "research_questions": "",
         "related_work": "", "methodology": "", "expected_outcomes": "",
         "edited_sections": [],
     }

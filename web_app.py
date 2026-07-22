@@ -218,6 +218,13 @@ def _init_profiles_db():
     except sqlite3.OperationalError:
         pass  # column already exists from a prior run
 
+    # Stage 2's artifact: the sharpened, specific problem statement the advisor
+    # converges on before any proposal section is drafted.
+    try:
+        con.execute("ALTER TABLE proposals ADD COLUMN problem_statement TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
     # Login sessions. These lived only in a module-level dict, so every restart
     # signed everyone out — invisible in local use beyond the annoyance, but it
     # also meant a deploy logged out every user mid-task.
@@ -1064,7 +1071,7 @@ async def api_profile_faculty_overrides(email: str, req: Request):
 
 
 EMPTY_PROPOSAL = {
-    "background": "", "objectives": "", "research_questions": "",
+    "problem_statement": "", "background": "", "objectives": "", "research_questions": "",
     "related_work": "", "methodology": "", "expected_outcomes": "",
     "edited_sections": [],
 }
@@ -1110,7 +1117,7 @@ def _owned_project(con, user, project_id) -> int | None:
 
 def _read_proposal(con, project_id) -> dict:
     row = con.execute(
-        "SELECT background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "SELECT problem_statement, background, objectives, research_questions, related_work, methodology, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (project_id,)
     ).fetchone()
     if not row:
@@ -1391,6 +1398,18 @@ def _advisor_system_prompt(profile: dict) -> str:
     proposal_state = "\n\n".join(written) or "(nothing written yet)"
     gaps = ", ".join(empty) if empty else "none — every section has a draft"
 
+    # The stage is derived from durable state, not conversation memory, so it
+    # survives restarts and resumed sessions: no saved problem statement means
+    # the problem still needs sharpening; a saved one unlocks proposal building.
+    if (proposal.get("problem_statement") or "").strip():
+        stage_line = ("STAGE 3 — BUILD THE PROPOSAL. The problem statement is settled and saved. "
+                      "Build the remaining proposal sections; every section must stay consistent "
+                      "with the saved problem statement.")
+    else:
+        stage_line = ("STAGE 1 — SHARPEN THE PROBLEM. No problem statement has been saved yet, so "
+                      "the problem is not yet specific enough. Do NOT draft or save any other "
+                      "proposal section until a problem statement is confirmed and saved.")
+
     return f"""You are a collegial AI research advisor at DePaul University. You are speaking with {name}.
 
 You are working on one specific project of theirs: "{project_title}".
@@ -1435,12 +1454,35 @@ Sources they linked (you cannot open these — mention them only if relevant):
 1. Help {name} understand specifically how AI and data science could strengthen their research.
 2. Identify DePaul faculty who could be valuable AI/data science collaborators for them.
 
-━━━ CONVERSATION FLOW ━━━
-• First message, when the proposal above already has content: greet {name} by name, name the actual subject back to them, then go straight to the FIRST GAP — the earliest section left empty or thin — and ask one focused question about it. Do not ask what they're working on; they already told you.
+━━━ THE THREE STAGES ━━━
+The conversation moves through three stages, strictly in order. Where you are is determined by the saved proposal, not by memory of the conversation:
 
-• First message, when the proposal above is EMPTY: they started this project from the chat and have told you nothing yet. Greet them, say you'll work through it together and that it takes shape in the panel as you go, then ask what they're working on — the problem itself, in their own words. One question, nothing else.
+{stage_line}
 
-• Build the research proposal through genuine back-and-forth — ask ONE focused question at a time, wait for {name}'s answer, then ask the next. Never dump a checklist of questions in one message. Work through these sections in order, but let {name} jump ahead, revisit, or add detail at any point:
+FIRST MESSAGE:
+• If the proposal above is EMPTY: they started this project from the chat and have told you nothing yet. Greet {name}, say you'll first pin down exactly what the research problem is — specific enough to build on — and then write it up into a proposal together. Ask what they're working on, in their own words. One question, nothing else.
+• If the proposal has content but NO problem statement: greet {name} by name, name the actual subject back to them, and go straight to sharpening — pick the vaguest part of what's written and ask one focused Stage 1 question about it. Do not ask what they're working on; they already told you.
+• If the problem statement IS saved: greet {name}, restate the problem in one line, and go to the earliest empty or thin proposal section with one focused question. Do not re-open the problem statement unless they ask to.
+
+STAGE 1 — SHARPEN THE PROBLEM
+Most researchers arrive with something broad: "AI and education", "social media and mental health", "bias in hiring". Your first job is to refuse to build on a vague foundation — kindly, but firmly. Do not draft proposal sections. Do not suggest methods. Sharpen.
+
+Interrogate the vague parts one question at a time, using these lenses:
+  • WHO exactly — which population, group, or cases? "Students" is not an answer; "first-generation undergraduates in intro CS courses" is.
+  • WHERE — what setting, institution, region, or system? A phenomenon everywhere is a phenomenon nowhere.
+  • WHAT precisely — which specific mechanism, behavior, or outcome? Push past umbrella terms: "mental health" → which construct? measured how?
+  • WHEN — what timeframe or period bounds this?
+  • WHAT WOULD AN ANSWER LOOK LIKE — what evidence, if they had it, would settle the question? If they can't say, the question isn't specific yet.
+
+When an answer stays broad, say so plainly and name the vague word ("'impact' is doing a lot of work in that sentence — impact on what, measured how?"). Then offer 2-4 concrete narrower versions of their idea as an option block so they have something to react to, with the last option always letting them phrase their own.
+
+The problem is sharp enough to leave Stage 1 when you can state: a specific population or setting, a specific phenomenon or mechanism, a clearly named unknown, and roughly what evidence would answer it. Check yourself against that list before moving on — if any part is missing, keep sharpening.
+
+STAGE 2 — WRITE THE PROBLEM STATEMENT
+Once the problem passes the test above, draft a problem statement IN THE CHAT: one focused paragraph naming the specific problem, who or what it concerns, the setting, what is currently unknown, and why it matters now. Ask {name}: "does this capture it, or would you change the emphasis?" Revise until they agree. Then — and only after they confirm the wording — call save_proposal with problem_statement. That save is what unlocks Stage 3; say something like "That's our anchor — everything we build now has to serve this statement."
+
+STAGE 3 — BUILD THE PROPOSAL
+Now build the full proposal through genuine back-and-forth. Every section must stay consistent with, and be checked against, the saved problem statement — if a proposed objective or method drifts away from it, point at the statement and ask which should change. Ask ONE focused question at a time, wait for {name}'s answer, then ask the next. Never dump a checklist of questions in one message. Work through these sections in order, but let {name} jump ahead, revisit, or add detail at any point:
 
   1. Background — the problem, its context, and why it matters NOW. Draw out: what is actually broken or unknown; who is affected; what changed recently that makes this urgent; and what we still can't answer. Two or three developed paragraphs, not a summary line.
   2. Objectives — what they're trying to find out, build, or change. Push past the first vague statement: is the aim descriptive (produce the record nobody has), evaluative (judge whether something works), or interventional (change practice)? Name the aims explicitly, 2-4 of them, each a full sentence saying what will exist or be known at the end.
@@ -1542,6 +1584,7 @@ _ADVISOR_TOOLS = [{
         "parameters": {
             "type": "object",
             "properties": {
+                "problem_statement": {"type": "string", "description": "The sharpened, SPECIFIC problem statement settled in Stage 2 — one focused paragraph naming the exact problem, the specific population or setting, the scope, and what is unknown. Save it only after the researcher confirms the wording. Saving this is what moves the conversation to Stage 3."},
                 "background": {"type": "string", "description": "The problem, its context, and why it matters now. Two or three developed paragraphs of prose — what is broken or unknown, who it affects, what changed recently, and what still can't be answered. Not a one-line summary."},
                 "objectives": {"type": "string", "description": "What the research aims to find out, build, or change. 2-4 aims, each a full sentence naming what will exist or be known at the end. Prose or a bulleted list."},
                 "research_questions": {"type": "string", "description": "3-5 research questions or hypotheses, each a full question. Group by theme when there is more than one angle. Bulleted list (lines starting with '- ')."},
@@ -1628,7 +1671,7 @@ def _advisor_search(query: str, mode: str = "semantic") -> dict:
 
 
 _PROPOSAL_FIELDS = [
-    "background", "objectives", "research_questions",
+    "problem_statement", "background", "objectives", "research_questions",
     "related_work", "methodology", "expected_outcomes",
 ]
 
@@ -1679,7 +1722,7 @@ def _save_proposal(project_id, args: dict) -> dict:
 
     con = sqlite3.connect(DB_PATH)
     existing = con.execute(
-        "SELECT background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "SELECT problem_statement, background, objectives, research_questions, related_work, methodology, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (pid,)
     ).fetchone()
     existing_values = dict(zip(_PROPOSAL_FIELDS, existing)) if existing else {f: "" for f in _PROPOSAL_FIELDS}
@@ -1694,9 +1737,10 @@ def _save_proposal(project_id, args: dict) -> dict:
 
     con.execute(
         """INSERT INTO proposals
-               (project_id, background, objectives, research_questions, related_work, methodology, expected_outcomes, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+               (project_id, problem_statement, background, objectives, research_questions, related_work, methodology, expected_outcomes, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT(project_id) DO UPDATE SET
+               problem_statement = excluded.problem_statement,
                background = excluded.background,
                objectives = excluded.objectives,
                research_questions = excluded.research_questions,
@@ -1704,7 +1748,7 @@ def _save_proposal(project_id, args: dict) -> dict:
                methodology = excluded.methodology,
                expected_outcomes = excluded.expected_outcomes,
                updated_at = excluded.updated_at""",
-        (pid, values["background"], values["objectives"], values["research_questions"],
+        (pid, values["problem_statement"], values["background"], values["objectives"], values["research_questions"],
          values["related_work"], values["methodology"], values["expected_outcomes"])
     )
     # A project begun from the chat starts untitled; name it from the background
@@ -1747,6 +1791,7 @@ def _build_proposal_docx(researcher_name: str, proposal: dict) -> bytes:
     doc.add_heading(title, level=1)
 
     sections = [
+        ("Problem Statement", proposal.get("problem_statement", "")),
         ("Introduction / Background", proposal.get("background", "")),
         ("Research Objectives", proposal.get("objectives", "")),
         ("Possible Research Questions", proposal.get("research_questions", "")),
@@ -1792,7 +1837,7 @@ async def api_project_proposal_download(project_id: int, req: Request):
     name  = name_row[0] if name_row else "Researcher"
     title = con.execute("SELECT title FROM projects WHERE id = ?", (project_id,)).fetchone()[0]
     row = con.execute(
-        "SELECT background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "SELECT problem_statement, background, objectives, research_questions, related_work, methodology, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (project_id,)
     ).fetchone()
     con.close()
