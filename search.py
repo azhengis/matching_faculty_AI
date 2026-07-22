@@ -243,18 +243,31 @@ def load_faculty():
         )
     """)
 
-    # Load faculty who have a research summary OR courses taught
+    # Load faculty who have a research summary, courses taught, OR publications.
+    # Publications count because a scraped bio is often missing for exactly the
+    # people with the deepest publication record — DePaul's most-published
+    # faculty member has no bio page at all, and was invisible to search until
+    # his paper titles were allowed to stand in for one.
     rows = con.execute("""
         SELECT * FROM faculty
         WHERE TRIM(research_summary) != ''
            OR TRIM(COALESCE(classes_taught,'')) != ''
+           OR id IN (SELECT faculty_id FROM papers)
     """).fetchall()
 
-    # Load paper titles per faculty for keyword boosting at query time
-    paper_title_rows = con.execute(
-        "SELECT faculty_id, GROUP_CONCAT(title, ' | ') as titles FROM papers GROUP BY faculty_id"
-    ).fetchall()
-    paper_titles_by_id = {r["faculty_id"]: r["titles"] for r in paper_title_rows}
+    # Most-cited titles per faculty, used to synthesise a research summary for
+    # anyone who has no bio and no courses. Capped because a single profile can
+    # carry over a thousand papers, and a wall of titles dilutes the embedding.
+    TITLES_FOR_SUMMARY = 12
+    top_titles_by_id = {}
+    for r in con.execute(
+        "SELECT faculty_id, title FROM papers "
+        "WHERE TRIM(COALESCE(title,'')) != '' "
+        "ORDER BY faculty_id, cited_by_count DESC"
+    ):
+        bucket = top_titles_by_id.setdefault(r["faculty_id"], [])
+        if len(bucket) < TITLES_FOR_SUMMARY:
+            bucket.append(r["title"].strip())
 
     # Load self-edited overrides, keyed by lowercased email
     override_rows = con.execute(
@@ -264,8 +277,6 @@ def load_faculty():
     con.close()
 
     people = [dict(r) for r in rows]
-    for p in people:
-        p["pub_titles"] = paper_titles_by_id.get(p["id"], "")
 
     for p in people:
         override = overrides_by_email.get((p.get("email") or "").strip().lower())
@@ -281,12 +292,21 @@ def load_faculty():
             summary = fix_summary(p.get("research_summary") or "")
             courses = clean_courses(p.get("classes_taught") or "")
 
+            titles = top_titles_by_id.get(p["id"], [])
+
             if is_biographical(summary, p["name"]) and courses:
                 summary = f"Courses taught: {courses}\n\n{summary}"
                 p["summary_source"] = "courses"
             elif not summary and courses:
                 summary = f"Courses taught: {courses}"
                 p["summary_source"] = "courses"
+            elif (not summary or is_biographical(summary, p["name"])) and titles:
+                # No usable bio, but they publish — their own titles describe the
+                # work better than an empty string does.
+                published = "\n".join(f"- {t}" for t in titles)
+                summary = (f"Published research:\n{published}"
+                           + (f"\n\n{summary}" if summary else ""))
+                p["summary_source"] = "papers"
             else:
                 p["summary_source"] = "research"
 
@@ -684,6 +704,13 @@ def kw_presence_score(query, text):
 
 def alpha_for_query(query, source="research"):
     n = len(query_keywords(query))
+    if source == "papers":
+        # A summary built from publication titles is SPECTER2's native input —
+        # the model is trained on exactly this text — so lean on the embedding
+        # a little harder than for a prose bio.
+        if n <= 1: return 0.50
+        if n <= 3: return 0.70
+        return 0.82
     if source == "courses":
         # Courses-based summaries get slightly lower SPECTER2 weight than research
         # summaries because course lists are less semantically dense than prose bios.
