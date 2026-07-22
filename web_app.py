@@ -1219,13 +1219,17 @@ async def api_project_get(project_id: int, req: Request):
         return JSONResponse({"error": "No such project"}, status_code=404)
 
     row = con.execute(
-        "SELECT id, title, intake, session_id, status, created_at FROM projects WHERE id = ?",
+        "SELECT id, title, intake, session_id, status, created_at, chat_history FROM projects WHERE id = ?",
         (project_id,)
     ).fetchone()
     try:
         intake = json.loads(row[2] or "{}")
     except ValueError:
         intake = {}
+    try:
+        chat_history = json.loads(row[6] or "[]")
+    except ValueError:
+        chat_history = []
     matches = [dict(zip(
         ["faculty_id", "name", "title", "department", "email", "match_tier", "match_pct", "why_match"], m
     )) for m in con.execute(
@@ -1238,7 +1242,7 @@ async def api_project_get(project_id: int, req: Request):
     return JSONResponse({
         "id": row[0], "title": row[1] or "Untitled project", "intake": intake,
         "session_id": row[3], "status": row[4], "created_at": row[5],
-        "proposal": proposal, "matches": matches,
+        "proposal": proposal, "matches": matches, "chat_history": chat_history,
     })
 
 
