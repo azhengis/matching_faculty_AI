@@ -22,7 +22,7 @@ SETUP (one time):
 RUN:
     python3 search.py
 """
-import os, sys, sqlite3, pickle, re, json
+import os, sys, sqlite3, pickle, re, json, hashlib
 import numpy as np
 
 DB          = "faculty.db"
@@ -274,6 +274,21 @@ def load_faculty():
         "SELECT email, self_bio, self_research_interests FROM faculty_overrides"
     ).fetchall()
     overrides_by_email = {r["email"].lower(): r for r in override_rows if r["email"]}
+
+    # Research content distilled from documents the person uploaded to their own
+    # profile (CV, papers, grant material), keyed by email like the overrides
+    # above so it survives the faculty-id churn of a pipeline re-import.
+    docs_by_email = {}
+    try:
+        for r in con.execute(
+            "SELECT p.email AS email, d.research_summary AS summary "
+            "FROM profile_documents d JOIN profiles p ON p.id = d.profile_id "
+            "WHERE TRIM(COALESCE(d.research_summary,'')) != '' "
+            "AND TRIM(COALESCE(p.email,'')) != ''"
+        ):
+            docs_by_email.setdefault(r["email"].strip().lower(), []).append(r["summary"].strip())
+    except sqlite3.OperationalError:
+        pass  # profile_documents not created yet (search used before the web app)
     con.close()
 
     people = [dict(r) for r in rows]
@@ -312,6 +327,13 @@ def load_faculty():
 
         if self_interests:
             summary = f"Research interests: {', '.join(self_interests)}\n\n{summary}"
+
+        # Anything they uploaded themselves describes their work better than a
+        # scraped page, so it goes first — build_text truncates from the end.
+        uploaded = docs_by_email.get((p.get("email") or "").strip().lower())
+        if uploaded:
+            summary = "\n\n".join(uploaded) + (f"\n\n{summary}" if summary else "")
+            p["summary_source"] = "research"
 
         p["research_summary"] = summary
 
@@ -525,24 +547,42 @@ def kmeans(X, k, n_iter=80, seed=42):
 # Index
 # ---------------------------------------------------------------------------
 
+def _index_fingerprint(texts):
+    """Content hash of everything that gets embedded.
+
+    The cache used to key on faculty count alone, so any edit that left the
+    count unchanged — a self-edited bio, a newly uploaded CV — was silently
+    ignored and the stale embedding served forever. Hashing the text means the
+    index rebuilds exactly when what it represents actually changed.
+    """
+    h = hashlib.sha256()
+    for t in texts:
+        h.update(t.encode("utf-8", "replace"))
+        h.update(b"\0")
+    return h.hexdigest()
+
+
 def get_index(people, model):
+    texts = [build_text(p) for p in people]
+    fingerprint = _index_fingerprint(texts)
+
     if os.path.exists(INDEX):
         with open(INDEX, "rb") as f:
             cache = pickle.load(f)
-        if cache.get("count") == len(people) and cache.get("model") == MODEL:
+        if (cache.get("fingerprint") == fingerprint
+                and cache.get("count") == len(people)
+                and cache.get("model") == MODEL):
             print(f"Loaded cached index ({len(people)} faculty, {K_CLUSTERS} clusters).\n")
             return cache["emb"], cache["labels"], cache["centroids"]
+        if cache.get("count") == len(people) and cache.get("model") == MODEL:
+            print("Faculty text changed since the index was built — rebuilding.")
 
     print(f"Building SPECTER2 embeddings for {len(people)} faculty (one-time ~1-2 min)...")
-    emb = model.encode(
-        [build_text(p) for p in people],
-        normalize_embeddings=True,
-        show_progress_bar=True,
-    )
+    emb = model.encode(texts, normalize_embeddings=True, show_progress_bar=True)
     print(f"Clustering into {K_CLUSTERS} research-topic groups...")
     labels, centroids = kmeans(emb, K_CLUSTERS)
     with open(INDEX, "wb") as f:
-        pickle.dump({"count": len(people), "model": MODEL,
+        pickle.dump({"count": len(people), "model": MODEL, "fingerprint": fingerprint,
                      "emb": emb, "labels": labels, "centroids": centroids}, f)
     print("Index built and cached.\n")
     return emb, labels, centroids
