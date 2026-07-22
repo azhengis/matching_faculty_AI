@@ -30,8 +30,11 @@ OLLAMA_URL   = "http://localhost:11434/api/generate"
 RESEARCH_HEADINGS = ["Research Interests", "Specific Research Area", "Research Area",
                      "Major Areas of Interest", "Research Focus",
                      "Areas of Expertise", "Areas of Interest", "Interests"]
-PUB_HEADINGS    = ["Selected Publications", "Select Publications", "Publications"]
-BIO_HEADINGS    = ["Biography", "About"]
+PUB_HEADINGS    = ["Selected Publications:", "Selected Publications", "Select Publications", "Publications"]
+# "BIO" is the heading DePaul actually uses on the faculty template. Omitting it
+# left every profile whose page has no explicit research section — most of the
+# arts, music, and law faculty — with an empty summary and invisible to search.
+BIO_HEADINGS    = ["Biography", "BIO", "About"]
 COURSE_HEADINGS = ["Classes Taught", "Courses Taught", "Courses Recently Taught",
                    "Courses Frequently Taught"]
 # Headings we don't output but use as boundaries so a section stops at the next one.
@@ -79,9 +82,13 @@ def parse_sections(text):
     low = text.lower()
     hits = []
     for h in ALL_HEADINGS:
-        i = low.find(h.lower())
-        if i != -1:
-            hits.append((i, i + len(h), h))
+        # Match whole words only. A plain substring search is fine for long
+        # headings but catastrophic for short ones: "BIO" would fire inside
+        # "biology", "biomedical", or "Biography" and split the page at the
+        # wrong offset.
+        m = re.search(r"(?<!\w)" + re.escape(h.lower()) + r"(?!\w)", low)
+        if m:
+            hits.append((m.start(), m.end(), h))
     # Drop any hit fully contained inside another (e.g. "Research Area" inside
     # "Specific Research Area", or "Publications" inside "Selected Publications").
     hits.sort(key=lambda x: (x[1] - x[0]), reverse=True)   # longest first
@@ -123,9 +130,13 @@ def ollama_topics(text):
 
 
 def main():
-    if not os.path.exists(ROSTER_IN):
+    # Prefer the already-enriched file as the base so a re-run only fills
+    # gaps / picks up live page changes instead of clobbering research
+    # summaries that came from a later stage (e.g. the OpenAlex fallback).
+    src = JSON_OUT if os.path.exists(JSON_OUT) else ROSTER_IN
+    if not os.path.exists(src):
         sys.exit(f"Put {ROSTER_IN} next to this script first.")
-    with open(ROSTER_IN, encoding="utf-8") as f:
+    with open(src, encoding="utf-8") as f:
         people = json.load(f)
 
     todo = [p for p in people if p.get("bio_url")]
@@ -152,12 +163,17 @@ def main():
         # Combine every research-type section that exists on the page.
         research_bits = [sections[h] for h in RESEARCH_HEADINGS if sections.get(h)]
         research = "\n\n".join(research_bits)
-        if not research:                       # fall back to biography prose
+        if not research and not (p.get("research_summary") or "").strip():
+            # Biography prose is the last resort — weaker signal than a research
+            # section, so it only ever fills a genuine gap. Never let it replace
+            # a summary an earlier run or a later stage already established.
             research = first_of(sections, BIO_HEADINGS)
 
-        p["research_summary"]  = research
-        p["publications_text"] = first_of(sections, PUB_HEADINGS)
-        p["classes_taught"]    = first_of(sections, COURSE_HEADINGS)
+        # Fall back to whatever was already there if this scrape found
+        # nothing new -- an empty page section shouldn't erase good data.
+        p["research_summary"]  = research or p.get("research_summary", "")
+        p["publications_text"] = first_of(sections, PUB_HEADINGS) or p.get("publications_text", "")
+        p["classes_taught"]    = first_of(sections, COURSE_HEADINGS) or p.get("classes_taught", "")
 
         if research:
             found += 1
