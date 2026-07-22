@@ -3,10 +3,15 @@
   --navy:#003366; --navy-lift:#0B4E92; --navy-deep:#00284D; --scarlet:#C41E2E;
   --canvas:#F4F6FA; --surface:#FFFFFF; --paper:#FCFAF5; --paper-line:#E8E2D6;
   --border:#E2E8F1; --border-2:#CBD5E4;
-  --ink:#111C2E; --ink-2:#55657E; --ink-3:#8D9AAE;
+  --ink:#111C2E; --ink-2:#55657E; --ink-3:#68778F;
   --green:#1A6B3A; --green-bg:#E8F5ED;
   --amber:#7A4F00; --amber-bg:#FDF5E5;
   --teal:#0D5C63; --teal-bg:#E4F4F5;
+  /* Palatino Linotype for every serif setting. Book Antiqua is metric-compatible
+     for machines without it; Georgia is the last resort. Palatino carries a
+     smaller x-height than Georgia, so serif sizes below are set a little larger
+     to keep the same apparent weight on screen. */
+  --serif:"Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
   --r-sm:8px; --r-md:12px; --r-lg:16px;
   --sh-sm:0 1px 2px rgba(17,28,46,.05);
   --sh-md:0 4px 14px rgba(17,28,46,.07);
@@ -52,8 +57,8 @@ a{color:var(--navy-lift)}
 /* ── Page headers ── */
 .page-head{margin-bottom:30px}
 .eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--scarlet);margin-bottom:7px}
-h1{font-family:Georgia,"Times New Roman",serif;font-size:31px;font-weight:normal;letter-spacing:-.02em;margin-bottom:7px}
-h2{font-family:Georgia,"Times New Roman",serif;font-size:22px;font-weight:normal;letter-spacing:-.015em;margin-bottom:7px}
+h1{font-family:var(--serif);font-size:34px;font-weight:normal;letter-spacing:-.01em;margin-bottom:7px}
+h2{font-family:var(--serif);font-size:24px;font-weight:normal;letter-spacing:-.008em;margin-bottom:7px}
 .lede{font-size:15px;color:var(--ink-2);max-width:62ch}
 
 /* ── Cards ── */
@@ -87,7 +92,7 @@ h2{font-family:Georgia,"Times New Roman",serif;font-size:22px;font-weight:normal
 
 /* ── Empty states ── */
 .empty{background:var(--surface);border:1px dashed var(--border-2);border-radius:var(--r-lg);padding:38px 30px;text-align:center}
-.empty h3{font-family:Georgia,serif;font-size:19px;font-weight:normal;margin-bottom:8px}
+.empty h3{font-family:var(--serif);font-size:21px;font-weight:normal;margin-bottom:8px}
 .empty p{font-size:14.5px;color:var(--ink-2);max-width:46ch;margin:0 auto 20px}
 
 /* ── Match / person cards ── */

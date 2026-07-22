@@ -9,7 +9,10 @@
   --navy:#003366; --navy-lift:#0B4E92; --scarlet:#C41E2E;
   --canvas:#F4F6FA; --surface:#FFFFFF; --paper:#FCFAF5;
   --border:#E2E8F1; --border-2:#CBD5E4;
-  --ink:#111C2E; --ink-2:#55657E; --ink-3:#8D9AAE;
+  --ink:#111C2E; --ink-2:#55657E; --ink-3:#68778F;
+  /* Kept in step with _shell.html — the login page stands alone and does not
+     splice in the shared stylesheet. */
+  --serif:"Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
   --r-sm:8px; --r-md:12px; --r-lg:16px;
   --sh-sm:0 1px 2px rgba(17,28,46,.05);
   --sh-lg:0 16px 40px rgba(17,28,46,.10);
@@ -25,7 +28,7 @@ body{background:var(--canvas);color:var(--ink);font-family:-apple-system,BlinkMa
 .brand-name{font-size:14px;font-weight:700;color:var(--navy);letter-spacing:-.01em}
 
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-lg);padding:34px 36px}
-h2{font-family:Georgia,"Times New Roman",serif;font-size:24px;font-weight:normal;margin-bottom:6px;letter-spacing:-.015em}
+h2{font-family:var(--serif);font-size:26px;font-weight:normal;margin-bottom:6px;letter-spacing:-.01em}
 .sub{font-size:14px;color:var(--ink-2);margin-bottom:22px}
 .tabs{display:flex;gap:4px;margin-bottom:22px;background:var(--canvas);border-radius:10px;padding:4px}
 .tab{flex:1;padding:8px 10px;background:none;border:none;border-radius:7px;font-size:13.5px;font-weight:600;color:var(--ink-2);cursor:pointer;font-family:inherit;transition:background .15s,color .15s}
