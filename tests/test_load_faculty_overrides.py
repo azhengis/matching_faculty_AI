@@ -13,7 +13,11 @@ def _make_db(tmp_path):
             name TEXT, email TEXT, research_summary TEXT, classes_taught TEXT
         )
     """)
-    con.execute("CREATE TABLE papers (faculty_id INTEGER, title TEXT)")
+    # Mirrors the real papers schema — load_faculty ranks titles by citations
+    # when it has to compose a research summary for a faculty member with no bio.
+    con.execute("CREATE TABLE papers (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "faculty_id INTEGER, title TEXT, abstract TEXT, year INTEGER, "
+                "cited_by_count INTEGER DEFAULT 0)")
     con.commit()
     con.close()
     return db_path

@@ -148,8 +148,19 @@ def test_get_my_profile_returns_saved_profile(tmp_path, monkeypatch):
 def test_get_proposal_requires_login(tmp_path, monkeypatch):
     _init_db(tmp_path, monkeypatch)
 
-    response = _run(web_app.api_profile_proposal(_FakeRequest(cookies={})))
+    response = _run(web_app.api_project_proposal(1, _FakeRequest(cookies={})))
     assert response.status_code == 401
+
+
+def test_project_routes_require_login(tmp_path, monkeypatch):
+    _init_db(tmp_path, monkeypatch)
+    anon = _FakeRequest(cookies={})
+
+    assert _run(web_app.api_projects_list(anon)).status_code == 401
+    assert _run(web_app.api_projects_create(_FakeRequest({"intake": {}}))).status_code == 401
+    assert _run(web_app.api_project_get(1, anon)).status_code == 401
+    assert _run(web_app.api_project_matches(1, anon)).status_code == 401
+    assert _run(web_app.api_project_delete(1, anon)).status_code == 401
 
 
 def test_faculty_overrides_lookup_requires_login(tmp_path, monkeypatch):

@@ -6,7 +6,7 @@ import sqlite3
 from docx import Document
 
 import web_app
-from web_app import _build_proposal_docx, api_profile_proposal_download
+from web_app import _build_proposal_docx, api_project_proposal_download
 
 
 def _run(coro):
@@ -100,51 +100,60 @@ def _signup_session(email="jane@depaul.edu"):
     return list(web_app._auth_sessions.keys())[-1]
 
 
+def _profile_and_project(db_path, token, title="Jane's project"):
+    user_id = web_app._auth_sessions[token]
+    con = sqlite3.connect(db_path)
+    cur = con.execute("INSERT INTO profiles (name, user_id) VALUES ('Jane Doe', ?)", (user_id,))
+    profile_id = cur.lastrowid
+    cur = con.execute("INSERT INTO projects (profile_id, title) VALUES (?, ?)", (profile_id, title))
+    project_id = cur.lastrowid
+    con.commit()
+    con.close()
+    return project_id
+
+
 def test_download_requires_login(tmp_path, monkeypatch):
     _init_db(tmp_path, monkeypatch)
-    response = _run(api_profile_proposal_download(_FakeRequest(cookies={})))
+    response = _run(api_project_proposal_download(1, _FakeRequest(cookies={})))
     assert response.status_code == 401
 
 
-def test_download_returns_404_when_no_profile(tmp_path, monkeypatch):
+def test_download_returns_404_when_project_not_owned(tmp_path, monkeypatch):
     _init_db(tmp_path, monkeypatch)
     token = _signup_session()
-    response = _run(api_profile_proposal_download(_FakeRequest(cookies={"session_token": token})))
+    response = _run(api_project_proposal_download(1, _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 404
 
 
 def test_download_returns_404_when_no_proposal(tmp_path, monkeypatch):
     db_path = _init_db(tmp_path, monkeypatch)
     token = _signup_session()
-    user_id = web_app._auth_sessions[token]
-    con = sqlite3.connect(db_path)
-    con.execute("INSERT INTO profiles (name, user_id) VALUES ('Jane Doe', ?)", (user_id,))
-    con.commit()
-    con.close()
+    project_id = _profile_and_project(db_path, token)
 
-    response = _run(api_profile_proposal_download(_FakeRequest(cookies={"session_token": token})))
+    response = _run(api_project_proposal_download(project_id, _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 404
 
 
 def test_download_returns_docx_when_proposal_exists(tmp_path, monkeypatch):
     db_path = _init_db(tmp_path, monkeypatch)
     token = _signup_session()
-    user_id = web_app._auth_sessions[token]
+    project_id = _profile_and_project(db_path, token, title="Consent and imagery")
+
     con = sqlite3.connect(db_path)
-    cur = con.execute("INSERT INTO profiles (name, user_id) VALUES ('Jane Doe', ?)", (user_id,))
-    profile_id = cur.lastrowid
     con.execute(
-        "INSERT INTO proposals (profile_id, background, objectives, research_questions, methodology) "
-        "VALUES (?, 'bg text', 'obj text', 'rq text', 'method text')", (profile_id,)
+        "INSERT INTO proposals (project_id, background, objectives, research_questions, methodology) "
+        "VALUES (?, 'bg text', 'obj text', 'rq text', 'method text')", (project_id,)
     )
     con.commit()
     con.close()
 
-    response = _run(api_profile_proposal_download(_FakeRequest(cookies={"session_token": token})))
+    response = _run(api_project_proposal_download(project_id, _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
     assert response.media_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     assert "attachment" in response.headers["content-disposition"]
-    assert "Jane_Doe" in response.headers["content-disposition"]
+    # Filenames are built from the project title, so several proposals from one
+    # researcher don't all download as the same file.
+    assert "Consent_and_imagery" in response.headers["content-disposition"]
 
     texts = _paragraph_texts(response.body)
     assert "bg text" in texts
