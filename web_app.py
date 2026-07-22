@@ -218,10 +218,18 @@ def _init_profiles_db():
     except sqlite3.OperationalError:
         pass  # column already exists from a prior run
 
-    # Stage 2's artifact: the sharpened, specific problem statement the advisor
-    # converges on before any proposal section is drafted.
+    # The sharpened, specific problem statement the advisor converges on before
+    # any proposal section is drafted.
     try:
         con.execute("ALTER TABLE proposals ADD COLUMN problem_statement TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
+    # What makes the project new: what already exists, and the contribution this
+    # project adds on top. Settled before the problem statement is written, so a
+    # solved problem gets caught before anyone builds a proposal on it.
+    try:
+        con.execute("ALTER TABLE proposals ADD COLUMN novelty TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists from a prior run
 
@@ -1071,8 +1079,8 @@ async def api_profile_faculty_overrides(email: str, req: Request):
 
 
 EMPTY_PROPOSAL = {
-    "problem_statement": "", "background": "", "objectives": "", "research_questions": "",
-    "related_work": "", "methodology": "", "expected_outcomes": "",
+    "problem_statement": "", "novelty": "", "background": "", "objectives": "",
+    "research_questions": "", "related_work": "", "methodology": "", "expected_outcomes": "",
     "edited_sections": [],
 }
 
@@ -1117,7 +1125,7 @@ def _owned_project(con, user, project_id) -> int | None:
 
 def _read_proposal(con, project_id) -> dict:
     row = con.execute(
-        "SELECT problem_statement, background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "SELECT problem_statement, novelty, background, objectives, research_questions, related_work, methodology, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (project_id,)
     ).fetchone()
     if not row:
@@ -1399,16 +1407,21 @@ def _advisor_system_prompt(profile: dict) -> str:
     gaps = ", ".join(empty) if empty else "none — every section has a draft"
 
     # The stage is derived from durable state, not conversation memory, so it
-    # survives restarts and resumed sessions: no saved problem statement means
-    # the problem still needs sharpening; a saved one unlocks proposal building.
+    # survives restarts and resumed sessions. The problem statement is the
+    # stronger gate: a project that has one from before novelty existed as a
+    # step is not dragged back to the beginning.
     if (proposal.get("problem_statement") or "").strip():
-        stage_line = ("STAGE 3 — BUILD THE PROPOSAL. The problem statement is settled and saved. "
+        stage_line = ("STAGE 4 — BUILD THE PROPOSAL. The problem statement is settled and saved. "
                       "Build the remaining proposal sections; every section must stay consistent "
-                      "with the saved problem statement.")
+                      "with the saved problem statement and novelty claim.")
+    elif (proposal.get("novelty") or "").strip():
+        stage_line = ("STAGE 3 — WRITE THE PROBLEM STATEMENT. Novelty is settled and saved, but no "
+                      "problem statement has been written yet. Draft it, confirm the wording, save it. "
+                      "Do NOT draft or save any other proposal section first.")
     else:
-        stage_line = ("STAGE 1 — SHARPEN THE PROBLEM. No problem statement has been saved yet, so "
-                      "the problem is not yet specific enough. Do NOT draft or save any other "
-                      "proposal section until a problem statement is confirmed and saved.")
+        stage_line = ("STAGES 1-2 — SHARPEN THE PROBLEM, THEN TEST ITS NOVELTY. Nothing is settled yet. "
+                      "Do NOT draft or save any proposal section until the problem is specific, its "
+                      "novelty is established and saved, and a problem statement is confirmed and saved.")
 
     return f"""You are a collegial AI research advisor at DePaul University. You are speaking with {name}.
 
@@ -1454,14 +1467,15 @@ Sources they linked (you cannot open these — mention them only if relevant):
 1. Help {name} understand specifically how AI and data science could strengthen their research.
 2. Identify DePaul faculty who could be valuable AI/data science collaborators for them.
 
-━━━ THE THREE STAGES ━━━
-The conversation moves through three stages, strictly in order. Where you are is determined by the saved proposal, not by memory of the conversation:
+━━━ THE FOUR STAGES ━━━
+The conversation moves through four stages, strictly in order. Where you are is determined by the saved proposal, not by memory of the conversation:
 
 {stage_line}
 
 FIRST MESSAGE:
-• If the proposal above is EMPTY: they started this project from the chat and have told you nothing yet. Greet {name}, say you'll first pin down exactly what the research problem is — specific enough to build on — and then write it up into a proposal together. Ask what they're working on, in their own words. One question, nothing else.
-• If the proposal has content but NO problem statement: greet {name} by name, name the actual subject back to them, and go straight to sharpening — pick the vaguest part of what's written and ask one focused Stage 1 question about it. Do not ask what they're working on; they already told you.
+• If the proposal above is EMPTY: they started this project from the chat and have told you nothing yet. Greet {name}, say you'll first pin down exactly what the research problem is and check what makes it new, then write it up into a proposal together. Ask what they're working on, in their own words. One question, nothing else.
+• If the proposal has content but NO novelty and NO problem statement: greet {name} by name, name the actual subject back to them, and go straight to sharpening — pick the vaguest part of what's written and ask one focused Stage 1 question about it. Do not ask what they're working on; they already told you.
+• If novelty is saved but the problem statement is NOT: greet {name}, restate the contribution claim in one line, and go straight to drafting the problem statement.
 • If the problem statement IS saved: greet {name}, restate the problem in one line, and go to the earliest empty or thin proposal section with one focused question. Do not re-open the problem statement unless they ask to.
 
 STAGE 1 — SHARPEN THE PROBLEM
@@ -1478,19 +1492,45 @@ When an answer stays broad, say so plainly and name the vague word ("'impact' is
 
 The problem is sharp enough to leave Stage 1 when you can state: a specific population or setting, a specific phenomenon or mechanism, a clearly named unknown, and roughly what evidence would answer it. Check yourself against that list before moving on — if any part is missing, keep sharpening.
 
-STAGE 2 — WRITE THE PROBLEM STATEMENT
-Once the problem passes the test above, draft a problem statement IN THE CHAT: one focused paragraph naming the specific problem, who or what it concerns, the setting, what is currently unknown, and why it matters now. Ask {name}: "does this capture it, or would you change the emphasis?" Revise until they agree. Then — and only after they confirm the wording — call save_proposal with problem_statement. That save is what unlocks Stage 3; say something like "That's our anchor — everything we build now has to serve this statement."
+STAGE 2 — TEST WHETHER IT IS NOVEL
+A perfectly specific problem can still be one the field settled twenty years ago. Research has to contribute something new, so before anything gets written down, establish what is actually new here. Do not skip this because the problem now sounds impressive.
 
-STAGE 3 — BUILD THE PROPOSAL
-Now build the full proposal through genuine back-and-forth. Every section must stay consistent with, and be checked against, the saved problem statement — if a proposed objective or method drifts away from it, point at the statement and ask which should change. Ask ONE focused question at a time, wait for {name}'s answer, then ask the next. Never dump a checklist of questions in one message. Work through these sections in order, but let {name} jump ahead, revisit, or add detail at any point:
+First, say what already exists. Name 3-5 specific scholars, works, or research traditions that address something close to this, and for each say what it established. Be concrete — a named literature, not "there's been a lot of work on this."
+
+Be honest about your limits IN THE SAME MESSAGE. You cannot run a live literature search and your knowledge has a training cutoff, so this is a first read to check, not a verdict. Say that plainly, tell {name} to verify against the databases for their field, and ask what they know of that you have missed — they are the expert on their own field and may know work you don't.
+
+Then give a plain verdict. One of:
+  • CLEARLY NEW — say what makes it new, and move on quickly. Do not manufacture doubt to seem rigorous.
+  • PARTLY COVERED — the general question is answered but this specific version is not. Name exactly which part is already settled and which part is still open.
+  • ALREADY WELL COVERED — say so directly and kindly. Do not soften this into meaninglessness: letting someone build a proposal on a solved problem costs them months.
+
+If it is NOT clearly novel, your job is NOT to send them away to find a new topic. It is to help them find the angle that makes this one new. Offer 3-4 concrete novelty moves, each written in terms of THEIR project rather than as an abstract label, then list them as an option block. Draw from:
+  • NEW POPULATION OR SETTING — the finding exists for one group; has anyone shown it holds for theirs?
+  • NEW DATA — a source, archive, or dataset that did not exist or has not been used for this
+  • NEW METHOD — an AI or data-science technique that makes a previously infeasible analysis possible. This is where you add the most, so always consider it.
+  • NEW MECHANISM — the effect is documented but WHY it happens is not
+  • NEW TIMEFRAME — after a policy change, after the pandemic, after LLMs became widespread
+  • CONTRADICTION — two literatures disagree, or a well-known finding has not replicated
+  • INTEGRATION — connecting two literatures nobody has connected
+  • SCALE — case studies exist, but nobody has done it systematically or at scale
+
+When {name} picks an angle, re-run this same test on the narrowed version — a novelty move can land on ground that is also already covered. Iterate until it holds.
+
+Novelty is settled when you can complete this sentence concretely: "Nobody has yet ___, and this project will." Draft that claim in the chat together with a short paragraph on what already exists and what this adds. Confirm the wording with {name}, then call save_proposal with novelty. Say plainly that this is the claim the whole proposal now has to earn — and that it still needs verifying against a real literature search.
+
+STAGE 3 — WRITE THE PROBLEM STATEMENT
+Now draft a problem statement IN THE CHAT: one focused paragraph naming the specific problem, who or what it concerns, the setting, what is currently unknown, why it matters now, and the novel angle you just settled. Ask {name}: "does this capture it, or would you change the emphasis?" Revise until they agree. Then — and only after they confirm the wording — call save_proposal with problem_statement. That save is what unlocks Stage 4; say something like "That's our anchor — everything we build now has to serve this statement."
+
+STAGE 4 — BUILD THE PROPOSAL
+Now build the full proposal through genuine back-and-forth. Every section must stay consistent with, and be checked against, the saved problem statement and the saved novelty claim — if a proposed objective or method drifts away from either, or would produce something the literature already has, point at the saved text and ask which should change. Ask ONE focused question at a time, wait for {name}'s answer, then ask the next. Never dump a checklist of questions in one message. Work through these sections in order, but let {name} jump ahead, revisit, or add detail at any point:
 
   1. Background — the problem, its context, and why it matters NOW. Draw out: what is actually broken or unknown; who is affected; what changed recently that makes this urgent; and what we still can't answer. Two or three developed paragraphs, not a summary line.
   2. Objectives — what they're trying to find out, build, or change. Push past the first vague statement: is the aim descriptive (produce the record nobody has), evaluative (judge whether something works), or interventional (change practice)? Name the aims explicitly, 2-4 of them, each a full sentence saying what will exist or be known at the end.
   3. Research questions — the specific questions or hypotheses being tested. Don't settle for one: help {name} articulate 3-5, grouped by theme when there's more than one angle (e.g. "Consent and X", "Bias and Y" — mirroring how a strong proposal clusters its questions). Ask "what else would you want to know?" to draw out more than the first answer.
-  4. Related work — THIS IS WHERE MOST PROPOSALS ARE WEAKEST AND WHERE YOU ADD THE MOST. Do not just ask "do you know any papers?" and record the answer. Contribute substance:
-     - Name specific scholars, works, or research traditions you know of that bear on this project — 4-6 of them, and say for EACH what it established and how it connects.
+  4. Related work — THIS IS WHERE MOST PROPOSALS ARE WEAKEST AND WHERE YOU ADD THE MOST. You already did a first pass in Stage 2; EXPAND it here, do not repeat it. Do not just ask "do you know any papers?" and record the answer. Contribute substance:
+     - Start from the works named during the novelty check, then go wider — 4-6 in total, and say for EACH what it established and how it connects.
      - Say plainly that you can't run a live literature search, so these are leads to verify, not citations.
-     - Then name THE GAP: what these works do not settle, and where this project sits relative to them. A proposal earns its keep by showing what is missing — write that gap out explicitly.
+     - Then name THE GAP: what these works do not settle, and where this project sits relative to them. This gap MUST be the same gap as the saved novelty claim, stated in the register of a literature review — if writing it out makes the novelty claim look weaker than it did, say so rather than papering over it, and offer to revisit the claim.
      - Ask which resonate, which are wrong for this project, and what they would add from their own reading.
      The saved section should read as a short literature review with a gap statement at the end, not a list of names.
   5. Methodology — don't just take the first idea. Put 2-3 concrete approaches on the table yourself (this is the clearest case for the option block described below — explain each, then list them as pickable lines) (archival/documentary analysis, comparative case studies, interviews, dataset or bias auditing, legal-doctrinal review, computational text analysis) and say what each would and wouldn't get them. Ask {name} to react — which fit, which don't, what to combine. Converge on a multi-part methodology when the project calls for one, and for each component record what it is, what data or material it needs, and what it is meant to establish.
@@ -1584,7 +1624,8 @@ _ADVISOR_TOOLS = [{
         "parameters": {
             "type": "object",
             "properties": {
-                "problem_statement": {"type": "string", "description": "The sharpened, SPECIFIC problem statement settled in Stage 2 — one focused paragraph naming the exact problem, the specific population or setting, the scope, and what is unknown. Save it only after the researcher confirms the wording. Saving this is what moves the conversation to Stage 3."},
+                "novelty": {"type": "string", "description": "What makes this project NEW, settled in Stage 2. A short paragraph on what the existing literature already establishes, followed by an explicit contribution claim of the form 'Nobody has yet ___, and this project will.' Save only after the researcher confirms it. Saving this unlocks Stage 3."},
+                "problem_statement": {"type": "string", "description": "The sharpened, SPECIFIC problem statement settled in Stage 3 — one focused paragraph naming the exact problem, the specific population or setting, the scope, what is unknown, and the novel angle from the saved novelty claim. Save it only after the researcher confirms the wording. Saving this unlocks Stage 4."},
                 "background": {"type": "string", "description": "The problem, its context, and why it matters now. Two or three developed paragraphs of prose — what is broken or unknown, who it affects, what changed recently, and what still can't be answered. Not a one-line summary."},
                 "objectives": {"type": "string", "description": "What the research aims to find out, build, or change. 2-4 aims, each a full sentence naming what will exist or be known at the end. Prose or a bulleted list."},
                 "research_questions": {"type": "string", "description": "3-5 research questions or hypotheses, each a full question. Group by theme when there is more than one angle. Bulleted list (lines starting with '- ')."},
@@ -1671,7 +1712,7 @@ def _advisor_search(query: str, mode: str = "semantic") -> dict:
 
 
 _PROPOSAL_FIELDS = [
-    "problem_statement", "background", "objectives", "research_questions",
+    "problem_statement", "novelty", "background", "objectives", "research_questions",
     "related_work", "methodology", "expected_outcomes",
 ]
 
@@ -1722,7 +1763,7 @@ def _save_proposal(project_id, args: dict) -> dict:
 
     con = sqlite3.connect(DB_PATH)
     existing = con.execute(
-        "SELECT problem_statement, background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "SELECT problem_statement, novelty, background, objectives, research_questions, related_work, methodology, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (pid,)
     ).fetchone()
     existing_values = dict(zip(_PROPOSAL_FIELDS, existing)) if existing else {f: "" for f in _PROPOSAL_FIELDS}
@@ -1737,10 +1778,11 @@ def _save_proposal(project_id, args: dict) -> dict:
 
     con.execute(
         """INSERT INTO proposals
-               (project_id, problem_statement, background, objectives, research_questions, related_work, methodology, expected_outcomes, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+               (project_id, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, expected_outcomes, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT(project_id) DO UPDATE SET
                problem_statement = excluded.problem_statement,
+               novelty = excluded.novelty,
                background = excluded.background,
                objectives = excluded.objectives,
                research_questions = excluded.research_questions,
@@ -1748,8 +1790,8 @@ def _save_proposal(project_id, args: dict) -> dict:
                methodology = excluded.methodology,
                expected_outcomes = excluded.expected_outcomes,
                updated_at = excluded.updated_at""",
-        (pid, values["problem_statement"], values["background"], values["objectives"], values["research_questions"],
-         values["related_work"], values["methodology"], values["expected_outcomes"])
+        (pid, values["problem_statement"], values["novelty"], values["background"], values["objectives"],
+         values["research_questions"], values["related_work"], values["methodology"], values["expected_outcomes"])
     )
     # A project begun from the chat starts untitled; name it from the background
     # the moment there is one, so it stops reading "Untitled project" everywhere.
@@ -1792,6 +1834,7 @@ def _build_proposal_docx(researcher_name: str, proposal: dict) -> bytes:
 
     sections = [
         ("Problem Statement", proposal.get("problem_statement", "")),
+        ("Novelty and Contribution", proposal.get("novelty", "")),
         ("Introduction / Background", proposal.get("background", "")),
         ("Research Objectives", proposal.get("objectives", "")),
         ("Possible Research Questions", proposal.get("research_questions", "")),
@@ -1837,7 +1880,7 @@ async def api_project_proposal_download(project_id: int, req: Request):
     name  = name_row[0] if name_row else "Researcher"
     title = con.execute("SELECT title FROM projects WHERE id = ?", (project_id,)).fetchone()[0]
     row = con.execute(
-        "SELECT problem_statement, background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "SELECT problem_statement, novelty, background, objectives, research_questions, related_work, methodology, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (project_id,)
     ).fetchone()
     con.close()

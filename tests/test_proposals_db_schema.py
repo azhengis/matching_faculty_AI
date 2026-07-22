@@ -20,7 +20,7 @@ def test_init_profiles_db_creates_proposals_table(tmp_path, monkeypatch):
     assert cols == [
         "id", "project_id", "background", "objectives", "research_questions",
         "related_work", "methodology", "expected_outcomes", "created_at",
-        "updated_at", "edited_sections", "problem_statement",
+        "updated_at", "edited_sections", "problem_statement", "novelty",
     ]
     con.close()
 

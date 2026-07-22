@@ -52,6 +52,21 @@ def test_build_proposal_docx_includes_all_populated_sections():
     assert "A framework for ethical guidelines" in texts
 
 
+def test_build_proposal_docx_includes_the_staged_gate_sections():
+    """The problem statement and novelty claim lead the document."""
+    proposal = {
+        "problem_statement": "Cook County caseworkers cannot contest algorithmic risk scores.",
+        "novelty": "Nobody has yet audited contestability in county-level deployments.",
+        "background": "Some background.",
+    }
+    texts = _paragraph_texts(_build_proposal_docx("Jane Doe", proposal))
+
+    assert any("Problem Statement" in t for t in texts)
+    assert "Cook County caseworkers cannot contest algorithmic risk scores." in texts
+    assert any("Novelty" in t for t in texts)
+    assert "Nobody has yet audited contestability in county-level deployments." in texts
+
+
 def test_build_proposal_docx_skips_empty_sections():
     proposal = {
         "background": "Some background.",

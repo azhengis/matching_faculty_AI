@@ -112,6 +112,32 @@ def test_save_proposal_accepts_a_single_section(tmp_path, monkeypatch):
     assert row == ("Just the background.", "Just the methodology.", "")
 
 
+def test_save_proposal_stores_the_staged_gate_sections(tmp_path, monkeypatch):
+    """novelty and problem_statement are saved one at a time, ahead of the rest.
+
+    They gate the advisor's stages, so each must persist on its own without
+    disturbing the other or the six proposal sections.
+    """
+    db_path = _setup(tmp_path, monkeypatch)
+    _profile_with_project(db_path)
+
+    assert _save_proposal(1, {"novelty": "Nobody has audited these systems."}) == {"status": "saved"}
+
+    con = sqlite3.connect(db_path)
+    row = con.execute(
+        "SELECT novelty, problem_statement, background FROM proposals WHERE project_id = 1").fetchone()
+    con.close()
+    assert row == ("Nobody has audited these systems.", "", "")
+
+    assert _save_proposal(1, {"problem_statement": "Caseworkers in Cook County."}) == {"status": "saved"}
+
+    con = sqlite3.connect(db_path)
+    row = con.execute(
+        "SELECT novelty, problem_statement, background FROM proposals WHERE project_id = 1").fetchone()
+    con.close()
+    assert row == ("Nobody has audited these systems.", "Caseworkers in Cook County.", "")
+
+
 def test_save_proposal_rejects_a_call_with_no_section_text(tmp_path, monkeypatch):
     db_path = _setup(tmp_path, monkeypatch)
     _profile_with_project(db_path)
@@ -198,8 +224,8 @@ def test_get_proposal_returns_empty_defaults_when_none_saved(tmp_path, monkeypat
     response = _run(api_project_proposal(1, _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
     assert _body(response) == {
-        "problem_statement": "", "background": "", "objectives": "", "research_questions": "",
-        "related_work": "", "methodology": "", "expected_outcomes": "",
+        "problem_statement": "", "novelty": "", "background": "", "objectives": "",
+        "research_questions": "", "related_work": "", "methodology": "", "expected_outcomes": "",
         "edited_sections": [],
     }
 
