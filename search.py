@@ -243,17 +243,14 @@ def load_faculty():
         )
     """)
 
-    # Load faculty who have a research summary, courses taught, OR publications.
-    # Publications count because a scraped bio is often missing for exactly the
-    # people with the deepest publication record — DePaul's most-published
-    # faculty member has no bio page at all, and was invisible to search until
-    # his paper titles were allowed to stand in for one.
-    rows = con.execute("""
-        SELECT * FROM faculty
-        WHERE TRIM(research_summary) != ''
-           OR TRIM(COALESCE(classes_taught,'')) != ''
-           OR id IN (SELECT faculty_id FROM papers)
-    """).fetchall()
+    # Load every faculty member. Those with a research summary, courses, or
+    # publications get a rich searchable text below; those with none still get
+    # a minimal directory entry (name/title/department) so a search for their
+    # name or unit finds them. Previously this query required one of those three
+    # signals, which silently dropped ~44 people — overwhelmingly performing-arts
+    # faculty who don't publish papers and had no research summary scraped — out
+    # of the index entirely, so searching their name returned nothing at all.
+    rows = con.execute("SELECT * FROM faculty").fetchall()
 
     # Most-cited titles per faculty, used to synthesise a research summary for
     # anyone who has no bio and no courses. Capped because a single profile can
@@ -335,9 +332,23 @@ def load_faculty():
             summary = "\n\n".join(uploaded) + (f"\n\n{summary}" if summary else "")
             p["summary_source"] = "research"
 
+        # Nothing usable from any source — a scraped bio, courses, papers, an
+        # override, or an upload. Rather than drop them (which made them
+        # unsearchable), fall back to a directory line built from what the
+        # roster always has: their name, title, and unit. They'll rank low on a
+        # research query — correctly, since we don't know their research — but a
+        # name or department search will now find them.
+        if not summary.strip():
+            summary = ". ".join(
+                part.strip() for part in (p["name"], p.get("title"), p.get("department"), p.get("college"))
+                if part and part.strip()
+            )
+            p["summary_source"] = "directory"
+
         p["research_summary"] = summary
 
-    # Drop anyone who still has nothing useful
+    # A name is the one field the roster always has, so everyone now carries at
+    # least a directory line; the filter only guards the impossible empty case.
     return [p for p in people if p["research_summary"].strip()]
 
 
@@ -759,6 +770,12 @@ def alpha_for_query(query, source="research"):
         if n <= 1: return 0.38
         if n <= 3: return 0.58
         return 0.72
+    if source == "directory":
+        # Just a name/title/unit line — the embedding carries no real research
+        # signal, so lean almost entirely on keyword overlap. This keeps these
+        # thin entries out of research-query results (where they'd be noise) while
+        # still letting a name or department search surface them via keywords.
+        return 0.15
     if n <= 1: return 0.45
     if n <= 3: return 0.65
     return 0.80
