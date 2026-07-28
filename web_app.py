@@ -74,6 +74,13 @@ _sessions: dict[str, list] = {}   # session_id → conversation history (mirrors
 MAX_STORED_TURNS = 80             # transcript tail kept per project; the proposal is the durable record
 MAX_PROMPT_DOCUMENTS = 3          # newest uploaded documents shown to the advisor
 MAX_DOCUMENT_CHARS   = 6000       # per document — a full CV blows the context window otherwise
+
+# Live literature search (OpenAlex) — lets the advisor judge novelty against what
+# actually exists rather than its training memory. Free, no API key; a mailto is
+# just OpenAlex's politeness convention for the shared pool.
+OPENALEX_BASE      = "https://api.openalex.org"
+OPENALEX_MAILTO    = os.environ.get("OPENALEX_MAILTO", "aruzhanzhengis19@gmail.com")
+LIT_SEARCH_RESULTS = 8            # works returned to the advisor per novelty query
 _auth_sessions: dict[str, int] = {}   # session_token → user_id (cache over auth_sessions)
 SESSION_DAYS = 30                     # login lifetime; swept on startup
 
@@ -1498,9 +1505,9 @@ The problem is specified enough to leave Stage 1 when ALL of these hold: a speci
 STAGE 2 — TEST WHETHER IT IS NOVEL
 A perfectly specific problem can still be one the field settled twenty years ago. Research has to contribute something new, so before anything gets written down, establish what is actually new here. Do not skip this because the problem now sounds impressive.
 
-First, say what already exists. Name 3-5 specific scholars, works, or research traditions that address something close to this, and for each say what it established. Be concrete — a named literature, not "there's been a lot of work on this."
+First, SEARCH THE LIVE LITERATURE. Call the search_literature tool with the specific problem's key terms BEFORE you say anything about what exists — do not rely on memory. Read the real works it returns (titles, authors, years, abstracts, citation counts) and ground your account of the field in them: name the specific works that bear on this problem and say for each what it established. Run more than one search if the problem has distinct facets (e.g. the population and the method separately). If the tool returns an error, say plainly that the search failed this time and fall back to what you know, flagged as unverified.
 
-Be honest about your limits IN THE SAME MESSAGE. You cannot run a live literature search and your knowledge has a training cutoff, so this is a first read to check, not a verdict. Say that plainly, tell {name} to verify against the databases for their field, and ask what they know of that you have missed — they are the expert on their own field and may know work you don't.
+Be honest about coverage IN THE SAME MESSAGE. Even a live search isn't exhaustive — OpenAlex misses some venues, preprints, and very recent work, and {name} is the expert on their own field. So present this as a strong evidence-based read, not the final word: ask what they know of that the search didn't surface.
 
 Then give a plain verdict. One of:
   • CLEARLY NEW — say what makes it new, and move on quickly. Do not manufacture doubt to seem rigorous.
@@ -1517,9 +1524,9 @@ If it is NOT clearly novel, your job is NOT to send them away to find a new topi
   • INTEGRATION — connecting two literatures nobody has connected
   • SCALE — case studies exist, but nobody has done it systematically or at scale
 
-When {name} picks an angle, re-run this same test on the narrowed version — a novelty move can land on ground that is also already covered. Iterate until it holds.
+When {name} picks an angle, SEARCH AGAIN on the narrowed version before blessing it — a novelty move can land on ground that is also already covered, and the tool is how you find that out. Iterate until a search comes back without a work that already does it.
 
-Novelty is settled when you can complete this sentence concretely: "Nobody has yet ___, and this project will." Draft that claim in the chat together with a short paragraph on what already exists and what this adds. Confirm the wording with {name}, then call save_proposal with novelty. Say plainly that this is the claim the whole proposal now has to earn — and that it still needs verifying against a real literature search.
+Novelty is settled when you can complete this sentence concretely: "Nobody has yet ___, and this project will." Draft that claim in the chat together with a short paragraph on what the literature search showed already exists and what this adds. Confirm the wording with {name}, then call save_proposal with novelty. Say plainly that this is the claim the whole proposal now has to earn.
 
 STAGE 3 — WRITE THE PROBLEM STATEMENT
 Now draft a problem statement IN THE CHAT: one focused paragraph naming the specific problem, who or what it concerns, the setting, what is currently unknown, why it matters now, and the novel angle you just settled. Ask {name}: "does this capture it, or would you change the emphasis?" Revise until they agree. Then — and only after they confirm the wording — call save_proposal with problem_statement. That save is what unlocks Stage 4; say something like "That's our anchor — everything we build now has to serve this statement."
@@ -1531,8 +1538,8 @@ Now build the full proposal through genuine back-and-forth. Every section must s
   2. Objectives — what they're trying to find out, build, or change. Push past the first vague statement: is the aim descriptive (produce the record nobody has), evaluative (judge whether something works), or interventional (change practice)? Name the aims explicitly, 2-4 of them, each a full sentence saying what will exist or be known at the end.
   3. Research questions — these were drafted in Stage 1, so DON'T start over. Review what's saved, and deepen it: group them by theme when there's more than one angle (e.g. "Consent and X", "Bias and Y"), and if the proposal now suggests a question they haven't asked, offer it and ask whether it belongs. Aim for 3-5 well-formed questions total.
   4. Related work — THIS IS WHERE MOST PROPOSALS ARE WEAKEST AND WHERE YOU ADD THE MOST. You already did a first pass in Stage 2; EXPAND it here, do not repeat it. Do not just ask "do you know any papers?" and record the answer. Contribute substance:
-     - Start from the works named during the novelty check, then go wider — 4-6 in total, and say for EACH what it established and how it connects.
-     - Say plainly that you can't run a live literature search, so these are leads to verify, not citations.
+     - Start from the works surfaced during the novelty search, then go wider — call search_literature again for angles you haven't checked yet — 4-6 works in total, and say for EACH what it established and how it connects.
+     - These are real search hits, but confirm details (exact venue, year) aren't garbled before treating them as citations, and note that coverage isn't exhaustive.
      - Then name THE GAP: what these works do not settle, and where this project sits relative to them. This gap MUST be the same gap as the saved novelty claim, stated in the register of a literature review — if writing it out makes the novelty claim look weaker than it did, say so rather than papering over it, and offer to revisit the claim.
      - Ask which resonate, which are wrong for this project, and what they would add from their own reading.
      The saved section should read as a short literature review with a gap statement at the end, not a list of names.
@@ -1594,6 +1601,27 @@ Talk to {name} as a peer — a fellow faculty member. Direct, warm, specific. No
 
 
 _ADVISOR_TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "search_literature",
+        "description": (
+            "Search the live scholarly literature (OpenAlex, ~250M works) to check what "
+            "already exists on a topic during the novelty stage. Use this BEFORE judging "
+            "whether a problem is novel — do not rely on memory. Query with the specific "
+            "problem's key terms. Returns real works with titles, authors, years, citation "
+            "counts, and abstracts. If it returns an error, tell the researcher the search "
+            "failed rather than inventing results."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "Key terms of the specific research problem to check against existing work."}
+            },
+            "required": ["query"]
+        }
+    }
+}, {
     "type": "function",
     "function": {
         "name": "search_faculty",
@@ -1658,6 +1686,64 @@ def _diverse_top(cands: list, n: int = 10, per_dept: int = 3) -> list:
             if len(out) >= n:
                 break
     return out
+
+
+def _reconstruct_abstract(inv_idx: dict) -> str:
+    """OpenAlex ships abstracts as an inverted index {word: [positions]}; rebuild
+    the plain text. Same routine the pipeline uses when fetching papers."""
+    if not inv_idx:
+        return ""
+    word_at: dict = {}
+    for word, positions in inv_idx.items():
+        for pos in positions:
+            word_at[pos] = word
+    return " ".join(word_at[i] for i in sorted(word_at))
+
+
+def _search_literature(query: str, limit: int = LIT_SEARCH_RESULTS) -> dict:
+    """Live literature search against OpenAlex for the novelty check.
+
+    Returns up to `limit` works most relevant to the query, each with title,
+    authors, year, citation count, and a short abstract snippet, so the advisor
+    can judge what already exists from real results instead of its training
+    memory. Never raises — on any failure it returns an error string the model
+    is told to relay honestly rather than pretending the search succeeded.
+    """
+    query = (query or "").strip()
+    if not query:
+        return {"error": "empty query", "results": []}
+    try:
+        import requests
+        r = requests.get(
+            f"{OPENALEX_BASE}/works",
+            params={
+                "search": query,
+                "per_page": limit,
+                "sort": "relevance_score:desc",
+                "select": "title,publication_year,cited_by_count,authorships,abstract_inverted_index",
+                "mailto": OPENALEX_MAILTO,
+            },
+            timeout=20,
+        )
+        if r.status_code != 200:
+            return {"error": f"literature search unavailable (HTTP {r.status_code})", "results": []}
+        works = r.json().get("results", [])
+    except Exception as e:
+        return {"error": f"literature search failed: {e}", "results": []}
+
+    out = []
+    for w in works:
+        authors = [a.get("author", {}).get("display_name", "") for a in (w.get("authorships") or [])]
+        authors = [a for a in authors if a][:3]
+        abstract = _reconstruct_abstract(w.get("abstract_inverted_index") or {})
+        out.append({
+            "title": w.get("title") or "(untitled)",
+            "authors": authors,
+            "year": w.get("publication_year"),
+            "cited_by_count": w.get("cited_by_count", 0),
+            "abstract": abstract[:400] + ("…" if len(abstract) > 400 else ""),
+        })
+    return {"query_used": query, "result_count": len(out), "results": out}
 
 
 def _advisor_search(query: str, mode: str = "semantic") -> dict:
@@ -2078,6 +2164,8 @@ async def api_advisor_chat(req: Request):
                 args = json.loads(tc.function.arguments)
                 if tc.function.name == "save_proposal":
                     result = _save_proposal(project_id, args)
+                elif tc.function.name == "search_literature":
+                    result = _search_literature(query=args.get("query", ""))
                 else:
                     result = _advisor_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
                     _record_matches(project_id, result.get("results", []))
