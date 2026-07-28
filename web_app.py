@@ -265,6 +265,15 @@ def _init_profiles_db():
     except sqlite3.OperationalError:
         pass  # column already exists from a prior run
 
+    # The research-gap map: the works the novelty search surfaced plus the
+    # project's own focus, each given a 2D coordinate, so the advisor can SHOW
+    # the researcher where their project sits relative to existing work — the
+    # gap being the open space it lands in. Refreshed on each novelty search.
+    try:
+        con.execute("ALTER TABLE projects ADD COLUMN gap_map TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
     # User accounts. One profile per user (profiles.user_id, added in a
     # later migration step) enforces the one-account-one-profile model.
     con.execute("""
@@ -1300,6 +1309,25 @@ async def api_project_proposal(project_id: int, req: Request):
     return JSONResponse(proposal)
 
 
+@app.get("/api/projects/{project_id}/gap-map")
+async def api_project_gap_map(project_id: int, req: Request):
+    """The research-gap map from the latest novelty search, or null if none yet."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+    con = sqlite3.connect(DB_PATH)
+    if _owned_project(con, user, project_id) is None:
+        con.close()
+        return JSONResponse({"error": "No such project"}, status_code=404)
+    row = con.execute("SELECT gap_map FROM projects WHERE id = ?", (project_id,)).fetchone()
+    con.close()
+    try:
+        gap_map = json.loads(row[0]) if row and row[0] else None
+    except (ValueError, TypeError):
+        gap_map = None
+    return JSONResponse({"gap_map": gap_map})
+
+
 @app.get("/api/projects/{project_id}/matches")
 async def api_project_matches(project_id: int, req: Request):
     user = _current_user(req)
@@ -1508,6 +1536,8 @@ A perfectly specific problem can still be one the field settled twenty years ago
 First, SEARCH THE LIVE LITERATURE. Call the search_literature tool with the specific problem's key terms BEFORE you say anything about what exists — do not rely on memory. Read the real works it returns (titles, authors, years, abstracts, citation counts) and ground your account of the field in them: name the specific works that bear on this problem and say for each what it established. Run more than one search if the problem has distinct facets (e.g. the population and the method separately). If the tool returns an error, say plainly that the search failed this time and fall back to what you know, flagged as unverified.
 
 Be honest about coverage IN THE SAME MESSAGE. Even a live search isn't exhaustive — OpenAlex misses some venues, preprints, and very recent work, and {name} is the expert on their own field. So present this as a strong evidence-based read, not the final word: ask what they know of that the search didn't surface.
+
+A "Research landscape" map appears in their panel each time you search — the works you found plotted as dots, their project as a marker in the open space between them. Point them to it once ("you can see this in the landscape map on the left — the cluster there is the existing work, and your project sits off to the side"), and use where the project sits as evidence: near a cluster means the ground is crowded, off on its own means the gap is real.
 
 Then give a plain verdict. One of:
   • CLEARLY NEW — say what makes it new, and move on quickly. Do not manufacture doubt to seem rigorous.
@@ -1744,6 +1774,55 @@ def _search_literature(query: str, limit: int = LIT_SEARCH_RESULTS) -> dict:
             "abstract": abstract[:400] + ("…" if len(abstract) > 400 else ""),
         })
     return {"query_used": query, "result_count": len(out), "results": out}
+
+
+def _compute_gap_map(query: str, works: list) -> dict | None:
+    """Position the project and the works the novelty search found in 2D.
+
+    The project's point is the query embedding; each work is its title+abstract,
+    all embedded with SPECTER2 and projected to two dimensions by PCA. A genuinely
+    novel project lands away from the cluster of existing work — that open space
+    is the gap, made visible. Returns None when there's too little to plot or the
+    model isn't loaded (the feature is best-effort; it never blocks the chat).
+    """
+    works = [w for w in (works or []) if (w.get("title") or "").strip()]
+    if len(works) < 3 or _st.get("model") is None:
+        return None
+    texts = [query] + [f"{w['title']}. {(w.get('abstract') or '')[:400]}" for w in works]
+    try:
+        emb = np.asarray(_st["model"].encode(texts, normalize_embeddings=True), dtype=float)
+        centered = emb - emb.mean(axis=0)
+        _, _, vt = np.linalg.svd(centered, full_matrices=False)
+        coords = centered @ vt[:2].T                      # (n, 2)
+    except Exception:
+        return None
+
+    mn, mx = coords.min(axis=0), coords.max(axis=0)
+    span   = np.where((mx - mn) == 0, 1.0, mx - mn)
+    norm   = (coords - mn) / span                          # each axis → [0, 1]
+
+    return {
+        "query":   query,
+        "project": {"x": round(float(norm[0][0]), 4), "y": round(float(norm[0][1]), 4)},
+        "works": [
+            {"title": w["title"], "authors": (w.get("authors") or [])[:2],
+             "year": w.get("year"), "cited_by_count": w.get("cited_by_count", 0),
+             "x": round(float(norm[i + 1][0]), 4), "y": round(float(norm[i + 1][1]), 4)}
+            for i, w in enumerate(works)
+        ],
+    }
+
+
+def _save_gap_map(project_id, gap_map: dict) -> None:
+    """Persist the latest gap map for a project. Best-effort — never raises."""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute("UPDATE projects SET gap_map = ? WHERE id = ?",
+                    (json.dumps(gap_map), project_id))
+        con.commit()
+        con.close()
+    except sqlite3.OperationalError:
+        pass
 
 
 def _advisor_search(query: str, mode: str = "semantic") -> dict:
@@ -2170,6 +2249,10 @@ async def api_advisor_chat(req: Request):
                     result = _save_proposal(project_id, args)
                 elif tc.function.name == "search_literature":
                     result = _search_literature(query=args.get("query", ""))
+                    # Turn the real hits into a gap map the researcher can see.
+                    gap_map = _compute_gap_map(args.get("query", ""), result.get("results", []))
+                    if gap_map:
+                        _save_gap_map(project_id, gap_map)
                 else:
                     result = _advisor_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
                     _record_matches(project_id, result.get("results", []))

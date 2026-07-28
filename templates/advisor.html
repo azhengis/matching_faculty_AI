@@ -29,6 +29,25 @@
 .proposal-sidepanel h3{font-family:var(--serif);font-size:24px;font-weight:normal;margin-bottom:5px;letter-spacing:-.01em}
 .proposal-sidepanel-sub{font-size:12.5px;color:var(--ink-3)}
 
+/* ── Research-gap map ── */
+.gap-map-card{margin-bottom:26px;padding:16px 16px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm)}
+.gap-map-head{margin-bottom:10px}
+.gap-map-label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--navy)}
+.gap-map-hint{display:block;font-size:12px;color:var(--ink-3);margin-top:2px}
+#gap-map-plot svg{width:100%;height:auto;display:block}
+.gm-work{fill:var(--navy-lift);fill-opacity:.55;stroke:var(--surface);stroke-width:.6;transition:fill-opacity .15s}
+.gm-work:hover{fill-opacity:.9}
+.gm-project-halo{fill:var(--scarlet);fill-opacity:.13}
+.gm-project-dot{fill:var(--scarlet);stroke:var(--surface);stroke-width:1}
+.gm-project-label{font-size:4.4px;font-weight:700;fill:var(--scarlet);font-family:inherit}
+.gap-map-legend{display:flex;gap:16px;margin-top:10px;font-size:11.5px;color:var(--ink-2)}
+.gap-map-legend span{display:inline-flex;align-items:center;gap:5px}
+.gm-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.gm-dot.gm-existing{background:var(--navy-lift);opacity:.6}
+.gm-dot.gm-project{background:var(--scarlet)}
+.gap-map-caption{font-size:12.5px;color:var(--ink-2);line-height:1.55;margin-top:11px;padding-top:11px;border-top:1px solid var(--paper-line)}
+.gap-map-caption strong{color:var(--navy);font-weight:600}
+
 .proposal-section{margin-bottom:26px;position:relative}
 .proposal-section:last-of-type{margin-bottom:0}
 .proposal-section-head{display:flex;align-items:center;gap:9px;margin-bottom:9px;flex-wrap:wrap}
@@ -141,6 +160,18 @@
         <div class="proposal-doc-head">
           <h3>Research Proposal</h3>
           <div class="proposal-sidepanel-sub">Sections appear as you settle them. Edit any section to make it your own.</div>
+        </div>
+        <div class="gap-map-card" id="gap-map-card" style="display:none">
+          <div class="gap-map-head">
+            <span class="gap-map-label">Research landscape</span>
+            <span class="gap-map-hint">Where your project sits vs. existing work</span>
+          </div>
+          <div id="gap-map-plot"></div>
+          <div class="gap-map-legend">
+            <span><span class="gm-dot gm-existing"></span>Existing work</span>
+            <span><span class="gm-dot gm-project"></span>Your project</span>
+          </div>
+          <div class="gap-map-caption" id="gap-map-caption"></div>
         </div>
         <div id="proposal-sections"></div>
         <a class="btn-download disabled" id="btn-download-proposal" href="#" onclick="return onDownloadProposal(event)">Download as Word doc</a>
@@ -271,6 +302,7 @@ async function openProject(projectId, opts = {}) {
   clearStartMenu();
   _proposal = project.proposal || null;
   renderProposalPanel();   // reveals the panel only if there's already content
+  checkGapMap();           // restore the research-gap map if one was built before
 
   // Load and display stored chat history if resuming a project
   if (project.chat_history && project.chat_history.length > 0) {
@@ -349,6 +381,7 @@ async function callAdvisorAPI(message) {
     } else {
       renderBotReply(data.reply || '');
       checkProposal();
+      checkGapMap();
     }
   } catch (e) {
     addBotRaw('<div class="bubble" style="color:#9B2020">Network error: ' + esc(e.message) + '</div>');
@@ -465,6 +498,53 @@ async function checkProposal() {
     _proposal  = await res.json();
     renderProposalPanel();
   } catch (e) { /* network hiccup — the panel just won't update this turn */ }
+}
+
+// ── Research-gap map ──────────────────────────────────────────────────────────
+async function checkGapMap() {
+  try {
+    const res  = await fetch(`/api/projects/${_projectId}/gap-map`);
+    const data = await res.json();
+    renderGapMap(data.gap_map);
+  } catch (e) { /* best-effort visual — skip on any hiccup */ }
+}
+
+function renderGapMap(gm) {
+  const card = document.getElementById('gap-map-card');
+  if (!gm || !Array.isArray(gm.works) || gm.works.length < 3) {
+    card.style.display = 'none';
+    return;
+  }
+  // The map appears during the novelty stage, before any section is saved — so
+  // it reveals the proposal panel on its own.
+  document.getElementById('proposal-sidepanel').classList.add('visible');
+  card.style.display = 'block';
+
+  const P = 8, S = 100;                 // padding, viewBox size
+  const px = x => P + x * (S - 2 * P);
+  const py = y => P + (1 - y) * (S - 2 * P);   // flip: data y-up, screen y-down
+  const maxCite = Math.max(1, ...gm.works.map(w => w.cited_by_count || 0));
+  const rFor = c => 1.6 + 2.6 * Math.sqrt((c || 0) / maxCite);   // area ~ citations
+
+  const dots = gm.works.map(w => {
+    const t = esc(`${w.title}${w.year ? ' (' + w.year + ')' : ''}${w.cited_by_count ? ' · ' + w.cited_by_count + ' citations' : ''}`);
+    return `<circle class="gm-work" cx="${px(w.x).toFixed(1)}" cy="${py(w.y).toFixed(1)}" r="${rFor(w.cited_by_count).toFixed(1)}"><title>${t}</title></circle>`;
+  }).join('');
+
+  const jx = px(gm.project.x), jy = py(gm.project.y);
+  const project =
+    `<circle class="gm-project-halo" cx="${jx.toFixed(1)}" cy="${jy.toFixed(1)}" r="9"></circle>` +
+    `<circle class="gm-project-dot"  cx="${jx.toFixed(1)}" cy="${jy.toFixed(1)}" r="3"></circle>` +
+    `<text class="gm-project-label" x="${jx.toFixed(1)}" y="${(jy - 6).toFixed(1)}" text-anchor="middle">Your project</text>`;
+
+  document.getElementById('gap-map-plot').innerHTML =
+    `<svg viewBox="0 0 ${S} ${S}" role="img" aria-label="Research gap map">${dots}${project}</svg>`;
+
+  // Caption: the advisor's novelty claim if it's saved, else a plain explainer.
+  const novelty = (_proposal && (_proposal.novelty || '').trim()) || '';
+  document.getElementById('gap-map-caption').innerHTML = novelty
+    ? `<strong>The gap:</strong> ${esc(novelty)}`
+    : `Each dot is a real paper from the live search, sized by citations. Your project sits in the open space between them — the further from the clusters, the more novel.`;
 }
 
 function isLocked(k) {
