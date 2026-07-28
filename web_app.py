@@ -1754,7 +1754,11 @@ def _advisor_search(query: str, mode: str = "semantic") -> dict:
         kw_list   = expansion.get("keywords", [])
         qv        = _st["model"].encode([academic], normalize_embeddings=True)[0]
 
-        scores = sm.hybrid_scores(academic, qv, _st["emb"], _st["people"], kw_list=kw_list)
+        # Pass the paper index so a faculty member's publications count toward
+        # their match, not just their bio — a professor with ten on-topic papers
+        # surfaces even when their bio prose never uses the query's terms.
+        scores = sm.hybrid_scores(academic, qv, _st["emb"], _st["people"],
+                                  kw_list=kw_list, paper_idx=_st.get("paper_idx"))
 
         if mode == "complementary":
             top_idx  = np.argsort(scores)[::-1][:20]

@@ -811,12 +811,51 @@ def zero_kw_penalty(query, kw, specter_sim=None):
     return 1.0
 
 
-def hybrid_scores(query, qv, emb, people, kw_list=None):
+def _titles_by_faculty(paper_idx):
+    """faculty_id -> list of their paper titles (lowercased), from the paper index."""
+    out: dict = {}
+    for entry in paper_idx.get("meta", []):
+        out.setdefault(entry[0], []).append((entry[1] or "").lower())
+    return out
+
+
+def _best_paper_coverage(titles, kw_set):
+    """Largest fraction of the query's keywords that co-occur in ONE paper title.
+
+    This is the grounded publication signal. It asks "does this person have a
+    single paper actually ABOUT the query?", not "do these words appear anywhere
+    across their titles" — the latter gives a prolific author full credit for any
+    query, since across hundreds of titles almost every common word turns up.
+    """
+    if not titles or not kw_set:
+        return 0.0
+    n = len(kw_set)
+    best = 0.0
+    for t in titles:
+        c = sum(1 for kw in kw_set if kw in t) / n
+        if c > best:
+            best = c
+            if best == 1.0:
+                break
+    return best
+
+
+def hybrid_scores(query, qv, emb, people, kw_list=None, paper_idx=None):
     """Score all faculty against the query.
 
     kw_list: list of discrete keywords from LLM expansion (stage 1 structured output).
              When provided, used for keyword overlap instead of tokenising query string.
              This keeps SPECTER2 encoding (jargon phrase) and keyword matching (term list) separate.
+    paper_idx: when provided, a faculty member's PUBLICATIONS also count toward their
+             keyword match — a professor surfaces for a topic they publish on even when
+             their bio prose never uses the words. The signal is deliberately lexical and
+             per-paper: the best single paper's keyword coverage (see _best_paper_coverage).
+             An earlier version blended raw SPECTER2 paper-embedding similarity, but that
+             cosine has a high baseline, so it surfaced prolific authors on unrelated
+             queries (a psychologist ranked #3 for "graph neural networks"); per-paper
+             lexical grounding fixes that. Additive — it can only raise a score. When
+             None, behaviour is identical to before, so callers that don't pass it (and
+             the tests) are unaffected.
     """
     sims = emb @ qv
 
@@ -827,13 +866,23 @@ def hybrid_scores(query, qv, emb, people, kw_list=None):
         kw_set = query_keywords(query)
     n_kw = len(kw_set)
 
+    titles_by_fac = _titles_by_faculty(paper_idx) if paper_idx is not None else {}
+
     scores = []
     for i in range(len(people)):
         src        = people[i].get("summary_source", "research")
         a          = alpha_for_query(query, src)
         text_lower = people[i]["research_summary"].lower()
-        hits       = sum(1.0 for kw in kw_set if kw in text_lower) if kw_set else 0
-        kw         = (hits / n_kw) if n_kw > 0 else 0.5
+        bio_hits   = sum(1.0 for kw in kw_set if kw in text_lower) if kw_set else 0
+        kw         = (bio_hits / n_kw) if n_kw > 0 else 0.5
+
+        # A faculty member's best on-topic paper can raise their keyword score
+        # above what their bio alone earns — grounded, so no baseline noise.
+        if titles_by_fac:
+            paper_kw = _best_paper_coverage(titles_by_fac.get(people[i].get("id")), kw_set)
+            if paper_kw > kw:
+                kw = paper_kw
+
         raw        = a * float(sims[i]) + (1 - a) * kw
         scores.append(recency_penalty(people[i]) * raw * zero_kw_penalty(query, kw, float(sims[i])))
     return np.array(scores)
