@@ -274,6 +274,15 @@ def _init_profiles_db():
     except sqlite3.OperationalError:
         pass  # column already exists from a prior run
 
+    # Real papers the novelty search surfaced, accumulated across searches and
+    # deduped, so they can serve as the project's reference list — shown in the
+    # panel and included in the downloaded proposal. ("references" is a SQL
+    # reserved word, hence the column name.)
+    try:
+        con.execute("ALTER TABLE projects ADD COLUMN lit_references TEXT DEFAULT '[]'")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
     # User accounts. One profile per user (profiles.user_id, added in a
     # later migration step) enforces the one-account-one-profile model.
     con.execute("""
@@ -1328,6 +1337,28 @@ async def api_project_gap_map(project_id: int, req: Request):
     return JSONResponse({"gap_map": gap_map})
 
 
+@app.get("/api/projects/{project_id}/references")
+async def api_project_references(project_id: int, req: Request):
+    """Papers the novelty search surfaced, accumulated as the project's references."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+    con = sqlite3.connect(DB_PATH)
+    if _owned_project(con, user, project_id) is None:
+        con.close()
+        return JSONResponse({"error": "No such project"}, status_code=404)
+    try:
+        row = con.execute("SELECT lit_references FROM projects WHERE id = ?", (project_id,)).fetchone()
+    except sqlite3.OperationalError:
+        row = None   # column not present on an un-migrated database
+    con.close()
+    try:
+        refs = json.loads(row[0]) if row and row[0] else []
+    except (ValueError, TypeError):
+        refs = []
+    return JSONResponse({"references": refs})
+
+
 @app.get("/api/projects/{project_id}/matches")
 async def api_project_matches(project_id: int, req: Request):
     user = _current_user(req)
@@ -1750,7 +1781,7 @@ def _search_literature(query: str, limit: int = LIT_SEARCH_RESULTS) -> dict:
                 "search": query,
                 "per_page": limit,
                 "sort": "relevance_score:desc",
-                "select": "title,publication_year,cited_by_count,authorships,abstract_inverted_index",
+                "select": "title,publication_year,cited_by_count,authorships,abstract_inverted_index,doi,primary_location",
                 "mailto": OPENALEX_MAILTO,
             },
             timeout=20,
@@ -1766,11 +1797,17 @@ def _search_literature(query: str, limit: int = LIT_SEARCH_RESULTS) -> dict:
         authors = [a.get("author", {}).get("display_name", "") for a in (w.get("authorships") or [])]
         authors = [a for a in authors if a][:3]
         abstract = _reconstruct_abstract(w.get("abstract_inverted_index") or {})
+        # A link to follow: prefer the DOI, fall back to the landing page.
+        doi = w.get("doi") or ""
+        url = doi or (((w.get("primary_location") or {}).get("landing_page_url")) or "")
+        venue = ((w.get("primary_location") or {}).get("source") or {}).get("display_name") or ""
         out.append({
             "title": w.get("title") or "(untitled)",
             "authors": authors,
             "year": w.get("publication_year"),
             "cited_by_count": w.get("cited_by_count", 0),
+            "venue": venue,
+            "url": url,
             "abstract": abstract[:400] + ("…" if len(abstract) > 400 else ""),
         })
     return {"query_used": query, "result_count": len(out), "results": out}
@@ -1811,6 +1848,47 @@ def _save_gap_map(project_id, gap_map: dict) -> None:
         con = sqlite3.connect(DB_PATH)
         con.execute("UPDATE projects SET gap_map = ? WHERE id = ?",
                     (json.dumps(gap_map), project_id))
+        con.commit()
+        con.close()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _norm_title(t: str) -> str:
+    """Loose key for de-duplicating papers by title across searches."""
+    return re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+
+
+MAX_REFERENCES = 60   # cap the accumulated reference list per project
+
+
+def _add_references(project_id, works: list) -> None:
+    """Merge the works from a search into the project's reference list, deduped
+    by title and kept newest-search-first. Best-effort — never raises."""
+    works = [w for w in (works or []) if (w.get("title") or "").strip()]
+    if not works:
+        return
+    try:
+        con = sqlite3.connect(DB_PATH)
+        row = con.execute("SELECT lit_references FROM projects WHERE id = ?", (project_id,)).fetchone()
+        try:
+            existing = json.loads(row[0]) if row and row[0] else []
+        except (ValueError, TypeError):
+            existing = []
+        seen = {_norm_title(r.get("title", "")) for r in existing}
+        added = []
+        for w in works:
+            key = _norm_title(w.get("title", ""))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            added.append({k: w.get(k) for k in ("title", "authors", "year", "cited_by_count", "venue", "url")})
+        if not added:
+            con.close()
+            return
+        merged = (existing + added)[:MAX_REFERENCES]
+        con.execute("UPDATE projects SET lit_references = ? WHERE id = ?",
+                    (json.dumps(merged), project_id))
         con.commit()
         con.close()
     except sqlite3.OperationalError:
@@ -1981,13 +2059,32 @@ def _save_proposal(project_id, args: dict) -> dict:
     return {"status": "saved"}
 
 
-def _build_proposal_docx(researcher_name: str, proposal: dict) -> bytes:
+def _format_reference(r: dict) -> str:
+    """A single reference line: Authors (Year). Title. Venue."""
+    authors = r.get("authors") or []
+    if len(authors) > 3:
+        who = ", ".join(authors[:3]) + ", et al."
+    else:
+        who = ", ".join(authors)
+    year  = r.get("year")
+    parts = []
+    if who:
+        parts.append(f"{who}" + (f" ({year})." if year else "."))
+    elif year:
+        parts.append(f"({year}).")
+    parts.append((r.get("title") or "").strip().rstrip(".") + ".")
+    if r.get("venue"):
+        parts.append(f"{r['venue']}.")
+    return " ".join(p for p in parts if p).strip()
+
+
+def _build_proposal_docx(researcher_name: str, proposal: dict, references: list | None = None) -> bytes:
     """Render a saved proposal dict into a .docx file's raw bytes.
 
     Pure function — no DB/request access — so it's independently testable.
     Sections with empty text are skipped entirely. Within a section, lines
     starting with "- " or "• " become bulleted list items; other lines
-    become plain paragraphs.
+    become plain paragraphs. Any references passed are listed at the end.
     """
     import io
     from docx import Document
@@ -2021,6 +2118,17 @@ def _build_proposal_docx(researcher_name: str, proposal: dict) -> bytes:
             else:
                 doc.add_paragraph(line)
 
+    # References — the papers the novelty search surfaced, sorted by first author.
+    refs = [r for r in (references or []) if (r.get("title") or "").strip()]
+    if refs:
+        refs.sort(key=lambda r: ((r.get("authors") or [""])[0].lower(), r.get("title", "").lower()))
+        doc.add_heading("References", level=2)
+        doc.add_paragraph(
+            "Surfaced by the advisor's literature search — verify against your field's databases.",
+        ).italic = True
+        for r in refs:
+            doc.add_paragraph(_format_reference(r), style="List Bullet")
+
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
@@ -2047,12 +2155,20 @@ async def api_project_proposal_download(project_id: int, req: Request):
         "SELECT problem_statement, novelty, background, objectives, research_questions, related_work, methodology, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (project_id,)
     ).fetchone()
+    try:
+        refs_row = con.execute("SELECT lit_references FROM projects WHERE id = ?", (project_id,)).fetchone()
+    except sqlite3.OperationalError:
+        refs_row = None   # column not present on an un-migrated database
     con.close()
     if not row or not any((c or "").strip() for c in row):
         return JSONResponse({"error": "No proposal to download yet."}, status_code=404)
 
+    try:
+        references = json.loads(refs_row[0]) if refs_row and refs_row[0] else []
+    except (ValueError, TypeError):
+        references = []
     proposal = dict(zip(_PROPOSAL_FIELDS, row))
-    docx_bytes = _build_proposal_docx(name, proposal)
+    docx_bytes = _build_proposal_docx(name, proposal, references)
     safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", title or name or "proposal").strip("_") or "proposal"
     filename = f"Research_Proposal_{safe_name}.docx"
     return Response(
@@ -2241,10 +2357,12 @@ async def api_advisor_chat(req: Request):
                     result = _save_proposal(project_id, args)
                 elif tc.function.name == "search_literature":
                     result = _search_literature(query=args.get("query", ""))
-                    # Turn the real hits into a gap map the researcher can see.
+                    # Turn the real hits into a gap map the researcher can see,
+                    # and accumulate them as the project's reference list.
                     gap_map = _compute_gap_map(args.get("query", ""), result.get("results", []))
                     if gap_map:
                         _save_gap_map(project_id, gap_map)
+                    _add_references(project_id, result.get("results", []))
                 else:
                     result = _advisor_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
                     _record_matches(project_id, result.get("results", []))

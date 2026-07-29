@@ -62,6 +62,21 @@
 .gap-map-caption{font-size:12.5px;color:var(--ink-2);line-height:1.55;margin-top:13px;padding-top:12px;border-top:1px solid var(--paper-line)}
 .gap-map-caption strong{color:var(--navy);font-weight:600}
 
+/* ── References ── */
+.refs-card{margin:26px 0 0;padding-top:22px;border-top:1px solid var(--paper-line)}
+.refs-head{display:flex;align-items:baseline;gap:8px}
+.refs-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--navy)}
+.refs-count{font-size:11.5px;color:var(--ink-3)}
+.refs-sub{font-size:12px;color:var(--ink-3);margin:4px 0 12px;line-height:1.45}
+.refs-list{list-style:none;margin:0;padding:0;counter-reset:ref;display:flex;flex-direction:column;gap:10px}
+.refs-list li{display:flex;gap:9px;font-size:12.5px;line-height:1.45}
+.refs-list li::before{counter-increment:ref;content:counter(ref);flex-shrink:0;min-width:17px;color:var(--ink-3);font-variant-numeric:tabular-nums;font-weight:600}
+.refs-body{min-width:0}
+.refs-title{color:var(--ink)}
+.refs-title a{color:var(--navy-lift);text-decoration:none}
+.refs-title a:hover{text-decoration:underline}
+.refs-meta{color:var(--ink-3);font-size:11.5px;margin-top:1px}
+
 .proposal-section{margin-bottom:26px;position:relative}
 .proposal-section:last-of-type{margin-bottom:0}
 .proposal-section-head{display:flex;align-items:center;gap:9px;margin-bottom:9px;flex-wrap:wrap}
@@ -189,6 +204,14 @@
           <div class="gap-map-caption" id="gap-map-caption"></div>
         </div>
         <div id="proposal-sections"></div>
+        <div class="refs-card" id="refs-card" style="display:none">
+          <div class="refs-head">
+            <span class="refs-label">References</span>
+            <span class="refs-count" id="refs-count"></span>
+          </div>
+          <div class="refs-sub">Real papers from the advisor's literature search. Included in your download — verify against your field's databases.</div>
+          <ol class="refs-list" id="refs-list"></ol>
+        </div>
         <a class="btn-download disabled" id="btn-download-proposal" href="#" onclick="return onDownloadProposal(event)">Download as Word doc</a>
       </div>
 
@@ -318,6 +341,7 @@ async function openProject(projectId, opts = {}) {
   _proposal = project.proposal || null;
   renderProposalPanel();   // reveals the panel only if there's already content
   checkGapMap();           // restore the research-gap map if one was built before
+  checkReferences();       // restore the accumulated reference list
 
   // Load and display stored chat history if resuming a project
   if (project.chat_history && project.chat_history.length > 0) {
@@ -397,6 +421,7 @@ async function callAdvisorAPI(message) {
       renderBotReply(data.reply || '');
       checkProposal();
       checkGapMap();
+      checkReferences();
     }
   } catch (e) {
     addBotRaw('<div class="bubble" style="color:#9B2020">Network error: ' + esc(e.message) + '</div>');
@@ -513,6 +538,39 @@ async function checkProposal() {
     _proposal  = await res.json();
     renderProposalPanel();
   } catch (e) { /* network hiccup — the panel just won't update this turn */ }
+}
+
+// ── References ────────────────────────────────────────────────────────────────
+async function checkReferences() {
+  try {
+    const res  = await fetch(`/api/projects/${_projectId}/references`);
+    const data = await res.json();
+    renderReferences(data.references || []);
+  } catch (e) { /* best-effort — skip on any hiccup */ }
+}
+
+function renderReferences(refs) {
+  const card = document.getElementById('refs-card');
+  if (!Array.isArray(refs) || refs.length === 0) { card.style.display = 'none'; return; }
+  document.getElementById('proposal-sidepanel').classList.add('visible');
+  card.style.display = 'block';
+  document.getElementById('refs-count').textContent = `${refs.length} paper${refs.length === 1 ? '' : 's'}`;
+
+  // Sort by first author, matching how they appear in the downloaded doc.
+  const sorted = refs.slice().sort((a, b) =>
+    ((a.authors || [''])[0] || '').toLowerCase().localeCompare(((b.authors || [''])[0] || '').toLowerCase())
+    || (a.title || '').localeCompare(b.title || ''));
+
+  document.getElementById('refs-list').innerHTML = sorted.map(r => {
+    const authors = r.authors || [];
+    const who = authors.length > 3 ? authors.slice(0, 3).join(', ') + ', et al.' : authors.join(', ');
+    const meta = [who, r.year, r.venue].filter(Boolean).join(' · ');
+    const titleHtml = r.url
+      ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>`
+      : esc(r.title);
+    return `<li><div class="refs-body"><div class="refs-title">${titleHtml}</div>` +
+           (meta ? `<div class="refs-meta">${esc(meta)}</div>` : '') + `</div></li>`;
+  }).join('');
 }
 
 // ── Research-gap map ──────────────────────────────────────────────────────────

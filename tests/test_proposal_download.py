@@ -67,6 +67,31 @@ def test_build_proposal_docx_includes_the_staged_gate_sections():
     assert "Nobody has yet audited contestability in county-level deployments." in texts
 
 
+def test_build_proposal_docx_lists_references_sorted_by_author():
+    import web_app
+    refs = [
+        {"title": "Zeta paper", "authors": ["Zimmer"], "year": 2019, "venue": "J1", "url": "https://doi.org/z"},
+        {"title": "Alpha paper", "authors": ["Adams", "Baker"], "year": 2021, "venue": "", "url": ""},
+    ]
+    texts = _paragraph_texts(_build_proposal_docx("Jane Doe", {"background": "bg"}, refs))
+    assert any(t == "References" for t in texts)
+    adams = next(i for i, t in enumerate(texts) if "Adams" in t)
+    zimmer = next(i for i, t in enumerate(texts) if "Zimmer" in t)
+    assert adams < zimmer                       # alphabetical by first author
+    assert "Adams, Baker (2021). Alpha paper." in texts
+
+
+def test_build_proposal_docx_without_references_has_no_reference_section():
+    texts = _paragraph_texts(_build_proposal_docx("Jane Doe", {"background": "bg"}))
+    assert not any(t == "References" for t in texts)
+
+
+def test_format_reference_shortens_long_author_lists():
+    import web_app
+    r = {"title": "T", "authors": ["A", "B", "C", "D", "E"], "year": 2020, "venue": "V"}
+    assert web_app._format_reference(r) == "A, B, C, et al. (2020). T. V."
+
+
 def test_build_proposal_docx_skips_empty_sections():
     proposal = {
         "background": "Some background.",
