@@ -51,6 +51,13 @@
 .gap-map-caption{font-size:12.5px;color:var(--ink-2);line-height:1.55;margin-top:14px;padding-top:12px;border-top:1px solid var(--paper-line)}
 .gap-map-caption strong{color:var(--navy);font-weight:600}
 
+/* ── Matched collaborators (cards reuse .person styles from the shell) ── */
+.matches-card{margin:26px 0 0;padding-top:22px;border-top:1px solid var(--paper-line)}
+.matches-head{margin-bottom:13px}
+.matches-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--navy)}
+.matches-hint{display:block;font-size:12px;color:var(--ink-3);margin-top:2px;line-height:1.45}
+.person-list{display:flex;flex-direction:column;gap:10px}
+
 /* ── References ── */
 .refs-card{margin:26px 0 0;padding-top:22px;border-top:1px solid var(--paper-line)}
 .refs-head{display:flex;align-items:baseline;gap:8px}
@@ -189,6 +196,13 @@
           <div class="gap-map-caption" id="gap-map-caption"></div>
         </div>
         <div id="proposal-sections"></div>
+        <div class="matches-card" id="matches-card" style="display:none">
+          <div class="matches-head">
+            <span class="matches-label">Potential collaborators</span>
+            <span class="matches-hint">DePaul faculty matched to your project — click anyone to open their full profile.</span>
+          </div>
+          <div class="person-list" id="matches-list"></div>
+        </div>
         <div class="refs-card" id="refs-card" style="display:none">
           <div class="refs-head">
             <span class="refs-label">References</span>
@@ -327,6 +341,7 @@ async function openProject(projectId, opts = {}) {
   renderProposalPanel();   // reveals the panel only if there's already content
   checkGapMap();           // restore the research-gap map if one was built before
   checkReferences();       // restore the accumulated reference list
+  checkMatches();          // restore matched collaborators, clickable to full profile
 
   // Load and display stored chat history if resuming a project
   if (project.chat_history && project.chat_history.length > 0) {
@@ -407,6 +422,7 @@ async function callAdvisorAPI(message) {
       checkProposal();
       checkGapMap();
       checkReferences();
+      checkMatches();
     }
   } catch (e) {
     addBotRaw('<div class="bubble" style="color:#9B2020">Network error: ' + esc(e.message) + '</div>');
@@ -523,6 +539,39 @@ async function checkProposal() {
     _proposal  = await res.json();
     renderProposalPanel();
   } catch (e) { /* network hiccup — the panel just won't update this turn */ }
+}
+
+// ── Matched collaborators ─────────────────────────────────────────────────────
+async function checkMatches() {
+  try {
+    const res  = await fetch(`/api/projects/${_projectId}/matches`);
+    const data = await res.json();
+    renderMatches(data.matches || []);
+  } catch (e) { /* best-effort — skip on any hiccup */ }
+}
+
+function renderMatches(matches) {
+  const card = document.getElementById('matches-card');
+  if (!Array.isArray(matches) || matches.length === 0) { card.style.display = 'none'; return; }
+  document.getElementById('proposal-sidepanel').classList.add('visible');
+  card.style.display = 'block';
+
+  // Cards reuse the shell's .person styles and openFacultyProfile modal — a click
+  // opens the same full profile (research, publications, contact) as the projects
+  // page. The mailto stops propagation so it doesn't also open the modal.
+  document.getElementById('matches-list').innerHTML = matches.map(m => {
+    const clickable = m.faculty_id
+      ? `data-faculty="${m.faculty_id}" onclick="openFacultyProfile(${m.faculty_id})"` : '';
+    const meta = [m.title, m.department].filter(Boolean).map(esc).join(' · ');
+    return `<div class="person" ${clickable}>` +
+             `<div class="person-top"><div class="person-name">${esc(m.name)}</div>` +
+             (m.match_tier ? `<span class="tier tier-${esc(m.match_tier)}">${esc(m.match_tier)}</span>` : '') +
+             `</div>` +
+             (meta ? `<div class="person-meta">${meta}</div>` : '') +
+             (m.why_match ? `<div class="person-why">${esc(m.why_match)}</div>` : '') +
+             (m.email ? `<a class="person-email" href="mailto:${esc(m.email)}" onclick="event.stopPropagation()">${esc(m.email)}</a>` : '') +
+           `</div>`;
+  }).join('');
 }
 
 // ── References ────────────────────────────────────────────────────────────────
