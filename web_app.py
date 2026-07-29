@@ -1537,7 +1537,7 @@ First, SEARCH THE LIVE LITERATURE. Call the search_literature tool with the spec
 
 Be honest about coverage IN THE SAME MESSAGE. Even a live search isn't exhaustive — OpenAlex misses some venues, preprints, and very recent work, and {name} is the expert on their own field. So present this as a strong evidence-based read, not the final word: ask what they know of that the search didn't surface.
 
-A "Research landscape" map appears in their panel each time you search — the works you found plotted as dots, their project as a marker in the open space between them. Point them to it once ("you can see this in the landscape map on the left — the cluster there is the existing work, and your project sits off to the side"), and use where the project sits as evidence: near a cluster means the ground is crowded, off on its own means the gap is real.
+A "Research landscape" map appears in their panel each time you search: their project sits at the centre and the works you found are arranged around it by how close each is to their idea — the nearest existing work (#1) hugs the centre, and there's a numbered list naming each one. Point them to it once ("see the landscape map on the left — #1 is the closest existing work to what you're proposing"), and use it as evidence: if the closest work is essentially their project, the ground is crowded; if even the nearest is clearly doing something different, the gap is real. Name the closest work when you give your novelty verdict so the map and your words line up.
 
 Then give a plain verdict. One of:
   • CLEARLY NEW — say what makes it new, and move on quickly. Do not manufacture doubt to seem rigorous.
@@ -1777,40 +1777,32 @@ def _search_literature(query: str, limit: int = LIT_SEARCH_RESULTS) -> dict:
 
 
 def _compute_gap_map(query: str, works: list) -> dict | None:
-    """Position the project and the works the novelty search found in 2D.
+    """Measure how close each work the novelty search found is to the project.
 
-    The project's point is the query embedding; each work is its title+abstract,
-    all embedded with SPECTER2 and projected to two dimensions by PCA. A genuinely
-    novel project lands away from the cluster of existing work — that open space
-    is the gap, made visible. Returns None when there's too little to plot or the
-    model isn't loaded (the feature is best-effort; it never blocks the chat).
+    The project and every work are embedded with SPECTER2; each work's similarity
+    to the project is its cosine to the project vector. The frontend lays the
+    works out around the project by that similarity — the nearest existing work is
+    the biggest overlap, the open space is the gap. Returns None when there's too
+    little to work with or the model isn't loaded (best-effort; never blocks chat).
     """
     works = [w for w in (works or []) if (w.get("title") or "").strip()]
     if len(works) < 3 or _st.get("model") is None:
         return None
     texts = [query] + [f"{w['title']}. {(w.get('abstract') or '')[:400]}" for w in works]
     try:
-        emb = np.asarray(_st["model"].encode(texts, normalize_embeddings=True), dtype=float)
-        centered = emb - emb.mean(axis=0)
-        _, _, vt = np.linalg.svd(centered, full_matrices=False)
-        coords = centered @ vt[:2].T                      # (n, 2)
+        emb  = np.asarray(_st["model"].encode(texts, normalize_embeddings=True), dtype=float)
+        sims = emb[1:] @ emb[0]                             # cosine of each work to the project
     except Exception:
         return None
 
-    mn, mx = coords.min(axis=0), coords.max(axis=0)
-    span   = np.where((mx - mn) == 0, 1.0, mx - mn)
-    norm   = (coords - mn) / span                          # each axis → [0, 1]
-
-    return {
-        "query":   query,
-        "project": {"x": round(float(norm[0][0]), 4), "y": round(float(norm[0][1]), 4)},
-        "works": [
-            {"title": w["title"], "authors": (w.get("authors") or [])[:2],
-             "year": w.get("year"), "cited_by_count": w.get("cited_by_count", 0),
-             "x": round(float(norm[i + 1][0]), 4), "y": round(float(norm[i + 1][1]), 4)}
-            for i, w in enumerate(works)
-        ],
-    }
+    out = [
+        {"title": w["title"], "authors": (w.get("authors") or [])[:2],
+         "year": w.get("year"), "cited_by_count": w.get("cited_by_count", 0),
+         "similarity": round(float(max(0.0, min(1.0, sims[i]))), 4)}
+        for i, w in enumerate(works)
+    ]
+    out.sort(key=lambda w: w["similarity"], reverse=True)   # closest to the project first
+    return {"query": query, "works": out}
 
 
 def _save_gap_map(project_id, gap_map: dict) -> None:

@@ -33,26 +33,33 @@ def test_returns_none_when_model_missing(monkeypatch):
     assert web_app._compute_gap_map("q", _works(5)) is None
 
 
-def test_coords_are_normalised_and_shaped(monkeypatch):
-    # 1 query + 4 works = 5 vectors spread across the space.
-    vecs = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0.5, 0.5, 1]]
-    monkeypatch.setitem(web_app._st, "model", _FakeModel(vecs))
+def test_similarity_computed_and_sorted_closest_first(monkeypatch):
+    # project = [1,0,0]; works at decreasing cosine to it.
+    project = [1.0, 0.0, 0.0]
+    w_close = [1.0, 0.0, 0.0]        # cosine 1.0
+    w_mid   = [0.6, 0.8, 0.0]        # cosine 0.6
+    w_far   = [0.0, 1.0, 0.0]        # cosine 0.0
+    # _works(3) are Paper 0,1,2 → pair them with far, close, mid so ordering must sort.
+    monkeypatch.setitem(web_app._st, "model", _FakeModel([project, w_far, w_close, w_mid]))
 
-    gm = web_app._compute_gap_map("my project", _works(4))
-    assert gm is not None
-    assert set(gm) == {"query", "project", "works"}
+    gm = web_app._compute_gap_map("my project", _works(3))
+    assert set(gm) == {"query", "works"}
     assert gm["query"] == "my project"
-    assert len(gm["works"]) == 4
 
-    pts = [(gm["project"]["x"], gm["project"]["y"])] + [(w["x"], w["y"]) for w in gm["works"]]
-    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
-    # each axis min-max normalised into [0, 1]
-    assert min(xs) == 0.0 and max(xs) == 1.0
-    assert min(ys) == 0.0 and max(ys) == 1.0
-    assert all(0.0 <= v <= 1.0 for v in xs + ys)
-    # metadata carried through
-    assert gm["works"][2]["cited_by_count"] == 20
-    assert gm["works"][1]["year"] == 2021
+    sims = [w["similarity"] for w in gm["works"]]
+    assert sims == sorted(sims, reverse=True)          # closest first
+    assert sims[0] == 1.0 and sims[-1] == 0.0
+    assert all(0.0 <= s <= 1.0 for s in sims)
+    # the closest work is the one whose vector matched the project (Paper 1)
+    assert gm["works"][0]["title"] == "Paper 1"
+
+
+def test_negative_cosine_is_clamped(monkeypatch):
+    project = [1.0, 0.0, 0.0]
+    works_vecs = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]  # last is opposite
+    monkeypatch.setitem(web_app._st, "model", _FakeModel([project] + works_vecs))
+    gm = web_app._compute_gap_map("q", _works(3))
+    assert all(0.0 <= w["similarity"] <= 1.0 for w in gm["works"])
 
 
 def test_untitled_works_are_dropped(monkeypatch):

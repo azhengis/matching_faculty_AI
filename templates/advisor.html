@@ -35,17 +35,31 @@
 .gap-map-label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--navy)}
 .gap-map-hint{display:block;font-size:12px;color:var(--ink-3);margin-top:2px}
 #gap-map-plot svg{width:100%;height:auto;display:block}
-.gm-work{fill:var(--navy-lift);fill-opacity:.55;stroke:var(--surface);stroke-width:.6;transition:fill-opacity .15s}
-.gm-work:hover{fill-opacity:.9}
-.gm-project-halo{fill:var(--scarlet);fill-opacity:.13}
+.gm-ring{fill:none;stroke:var(--border-2);stroke-width:.3;stroke-dasharray:1.2 1.6;opacity:.7}
+.gm-work{fill:var(--navy-lift);fill-opacity:.6;stroke:var(--surface);stroke-width:.6;transition:fill-opacity .15s}
+.gm-work:hover{fill-opacity:.95}
+.gm-work.gm-closest{fill:var(--teal);fill-opacity:.85}
+.gm-num{font-size:3.4px;font-weight:700;fill:var(--ink-2);font-family:inherit}
+.gm-project-halo{fill:var(--scarlet);fill-opacity:.12}
 .gm-project-dot{fill:var(--scarlet);stroke:var(--surface);stroke-width:1}
-.gm-project-label{font-size:4.4px;font-weight:700;fill:var(--scarlet);font-family:inherit}
-.gap-map-legend{display:flex;gap:16px;margin-top:10px;font-size:11.5px;color:var(--ink-2)}
+.gm-project-label{font-size:4px;font-weight:700;fill:var(--scarlet);font-family:inherit}
+.gap-map-legend{display:flex;gap:16px;margin-top:10px;font-size:11.5px;color:var(--ink-2);flex-wrap:wrap}
 .gap-map-legend span{display:inline-flex;align-items:center;gap:5px}
 .gm-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
-.gm-dot.gm-existing{background:var(--navy-lift);opacity:.6}
+.gm-dot.gm-existing{background:var(--navy-lift);opacity:.7}
 .gm-dot.gm-project{background:var(--scarlet)}
-.gap-map-caption{font-size:12.5px;color:var(--ink-2);line-height:1.55;margin-top:11px;padding-top:11px;border-top:1px solid var(--paper-line)}
+.gap-map-list{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:9px}
+.gap-map-list li{display:flex;gap:9px;align-items:flex-start}
+.gm-ln{flex-shrink:0;width:16px;height:16px;border-radius:50%;background:var(--navy-lift);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.gap-map-list li.gm-li-closest .gm-ln{background:var(--teal)}
+.gm-li-body{min-width:0;flex:1}
+.gm-li-title{font-size:12.5px;color:var(--ink);line-height:1.35}
+.gm-li-meta{font-size:11px;color:var(--ink-3);margin-top:1px}
+.gm-li-closest .gm-li-meta::after{content:' · closest to your idea';color:var(--teal);font-weight:600}
+.gm-bar{height:3px;border-radius:2px;background:var(--border);margin-top:5px;overflow:hidden}
+.gm-bar>span{display:block;height:100%;background:var(--navy-lift);opacity:.65;border-radius:2px}
+.gm-li-closest .gm-bar>span{background:var(--teal);opacity:.85}
+.gap-map-caption{font-size:12.5px;color:var(--ink-2);line-height:1.55;margin-top:13px;padding-top:12px;border-top:1px solid var(--paper-line)}
 .gap-map-caption strong{color:var(--navy);font-weight:600}
 
 .proposal-section{margin-bottom:26px;position:relative}
@@ -164,13 +178,14 @@
         <div class="gap-map-card" id="gap-map-card" style="display:none">
           <div class="gap-map-head">
             <span class="gap-map-label">Research landscape</span>
-            <span class="gap-map-hint">Where your project sits vs. existing work</span>
+            <span class="gap-map-hint">The existing work the search found, by how close it is to your idea. Closer to the centre = more overlap; the open space is your gap.</span>
           </div>
           <div id="gap-map-plot"></div>
           <div class="gap-map-legend">
-            <span><span class="gm-dot gm-existing"></span>Existing work</span>
-            <span><span class="gm-dot gm-project"></span>Your project</span>
+            <span><span class="gm-dot gm-project"></span>Your project (centre)</span>
+            <span><span class="gm-dot gm-existing"></span>Existing paper</span>
           </div>
+          <ol class="gap-map-list" id="gap-map-list"></ol>
           <div class="gap-map-caption" id="gap-map-caption"></div>
         </div>
         <div id="proposal-sections"></div>
@@ -520,31 +535,64 @@ function renderGapMap(gm) {
   document.getElementById('proposal-sidepanel').classList.add('visible');
   card.style.display = 'block';
 
-  const P = 8, S = 100;                 // padding, viewBox size
-  const px = x => P + x * (S - 2 * P);
-  const py = y => P + (1 - y) * (S - 2 * P);   // flip: data y-up, screen y-down
-  const maxCite = Math.max(1, ...gm.works.map(w => w.cited_by_count || 0));
-  const rFor = c => 1.6 + 2.6 * Math.sqrt((c || 0) / maxCite);   // area ~ citations
+  // Works arrive sorted closest-first. Lay them out around the project (centre):
+  // radius encodes distance from the idea (closest paper hugs the centre), angle
+  // is a golden-angle spiral purely to keep dots from overlapping.
+  const works = gm.works;
+  const sims  = works.map(w => w.similarity || 0);
+  const mn = Math.min(...sims), mx = Math.max(...sims);
+  const span = (mx - mn) || 1;
+  const C = 50, R_IN = 16, R_OUT = 42, GA = 2.399963;
+  const maxCite = Math.max(1, ...works.map(w => w.cited_by_count || 0));
+  const rFor = c => 1.8 + 2.3 * Math.sqrt((c || 0) / maxCite);
 
-  const dots = gm.works.map(w => {
-    const t = esc(`${w.title}${w.year ? ' (' + w.year + ')' : ''}${w.cited_by_count ? ' · ' + w.cited_by_count + ' citations' : ''}`);
-    return `<circle class="gm-work" cx="${px(w.x).toFixed(1)}" cy="${py(w.y).toFixed(1)}" r="${rFor(w.cited_by_count).toFixed(1)}"><title>${t}</title></circle>`;
+  const nodes = works.map((w, i) => {
+    const closeness = (w.similarity - mn) / span;        // 1 = closest to project
+    const rad = R_IN + (1 - closeness) * (R_OUT - R_IN);
+    const ang = i * GA;
+    return { ...w, n: i + 1, closeness,
+             x: C + rad * Math.cos(ang), y: C + rad * Math.sin(ang) };
+  });
+
+  const rings = `<circle class="gm-ring" cx="${C}" cy="${C}" r="${R_OUT + 3}"></circle>` +
+                `<circle class="gm-ring" cx="${C}" cy="${C}" r="${(R_IN + R_OUT) / 2}"></circle>`;
+
+  const dots = nodes.map(nd => {
+    const r = rFor(nd.cited_by_count);
+    const t = esc(`${nd.title}${nd.year ? ' (' + nd.year + ')' : ''}${nd.cited_by_count ? ' · ' + nd.cited_by_count + ' citations' : ''}`);
+    const ny = nd.y < C ? nd.y - r - 1.2 : nd.y + r + 3.2;
+    return `<circle class="gm-work${nd.n === 1 ? ' gm-closest' : ''}" cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${r.toFixed(1)}"><title>${t}</title></circle>` +
+           `<text class="gm-num" x="${nd.x.toFixed(1)}" y="${ny.toFixed(1)}" text-anchor="middle">${nd.n}</text>`;
   }).join('');
 
-  const jx = px(gm.project.x), jy = py(gm.project.y);
-  const project =
-    `<circle class="gm-project-halo" cx="${jx.toFixed(1)}" cy="${jy.toFixed(1)}" r="9"></circle>` +
-    `<circle class="gm-project-dot"  cx="${jx.toFixed(1)}" cy="${jy.toFixed(1)}" r="3"></circle>` +
-    `<text class="gm-project-label" x="${jx.toFixed(1)}" y="${(jy - 6).toFixed(1)}" text-anchor="middle">Your project</text>`;
+  const center =
+    `<circle class="gm-project-halo" cx="${C}" cy="${C}" r="10"></circle>` +
+    `<circle class="gm-project-dot"  cx="${C}" cy="${C}" r="3.2"></circle>` +
+    `<text class="gm-project-label" x="${C}" y="${C - 5.5}" text-anchor="middle">You</text>`;
 
   document.getElementById('gap-map-plot').innerHTML =
-    `<svg viewBox="0 0 ${S} ${S}" role="img" aria-label="Research gap map">${dots}${project}</svg>`;
+    `<svg viewBox="0 0 100 100" role="img" aria-label="Research landscape: existing papers arranged by closeness to your project">${rings}${center}${dots}</svg>`;
 
-  // Caption: the advisor's novelty claim if it's saved, else a plain explainer.
+  // Numbered list so every dot says what it is.
+  document.getElementById('gap-map-list').innerHTML = nodes.map(nd => {
+    const meta = [ (nd.authors || []).join(', '), nd.year,
+                   nd.cited_by_count ? nd.cited_by_count + ' citations' : '' ]
+                 .filter(Boolean).join(' · ');
+    return `<li class="${nd.n === 1 ? 'gm-li-closest' : ''}">` +
+             `<span class="gm-ln">${nd.n}</span>` +
+             `<div class="gm-li-body">` +
+               `<div class="gm-li-title">${esc(nd.title)}</div>` +
+               `<div class="gm-li-meta">${esc(meta)}</div>` +
+               `<div class="gm-bar"><span style="width:${Math.round(15 + nd.closeness * 85)}%"></span></div>` +
+             `</div></li>`;
+  }).join('');
+
+  // Caption: the advisor's novelty claim if saved, else how to read the map.
   const novelty = (_proposal && (_proposal.novelty || '').trim()) || '';
+  const closest = works[0];
   document.getElementById('gap-map-caption').innerHTML = novelty
     ? `<strong>The gap:</strong> ${esc(novelty)}`
-    : `Each dot is a real paper from the live search, sized by citations. Your project sits in the open space between them — the further from the clusters, the more novel.`;
+    : `The closest existing work to your idea is <strong>#1 — ${esc(closest.title)}</strong>. Your gap is what your project does that it and the others don't.`;
 }
 
 function isLocked(k) {
