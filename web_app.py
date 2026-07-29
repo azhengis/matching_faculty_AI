@@ -1334,6 +1334,16 @@ async def api_project_gap_map(project_id: int, req: Request):
         gap_map = json.loads(row[0]) if row and row[0] else None
     except (ValueError, TypeError):
         gap_map = None
+
+    # Heal maps saved before the similarity rework (works carry x/y, no
+    # 'similarity'): recompute from the stored titles so old projects render
+    # correctly without needing another search.
+    works = (gap_map or {}).get("works") or []
+    if works and any("similarity" not in w for w in works):
+        healed = _compute_gap_map(gap_map.get("query", ""), works)
+        if healed:
+            _save_gap_map(project_id, healed)
+            gap_map = healed
     return JSONResponse({"gap_map": gap_map})
 
 

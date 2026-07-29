@@ -573,6 +573,13 @@ function renderGapMap(gm) {
     card.style.display = 'none';
     return;
   }
+  // Don't render an old map that predates similarity scoring (works without a
+  // numeric similarity) — it would show every bar tied at 100. It heals on the
+  // next fetch or search.
+  if (gm.works.some(w => typeof w.similarity !== 'number')) {
+    card.style.display = 'none';
+    return;
+  }
   // The map appears during the novelty stage, before any section is saved — so
   // it reveals the proposal panel on its own.
   document.getElementById('proposal-sidepanel').classList.add('visible');
