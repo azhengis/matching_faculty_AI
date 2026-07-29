@@ -448,6 +448,35 @@ def _project_title_from(text: str) -> str:
     return cut + "…"
 
 
+def _generate_title(text: str) -> str:
+    """A short, well-formed project title generated from the problem text.
+
+    Asks the model for a real 3-8 word title that names the topic, instead of
+    truncating a sentence. Falls back to the truncated first sentence if the
+    model isn't configured or the call fails, so it never blocks a save.
+    """
+    text = (text or "").strip()
+    if not text:
+        return "Untitled project"
+    if not (CHATBOT_MODEL and _litellm):
+        return _project_title_from(text)
+    try:
+        resp = _litellm.completion(
+            model=CHATBOT_MODEL, max_tokens=24, timeout=15,
+            messages=[
+                {"role": "system", "content":
+                 "You write concise research-project titles. Given a description, reply with "
+                 "ONLY the title — 3 to 8 words, title case, naming the specific topic. No "
+                 "quotes, no trailing period, and NOT a full sentence."},
+                {"role": "user", "content": text[:1500]},
+            ])
+        title = (resp.choices[0].message.content or "").strip().strip('"').strip()
+        title = title.split("\n")[0].rstrip(".").strip()[:120]
+        return title or _project_title_from(text)
+    except Exception:
+        return _project_title_from(text)
+
+
 # ── App startup ───────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -2114,13 +2143,16 @@ def _save_proposal(project_id, args: dict) -> dict:
         (pid, values["problem_statement"], values["novelty"], values["background"], values["objectives"],
          values["research_questions"], values["related_work"], values["methodology"], values["expected_outcomes"])
     )
-    # A project begun from the chat starts untitled; name it from the background
-    # the moment there is one, so it stops reading "Untitled project" everywhere.
-    if values.get("background", "").strip():
+    # A project begun from the chat starts untitled; give it a real title the
+    # moment there's something to name it from — the problem statement if we have
+    # it (it's the concise anchor), else the background. Only auto-names while the
+    # title is still the placeholder, so a researcher's own rename is never lost.
+    source = (values.get("problem_statement") or values.get("background") or "").strip()
+    if source:
         row = con.execute("SELECT title FROM projects WHERE id = ?", (pid,)).fetchone()
         if row and (not (row[0] or "").strip() or row[0] == "Untitled project"):
             con.execute("UPDATE projects SET title = ? WHERE id = ?",
-                        (_project_title_from(values["background"]), pid))
+                        (_generate_title(source), pid))
 
     con.execute("UPDATE projects SET updated_at = datetime('now') WHERE id = ?", (pid,))
     con.commit()
