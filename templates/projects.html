@@ -16,6 +16,17 @@
 .btn-danger-quiet{background:none;border:none;font-size:12.5px;color:var(--ink-3);cursor:pointer;font-family:inherit;text-decoration:underline;padding:0}
 .btn-danger-quiet:hover{color:var(--scarlet)}
 
+/* ── Rename title + remove match ── */
+.detail-title-row{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+.title-edit-btn{background:none;border:1px solid var(--border-2);border-radius:999px;font-size:11.5px;color:var(--ink-2);cursor:pointer;font-family:inherit;padding:4px 12px;transition:background .15s,color .15s;flex-shrink:0}
+.title-edit-btn:hover{background:var(--canvas);color:var(--navy)}
+.title-input{font-family:var(--serif);font-size:24px;line-height:1.3;color:var(--ink);background:var(--surface);border:1.5px solid var(--navy-lift);border-radius:var(--r-sm);padding:5px 11px;outline:none;min-width:0;flex:1;box-shadow:0 0 0 3px rgba(11,78,146,.1)}
+.btn-sm{padding:7px 14px;font-size:13px}
+#detail-people-slot .person{position:relative}
+.person-remove{position:absolute;top:11px;right:12px;background:none;border:none;font-size:11px;color:var(--ink-3);cursor:pointer;font-family:inherit;padding:2px 6px;border-radius:6px;opacity:0;transition:opacity .15s,background .15s,color .15s}
+#detail-people-slot .person:hover .person-remove,.person-remove:focus-visible{opacity:1}
+.person-remove:hover{background:#F5EAEA;color:var(--scarlet)}
+
 /* ── Intake: each question names the section it becomes ── */
 .intake-head{margin-bottom:26px}
 .feeds{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--teal);background:var(--teal-bg);border-radius:999px;padding:3px 10px;margin-left:9px;vertical-align:2px}
@@ -79,9 +90,12 @@
     <div id="detail-view" style="display:none">
       <a class="back-link" href="#" onclick="showList(); return false;">← All projects</a>
       <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap">
-        <div>
+        <div style="min-width:0">
           <div class="eyebrow">Project</div>
-          <h1 id="detail-title"></h1>
+          <div class="detail-title-row">
+            <h1 id="detail-title"></h1>
+            <button class="title-edit-btn" onclick="startEditTitle()" title="Rename project" aria-label="Rename project">Rename</button>
+          </div>
         </div>
         <div style="display:flex;gap:9px;flex-shrink:0">
           <a class="btn btn-accent" id="detail-chat">Continue the conversation</a>
@@ -112,6 +126,7 @@ const SECTION_LABELS = {
 const SECTION_ORDER = Object.keys(SECTION_LABELS);
 
 let _projects = [], _intake = [];
+let _detailId = null;   // project currently open in the detail view
 
 (async function init() {
   let me;
@@ -268,7 +283,8 @@ async function showDetail(id) {
   document.getElementById('detail-view').style.display = 'block';
   history.replaceState({}, '', '/projects?open=' + id);
 
-  document.getElementById('detail-title').textContent = data.title;
+  _detailId = id;
+  renderTitleRow(data.title);
   document.getElementById('detail-chat').href = `/advisor?project=${id}`;
   document.getElementById('detail-chat').textContent =
     data.session_id ? 'Continue the conversation' : 'Talk it through';
@@ -294,6 +310,8 @@ async function showDetail(id) {
   document.getElementById('detail-people-section').style.display = people.length ? '' : 'none';
   document.getElementById('detail-people-slot').innerHTML = people.map(m => `
     <div class="person" data-faculty="${m.faculty_id||''}" onclick="openFacultyProfile(${m.faculty_id||0})">
+      <button class="person-remove" title="Remove this person"
+              onclick="event.stopPropagation(); removeMatch(${m.id}, this)">Remove</button>
       <div class="person-top">
         <div class="person-name">${esc(m.name)}</div>
         ${m.match_tier ? `<span class="tier tier-${esc(m.match_tier)}">${esc(m.match_tier)}</span>` : ''}
@@ -302,6 +320,62 @@ async function showDetail(id) {
       ${m.why_match ? `<div class="person-why">${esc(m.why_match)}</div>` : ''}
       ${m.email ? `<a class="person-email" href="mailto:${esc(m.email)}" onclick="event.stopPropagation()">${esc(m.email)}</a>` : ''}
     </div>`).join('');
+}
+
+// ── Rename the project ─────────────────────────────────────────────────────────
+function renderTitleRow(title) {
+  document.querySelector('.detail-title-row').innerHTML =
+    `<h1 id="detail-title"></h1>` +
+    `<button class="title-edit-btn" onclick="startEditTitle()" title="Rename project" aria-label="Rename project">Rename</button>`;
+  document.getElementById('detail-title').textContent = title;
+}
+
+function startEditTitle() {
+  const h1 = document.getElementById('detail-title');
+  if (document.getElementById('title-input')) return;   // already editing
+  const current = h1.textContent;
+  const row = document.querySelector('.detail-title-row');
+  row.innerHTML =
+    `<input id="title-input" class="title-input" type="text" maxlength="120" value="${esc(current)}">` +
+    `<button class="btn btn-accent btn-sm" onclick="saveTitle()">Save</button>` +
+    `<button class="btn btn-quiet btn-sm" onclick="showDetail(_detailId)">Cancel</button>`;
+  const input = document.getElementById('title-input');
+  input.focus(); input.select();
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') saveTitle();
+    if (e.key === 'Escape') showDetail(_detailId);
+  });
+}
+
+async function saveTitle() {
+  const input = document.getElementById('title-input');
+  const title = (input.value || '').trim();
+  if (!title) { input.focus(); return; }
+  try {
+    const res = await fetch('/api/projects/' + _detailId, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ title })
+    });
+    if (!res.ok) throw new Error();
+  } catch (e) { /* fall through to reload, which shows the saved value */ }
+  await showDetail(_detailId);   // re-render header, and refresh the list underneath
+  loadProjects();
+}
+
+// ── Remove a matched collaborator ──────────────────────────────────────────────
+async function removeMatch(matchId, btn) {
+  const card = btn.closest('.person');
+  card.style.opacity = '0.5';
+  try {
+    const res = await fetch(`/api/projects/${_detailId}/matches/${matchId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error();
+    card.remove();
+    // Hide the whole panel if that was the last one.
+    if (!document.querySelectorAll('#detail-people-slot .person').length)
+      document.getElementById('detail-people-section').style.display = 'none';
+  } catch (e) {
+    card.style.opacity = '';   // restore on failure
+  }
 }
 
 function textToHtml(text) {

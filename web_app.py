@@ -431,12 +431,21 @@ def _migrate_proposals_to_projects(con):
 
 
 def _project_title_from(text: str) -> str:
-    """A short, human title for a project, taken from its first sentence."""
+    """A short, human title for a project, taken from its first sentence.
+
+    Auto-generated as a fallback only — the researcher can rename the project.
+    Truncates at a word boundary (not mid-word) so it reads cleanly.
+    """
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
         return "Untitled project"
     first = re.split(r"(?<=[.!?])\s", text)[0]
-    return (first[:70].rstrip() + "…") if len(first) > 70 else first
+    if len(first) <= 70:
+        return first
+    cut = first[:70].rstrip()
+    if " " in cut:
+        cut = cut[:cut.rfind(" ")].rstrip()   # don't slice through a word
+    return cut + "…"
 
 
 # ── App startup ───────────────────────────────────────────────────────────────
@@ -1285,9 +1294,9 @@ async def api_project_get(project_id: int, req: Request):
     except ValueError:
         chat_history = []
     matches = [dict(zip(
-        ["faculty_id", "name", "title", "department", "email", "match_tier", "match_pct", "why_match"], m
+        ["id", "faculty_id", "name", "title", "department", "email", "match_tier", "match_pct", "why_match"], m
     )) for m in con.execute(
-        "SELECT faculty_id, name, title, department, email, match_tier, match_pct, why_match "
+        "SELECT id, faculty_id, name, title, department, email, match_tier, match_pct, why_match "
         "FROM project_matches WHERE project_id = ? ORDER BY match_pct DESC", (project_id,)
     ).fetchall()]
     proposal = _read_proposal(con, project_id)
@@ -1316,6 +1325,46 @@ async def api_project_delete(project_id: int, req: Request):
     con.commit()
     con.close()
     return JSONResponse({"status": "deleted"})
+
+
+@app.patch("/api/projects/{project_id}")
+async def api_project_rename(project_id: int, req: Request):
+    """Rename a project. The auto-generated title is only a fallback; this lets
+    the researcher set their own."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+    body  = await req.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        return JSONResponse({"error": "Title can't be empty."}, status_code=400)
+    title = title[:120]
+    con = sqlite3.connect(DB_PATH)
+    if _owned_project(con, user, project_id) is None:
+        con.close()
+        return JSONResponse({"error": "No such project"}, status_code=404)
+    con.execute("UPDATE projects SET title = ?, updated_at = datetime('now') WHERE id = ?",
+                (title, project_id))
+    con.commit()
+    con.close()
+    return JSONResponse({"status": "renamed", "title": title})
+
+
+@app.delete("/api/projects/{project_id}/matches/{match_id}")
+async def api_project_match_delete(project_id: int, match_id: int, req: Request):
+    """Remove one matched collaborator the researcher doesn't want to keep."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+    con = sqlite3.connect(DB_PATH)
+    if _owned_project(con, user, project_id) is None:
+        con.close()
+        return JSONResponse({"error": "No such project"}, status_code=404)
+    con.execute("DELETE FROM project_matches WHERE id = ? AND project_id = ?",
+                (match_id, project_id))
+    con.commit()
+    con.close()
+    return JSONResponse({"status": "removed"})
 
 
 @app.get("/api/projects/{project_id}/proposal")
@@ -1393,9 +1442,9 @@ async def api_project_matches(project_id: int, req: Request):
         con.close()
         return JSONResponse({"error": "No such project"}, status_code=404)
     matches = [dict(zip(
-        ["faculty_id", "name", "title", "department", "email", "match_tier", "match_pct", "why_match"], m
+        ["id", "faculty_id", "name", "title", "department", "email", "match_tier", "match_pct", "why_match"], m
     )) for m in con.execute(
-        "SELECT faculty_id, name, title, department, email, match_tier, match_pct, why_match "
+        "SELECT id, faculty_id, name, title, department, email, match_tier, match_pct, why_match "
         "FROM project_matches WHERE project_id = ? ORDER BY match_pct DESC", (project_id,)
     ).fetchall()]
     con.close()
