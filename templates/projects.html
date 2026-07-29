@@ -318,6 +318,7 @@ async function showDetail(id) {
       </div>
       <div class="person-meta">${esc(m.title || '')}${m.title && m.department ? ' · ' : ''}${esc(m.department || '')}</div>
       ${m.why_match ? `<div class="person-why">${esc(m.why_match)}</div>` : ''}
+      ${relevantWorkHtml(m.relevant_work)}
       ${m.email ? `<a class="person-email" href="mailto:${esc(m.email)}" onclick="event.stopPropagation()">${esc(m.email)}</a>` : ''}
     </div>`).join('');
 }

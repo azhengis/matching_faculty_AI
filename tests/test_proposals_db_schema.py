@@ -39,6 +39,7 @@ def test_init_profiles_db_creates_projects_and_matches(tmp_path, monkeypatch):
     assert _columns(con, "project_matches") == [
         "id", "project_id", "faculty_id", "name", "title", "department",
         "email", "match_tier", "match_pct", "why_match", "created_at",
+        "relevant_work",
     ]
     con.close()
 

@@ -371,6 +371,14 @@ def _init_profiles_db():
     except sqlite3.OperationalError:
         pass  # project_matches not created yet on a fresh install
 
+    # Each match's most query-relevant publications, as JSON, so the card can
+    # show WHY this person fits — grounded in their actual work, not just a bio
+    # snippet.
+    try:
+        con.execute("ALTER TABLE project_matches ADD COLUMN relevant_work TEXT DEFAULT '[]'")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
     _migrate_proposals_to_projects(con)
 
     con.commit()
@@ -1212,6 +1220,30 @@ def _read_proposal(con, project_id) -> dict:
     return out
 
 
+def _read_matches(con, project_id) -> list:
+    """A project's matches, newest score first, with relevant_work parsed to a
+    list. Tolerant of a project_matches table without the relevant_work column."""
+    cols = ["id", "faculty_id", "name", "title", "department", "email",
+            "match_tier", "match_pct", "why_match", "relevant_work"]
+    select = ("SELECT id, faculty_id, name, title, department, email, match_tier, "
+              "match_pct, why_match, relevant_work FROM project_matches "
+              "WHERE project_id = ? ORDER BY match_pct DESC")
+    try:
+        rows = con.execute(select, (project_id,)).fetchall()
+    except sqlite3.OperationalError:
+        cols = cols[:-1]
+        rows = con.execute(select.replace(", relevant_work", ""), (project_id,)).fetchall()
+    matches = []
+    for m in rows:
+        d = dict(zip(cols, m))
+        try:
+            d["relevant_work"] = json.loads(d.get("relevant_work") or "[]")
+        except (ValueError, TypeError):
+            d["relevant_work"] = []
+        matches.append(d)
+    return matches
+
+
 @app.get("/api/projects")
 async def api_projects_list(req: Request):
     """Every project for the logged-in researcher, newest first."""
@@ -1322,12 +1354,7 @@ async def api_project_get(project_id: int, req: Request):
         chat_history = json.loads(row[6] or "[]")
     except ValueError:
         chat_history = []
-    matches = [dict(zip(
-        ["id", "faculty_id", "name", "title", "department", "email", "match_tier", "match_pct", "why_match"], m
-    )) for m in con.execute(
-        "SELECT id, faculty_id, name, title, department, email, match_tier, match_pct, why_match "
-        "FROM project_matches WHERE project_id = ? ORDER BY match_pct DESC", (project_id,)
-    ).fetchall()]
+    matches = _read_matches(con, project_id)
     proposal = _read_proposal(con, project_id)
     con.close()
 
@@ -1470,12 +1497,7 @@ async def api_project_matches(project_id: int, req: Request):
     if _owned_project(con, user, project_id) is None:
         con.close()
         return JSONResponse({"error": "No such project"}, status_code=404)
-    matches = [dict(zip(
-        ["id", "faculty_id", "name", "title", "department", "email", "match_tier", "match_pct", "why_match"], m
-    )) for m in con.execute(
-        "SELECT id, faculty_id, name, title, department, email, match_tier, match_pct, why_match "
-        "FROM project_matches WHERE project_id = ? ORDER BY match_pct DESC", (project_id,)
-    ).fetchall()]
+    matches = _read_matches(con, project_id)
     con.close()
     return JSONResponse({"matches": matches})
 
@@ -1763,7 +1785,7 @@ Rules:
   "machine learning natural language processing survey analysis text classification sentiment"
   NOT "political polarization sociology."
 
-• Return up to 10 results. For each person, explain specifically what they bring to this collaboration — what method or expertise they have that matches the researcher's need.
+• Return up to 10 results. For each person, explain specifically HOW THEY WOULD HELP {name}'s project — and ground it in their actual work, not a generic label. The search gives you each person's most relevant publications (relevant_papers in the result); name one and say what it shows they can do for the specific method {name} needs. Format: "[Name] — [their method/expertise]. Their work on '[real paper title]' is a direct fit for [the specific thing {name} needs], so they could help with [X]." Tie it to the researcher's saved methodology, not just the topic. Skip anyone whose relevant work doesn't actually fit rather than padding the list.
 
 ━━━ TONE ━━━
 Talk to {name} as a peer — a fellow faculty member. Direct, warm, specific. No over-explaining basics."""
@@ -2319,18 +2341,20 @@ def _record_matches(project_id, results: list) -> None:
         name = (r.get("name") or "").strip()
         if not name:
             continue
+        relevant_work = json.dumps(r.get("relevant_papers") or [])
         con.execute(
             """INSERT INTO project_matches
-                   (project_id, faculty_id, name, title, department, email, match_tier, match_pct, why_match)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   (project_id, faculty_id, name, title, department, email, match_tier, match_pct, why_match, relevant_work)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(project_id, name) DO UPDATE SET
                    match_tier = excluded.match_tier,
                    match_pct  = MAX(project_matches.match_pct, excluded.match_pct),
                    why_match  = excluded.why_match,
+                   relevant_work = excluded.relevant_work,
                    email      = excluded.email""",
             (project_id, r.get("id"), name, r.get("title", ""),
              r.get("department", "") or r.get("college", ""), r.get("email", ""),
-             r.get("match_tier", ""), int(r.get("match_pct") or 0), r.get("why_match", ""))
+             r.get("match_tier", ""), int(r.get("match_pct") or 0), r.get("why_match", ""), relevant_work)
         )
     con.execute("UPDATE projects SET updated_at = datetime('now') WHERE id = ?", (project_id,))
     con.commit()
