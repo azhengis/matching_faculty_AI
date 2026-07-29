@@ -800,13 +800,27 @@ async def api_profile_me(req: Request):
     except Exception:
         interests = []
     papers = []
+    title = department = college = ""
+    con = sqlite3.connect(DB_PATH)
     if paper_ids:
-        con = sqlite3.connect(DB_PATH)
         ph  = ",".join("?" * len(paper_ids))
-        prows = con.execute(f"SELECT id, title, year FROM papers WHERE id IN ({ph})", paper_ids).fetchall()
-        con.close()
-        papers = [{"id": r[0], "title": r[1] or "", "year": r[2]} for r in prows]
+        prows = con.execute(
+            f"SELECT id, title, year, cited_by_count FROM papers WHERE id IN ({ph}) "
+            "ORDER BY cited_by_count DESC, year DESC", paper_ids).fetchall()
+        papers = [{"id": r[0], "title": r[1] or "", "year": r[2], "cited_by": r[3] or 0} for r in prows]
+    # Title/department/college come from the faculty record this profile is linked
+    # to, so the profile can show a proper header instead of a bare name. Tolerant
+    # of a faculty table without these columns (older/minimal schemas).
+    if fid:
+        try:
+            frow = con.execute("SELECT title, department, college FROM faculty WHERE id = ?", (fid,)).fetchone()
+            if frow:
+                title, department, college = frow[0] or "", frow[1] or "", frow[2] or ""
+        except sqlite3.OperationalError:
+            pass
+    con.close()
     return JSONResponse({"id": pid, "faculty_id": fid, "name": name, "email": email or "",
+                         "title": title, "department": department, "college": college,
                          "bio": bio or "", "project_description": proj or "",
                          "confirmed_paper_ids": paper_ids, "research_interests": interests,
                          "papers": papers})

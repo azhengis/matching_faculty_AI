@@ -100,10 +100,31 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 .btn-scarlet{padding:12px 24px;background:var(--scarlet);color:#fff;border:none;border-radius:var(--r-sm);font-size:14.5px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;box-shadow:var(--sh-sm);transition:background .15s,transform .1s}
 .btn-scarlet:hover{background:#A81826}
 .btn-scarlet:active{transform:translateY(1px)}
-.profile-summary{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:26px;margin-bottom:22px}
+.profile-summary{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:28px;margin-bottom:22px}
 .profile-field{margin-bottom:18px}
 .profile-field:last-child{margin-bottom:0}
 .profile-text{font-size:14px;color:var(--ink-2);line-height:1.65;white-space:pre-wrap}
+
+/* ── Polished profile view ── */
+.pv-header{display:flex;gap:18px;align-items:center;padding-bottom:22px;margin-bottom:24px;border-bottom:1px solid var(--border)}
+.pv-avatar{width:64px;height:64px;border-radius:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:25px;font-weight:600;color:#fff;background:linear-gradient(135deg,var(--navy),var(--navy-lift));letter-spacing:.01em}
+.pv-headtext{min-width:0}
+.pv-header h2{font-family:var(--serif);font-size:26px;font-weight:normal;letter-spacing:-.01em;margin:0 0 3px;line-height:1.15}
+.pv-role{font-size:13.5px;color:var(--ink-2)}
+.pv-contact{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
+.pv-contact a{font-size:12.5px;color:var(--navy-lift);text-decoration:none;border:1px solid var(--border);border-radius:999px;padding:4px 13px;transition:background .15s}
+.pv-contact a:hover{background:var(--canvas)}
+.pv-block{margin-bottom:24px}
+.pv-block:last-child{margin-bottom:0}
+.pv-block-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);margin-bottom:10px}
+.pv-count{color:var(--ink-3);font-weight:600}
+.pv-chips{display:flex;flex-wrap:wrap;gap:7px}
+.pv-chip{font-size:12.5px;color:var(--teal);background:var(--teal-bg);border:1px solid #BEE0E2;border-radius:999px;padding:5px 13px}
+.pv-prose{font-size:14.5px;color:var(--ink-2);line-height:1.7;white-space:pre-wrap}
+.pv-prose.empty{color:var(--ink-3);font-style:italic}
+.pv-papers{display:flex;flex-direction:column;gap:10px}
+.pv-paper{font-size:13.5px;color:var(--ink);line-height:1.4;padding-left:13px;border-left:2px solid var(--border-2)}
+.pv-paper-meta{font-size:11.5px;color:var(--ink-3);margin-top:2px}
 .documents-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:26px;margin-bottom:22px}
 .doc-row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--border)}
 .doc-row:last-child{border-bottom:none}
@@ -150,22 +171,33 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
   <div id="profile-view" style="display:none">
    <div class="split">
     <div class="profile-summary">
-      <h2 id="pv-name"></h2>
-      <div class="profile-field">
-        <div class="field-label">Bio</div>
-        <div id="pv-bio" class="profile-text"></div>
+      <div class="pv-header">
+        <div class="pv-avatar" id="pv-avatar"></div>
+        <div class="pv-headtext">
+          <h2 id="pv-name"></h2>
+          <div class="pv-role" id="pv-role"></div>
+          <div class="pv-contact" id="pv-contact"></div>
+        </div>
       </div>
-      <div class="profile-field">
-        <div class="field-label">Research Interests</div>
-        <div id="pv-interests" class="profile-text"></div>
+
+      <div class="pv-block" id="pv-interests-block">
+        <div class="pv-block-label">Research interests</div>
+        <div class="pv-chips" id="pv-interests"></div>
       </div>
-      <div class="profile-field">
-        <div class="field-label">Confirmed Publications</div>
-        <div id="pv-papers" class="profile-text"></div>
+
+      <div class="pv-block">
+        <div class="pv-block-label">Bio</div>
+        <div class="pv-prose" id="pv-bio"></div>
       </div>
-      <div class="profile-field">
-        <div class="field-label">Current Project</div>
-        <div id="pv-project" class="profile-text"></div>
+
+      <div class="pv-block">
+        <div class="pv-block-label">Current project</div>
+        <div class="pv-prose" id="pv-project"></div>
+      </div>
+
+      <div class="pv-block">
+        <div class="pv-block-label">Publications <span class="pv-count" id="pv-papers-count"></span></div>
+        <div class="pv-papers" id="pv-papers"></div>
       </div>
     </div>
 
@@ -388,21 +420,52 @@ let _tags        = [];     // current research interest tags
   }
 })();
 
+function setProse(id, text, placeholder) {
+  const el = document.getElementById(id);
+  const t = (text || '').trim();
+  el.textContent = t || placeholder;
+  el.classList.toggle('empty', !t);
+}
+
 function showProfileView(profile) {
   document.getElementById('steps').style.display = 'none';
   document.getElementById('panel-1').classList.remove('active');
   document.getElementById('panel-2').classList.remove('active');
   document.getElementById('panel-3').classList.remove('active');
 
-  document.getElementById('pv-name').textContent = profile.name || '';
-  document.getElementById('pv-bio').textContent = profile.bio || '(no bio yet)';
+  const name = profile.name || '';
+  document.getElementById('pv-name').textContent = name;
+  document.getElementById('pv-avatar').textContent =
+    name.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0].toUpperCase()).join('') || '?';
+
+  const role = [profile.title, profile.department, profile.college].filter(Boolean).join(' · ');
+  const roleEl = document.getElementById('pv-role');
+  roleEl.textContent = role;
+  roleEl.style.display = role ? '' : 'none';
+
+  document.getElementById('pv-contact').innerHTML =
+    profile.email ? `<a href="mailto:${esc(profile.email)}">${esc(profile.email)}</a>` : '';
+
   const interests = profile.research_interests || [];
-  document.getElementById('pv-interests').textContent = interests.length ? interests.join(', ') : '(none added yet)';
+  const ib = document.getElementById('pv-interests-block');
+  if (interests.length) {
+    ib.style.display = '';
+    document.getElementById('pv-interests').innerHTML =
+      interests.map(i => `<span class="pv-chip">${esc(i)}</span>`).join('');
+  } else {
+    ib.style.display = 'none';
+  }
+
+  setProse('pv-bio', profile.bio, 'No bio yet — add one so collaborators know your work.');
+  setProse('pv-project', profile.project_description, 'No project described yet.');
+
   const papers = profile.papers || [];
+  document.getElementById('pv-papers-count').textContent = papers.length ? `(${papers.length})` : '';
   document.getElementById('pv-papers').innerHTML = papers.length
-    ? papers.map(p => `<div>${esc(p.title)}${p.year ? ' (' + p.year + ')' : ''}</div>`).join('')
-    : '(none confirmed yet)';
-  document.getElementById('pv-project').textContent = profile.project_description || '(not described yet)';
+    ? papers.map(p => `<div class="pv-paper">${esc(p.title)}` +
+        `<div class="pv-paper-meta">${p.year || 'year unknown'}` +
+        `${p.cited_by ? ' · ' + p.cited_by + ' citations' : ''}</div></div>`).join('')
+    : '<div class="pv-prose empty">No publications confirmed yet.</div>';
 
   document.getElementById('profile-view').style.display = 'block';
   loadDocuments();
