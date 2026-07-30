@@ -25,3 +25,6 @@ start_server.sh
 
 # Fine-tuned SPECTER2 weights (~420MB) — retrain with finetune_specter2_colab.ipynb
 models/
+
+# Generated deployment seed (rebuild with pipeline/make_seed_db.py)
+seed_faculty.db
