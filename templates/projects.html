@@ -7,6 +7,17 @@
 <style>
 {{SHELL_CSS}}
 
+/* ── Resume card: the one thing you most likely came back for ── */
+.resume{background:var(--navy);color:#fff;border-radius:var(--r-lg);padding:26px 28px;box-shadow:var(--sh-md);display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
+.resume-label{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:rgba(255,255,255,.6);margin-bottom:8px}
+.resume-title{font-family:var(--serif);font-size:25px;letter-spacing:-.008em;margin-bottom:12px;max-width:52ch}
+.resume .chips{margin-bottom:0}
+.resume .chip-on{background:rgba(255,255,255,.94);color:var(--navy)}
+.resume .chip-off{background:rgba(255,255,255,.09);color:rgba(255,255,255,.62);border-color:rgba(255,255,255,.18)}
+.resume-actions{display:flex;gap:10px;flex-shrink:0}
+.resume .btn-quiet{background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.28)}
+.resume .btn-quiet:hover{background:rgba(255,255,255,.2)}
+
 .project-row{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:20px 22px;margin-bottom:13px;transition:border-color .15s,box-shadow .15s}
 .project-row:hover{border-color:var(--border-2);box-shadow:var(--sh-md)}
 .project-row-top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:13px}
@@ -62,11 +73,13 @@
     <div id="list-view" style="display:none">
       <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap">
         <div>
-          <h1>Projects</h1>
+          <h1 id="greeting">Your research</h1>
           <p class="lede">Each project has its own proposal, its own conversation, and its own collaborators.</p>
         </div>
         <button class="btn btn-accent" onclick="showIntake()">New project</button>
       </div>
+      <!-- Pick up where you left off: the reason most visits happen. -->
+      <div id="resume-slot"></div>
       <div id="list-slot"></div>
     </div>
 
@@ -139,10 +152,15 @@ let _detailId = null;   // project currently open in the detail view
   } catch (e) { window.location.href = '/login'; return; }
   document.getElementById('sidebar-email').textContent = me.email || '';
 
+  let profile = null;
   try {
     const res = await fetch('/api/profile/me');
     if (!res.ok) { window.location.href = '/profile'; return; }
+    profile = await res.json();
   } catch (e) { window.location.href = '/profile'; return; }
+
+  const first = (profile.name || '').trim().split(/\s+/)[0];
+  if (first) document.getElementById('greeting').textContent = `Welcome back, ${first}`;
 
   await loadProjects();
   document.getElementById('loading').style.display = 'none';
@@ -173,6 +191,8 @@ function showList() {
   document.getElementById('list-view').style.display = 'block';
   history.replaceState({}, '', '/projects');
 
+  renderResume();
+
   const slot = document.getElementById('list-slot');
   if (!_projects.length) {
     slot.innerHTML = `
@@ -199,6 +219,28 @@ function showList() {
         <button class="btn-danger-quiet" style="float:right" onclick="deleteProject(${p.id})">Delete</button>
       </div>
     </div>`).join('');
+}
+
+// The most recently touched project, surfaced above the list. This was the
+// dashboard's whole reason to exist as a separate page; it is one card.
+function renderResume() {
+  const slot = document.getElementById('resume-slot');
+  if (_projects.length < 2) { slot.innerHTML = ''; return; }
+
+  const p = _projects[0];
+  slot.innerHTML = `
+    <div class="resume">
+      <div style="min-width:0">
+        <div class="resume-label">Pick up where you left off</div>
+        <div class="resume-title">${esc(p.title)}</div>
+        <div class="chips">${sectionChips(p.sections_written)}</div>
+      </div>
+      <div class="resume-actions">
+        <a class="btn btn-accent" href="/advisor?project=${p.id}">
+          ${p.started_chat ? 'Continue the conversation' : 'Talk it through'}</a>
+        <button class="btn btn-quiet" onclick="showDetail(${p.id})">Open project</button>
+      </div>
+    </div>`;
 }
 
 function peopleLine(p) {

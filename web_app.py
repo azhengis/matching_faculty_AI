@@ -539,11 +539,15 @@ def _render_page(filename: str, active: str = "") -> HTMLResponse:
 
 @app.get("/")
 async def root(req: Request):
-    return RedirectResponse(url="/dashboard" if _current_user(req) else "/login")
+    return RedirectResponse(url="/projects" if _current_user(req) else "/login")
 
-@app.get("/dashboard", response_class=HTMLResponse)
+@app.get("/dashboard")
 async def page_dashboard():
-    return _render_page("dashboard.html", "dashboard")
+    """Retired. The dashboard was a second, thinner view of the projects list —
+    same cards, same progress chips, one extra click to reach the real thing,
+    and a duplicated section-label map that silently drifted out of date.
+    Folded into /projects. Kept as a redirect so old links and bookmarks work."""
+    return RedirectResponse(url="/projects")
 
 @app.get("/projects", response_class=HTMLResponse)
 async def page_projects():
