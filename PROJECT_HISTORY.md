@@ -143,15 +143,95 @@ export CHATBOT_MODEL=ollama/llama3
 
 ---
 
+## Phase 7 — Everyone Stays Searchable
+
+**Problem found during auditing:** the faculty loader required a research summary, courses, or publications before it would index someone. That silently dropped ~44 people — overwhelmingly performing-arts faculty who don't publish papers and whose bio pages had nothing scrapeable — out of the index entirely. Searching their own name returned nothing.
+
+**Fix:** every faculty member gets an index entry. Those with research text get a rich one; those without get a minimal directory entry (name, title, department) so at least name and unit searches find them.
+
+The same conflation appeared in the publication-fetch stages, which only looked up faculty who already had a scraped bio. Bio presence and publication record are independent — a new hire with an unpopulated profile page can have a decade of papers. Both stages now consider everyone.
+
+---
+
+## Phase 8 — Accounts, Profiles, and Self-Editing
+
+**Goal:** let faculty claim their own record and correct what we scraped about them.
+
+- Email/password accounts (`auth.py`), with sessions in SQLite rather than a module-level dict — the previous version signed everyone out on restart, so a deploy logged users out mid-task.
+- A profile links an account to a faculty record: bio, research interests, and a confirmed publication list.
+- **Self-edits live in a separate `faculty_overrides` table**, keyed by email rather than by `faculty_id`. This matters: the pipeline rebuilds `faculty` from scratch on each run and AUTOINCREMENT reassigns ids, so anything keyed on `faculty_id` would be silently reattached to the wrong person. Keying on email means a re-import can never overwrite or misattribute a self-edit.
+- Only the account whose email matches the faculty record can edit that record — otherwise anyone could rewrite anyone's listing.
+- Faculty can upload CVs, papers, or grant documents (`doc_extract.py` handles PDF/DOCX), or link a Google Scholar profile to import publications the pipeline missed.
+
+Editing had to be genuinely usable, not merely possible: the edit form opens pre-filled with everything we currently believe, so correcting a misattributed publication is unticking a box rather than redoing setup.
+
+---
+
+## Phase 9 — Projects and Structured Proposals
+
+**Goal:** move from "find me collaborators" to "help me write the proposal."
+
+A **project** is one piece of research, with its own proposal, its own conversation history, and its own matches. Researchers have several; the original design allowed exactly one per person for life, which the schema enforced with `UNIQUE(profile_id)` and which had to be migrated out.
+
+Each project has a **proposal** — a structured record with one column per section, built up over the conversation and rendered live in a panel beside the chat. Sections the researcher hand-edits are recorded in `edited_sections` and skipped by the advisor, so it can't silently overwrite someone's own wording; handing a section back is explicit.
+
+Proposals export to `.docx` with a reference list accumulated from the literature searches.
+
+---
+
+## Phase 10 — The Staged Advisor
+
+**Goal:** stop the advisor from writing a polished proposal for a vague or already-answered question.
+
+Earlier versions started drafting sections immediately. A proposal built on an unspecific problem reads well and is useless, and one built on a solved problem costs the researcher months. So the conversation now moves through four gated stages, where **position is determined by what's saved in the proposal, not by conversational memory** — a reload, a week away, or a truncated history can't lose the place.
+
+1. **Specify the problem.** Asks clarifying questions only. It explicitly does *not* suggest topics — the researcher already has an idea, and the job is drawing specificity out of them. Won't advance without a specific population/setting, a specific mechanism, a stated objective, and 2–4 evidence-answerable research questions.
+2. **Test novelty.** Searches OpenAlex live, reports what actually exists, and gives a plain verdict — including "already well covered" when that's true. If the ground is crowded, it offers concrete novelty moves; after two unsuccessful rounds it stops looping and offers honest ways forward (replicate, pivot, or proceed knowing the contribution is incremental) rather than pretending a fresh angle is one more question away.
+3. **Write the problem statement.** Drafted in the chat, revised until the researcher agrees, then saved as the anchor everything else must serve.
+4. **Build the proposal.** Section by section, one question at a time.
+
+A "research landscape" panel visualises each literature search as ranked closeness bars, so the novelty verdict and the evidence for it are visible side by side.
+
+**Guidance from the AI Institute review (July 2026)** shaped several parts of this:
+- The literature review targets **3–5 recent studies bearing directly on the gap**, not a broad sweep. Padding the list makes the gap harder to see, not easier.
+- The research gap is established **after** the research questions are specific, not by jumping straight to a literature review.
+- A dedicated **"role of AI and data science"** section asks where AI actually enters the project — as method, as subject, or honestly neither. "AI is peripheral here, and here is why" is a savable answer; bolting a method onto research that doesn't need it produces a weaker proposal.
+- **Ethical considerations** and an **abstract** (written last) complete the section set.
+
+---
+
+## Phase 11 — Fine-Tuning SPECTER2 (Optional)
+
+**Goal:** test whether a DePaul-specific model beats off-the-shelf SPECTER2.
+
+- `9_generate_training_data.py` has an LLM write 5 plausible search queries per faculty member — the phrasings a grad student or external researcher would actually type, ranging from lay terms to technical ones. Each becomes a positive (query, bio) pair.
+- `10_finetune_specter2.py` trains three configurations with MultipleNegativesRankingLoss (every other bio in the batch acts as a negative, so no explicit negatives are needed), evaluates each on a held-out test set, and keeps the best.
+
+Set `FINETUNED_MODEL` to the output directory to use it; `search.py` prefers it over the adapter and base models. Weights live in `models/` and are not committed — 420MB, and retrainable from the pipeline.
+
+---
+
+## Phase 12 — Describing People by Current Work
+
+**Problem:** for faculty with no scraped bio, the searchable research summary was synthesised from their **most-cited** titles. Citations accumulate with age, so that ranking structurally favours old work. One professor with 83 papers spanning 1981–2025, currently publishing on political marketing, was being embedded — and therefore matched — on a 1991 consumption-values paper with 9,527 citations.
+
+**Fix:** the summary now leads with the 9 most recent titles, followed by up to 3 most-cited of any age. Recency identifies what someone works on now; the seminal tail keeps them reachable for the work they're known for. The per-paper embedding index already covers every paper regardless of era, so broader expertise is preserved for matching.
+
+---
+
 ## Current State
+
+*As of July 2026.*
 
 | Component | Status |
 |-----------|--------|
-| Faculty database | 699 full-time faculty, 443 searchable |
-| Publications | 4,501 papers across ~400 faculty |
-| Search accuracy | ~97% precision@5 across 12 disciplines tested |
-| Chatbot | Working, provider-agnostic |
-| Coverage gaps | ~250 faculty (Theatre, Law, some Science/Health) have no bio and no papers yet |
+| Faculty database | 1,389 faculty indexed; 1,339 have a research summary or course list |
+| Publications | 18,665 papers across 478 faculty |
+| Embedding model | `specter2_base` in the running app — the proximity adapter is preferred but `adapters` is not currently installed |
+| Advisor | Four gated stages, live literature search, structured proposal with `.docx` export |
+| Accounts | Email/password, SQLite-backed sessions, faculty self-editing |
+| Coverage gaps | 50 faculty have neither a bio nor courses; 44 of those also have no publications found yet. Mostly performing arts, where there is often nothing to scrape and nothing indexed to find. They still appear in name and department searches. |
+| Deployment | Not yet deployed — runs locally. See README. |
 
 ---
 
@@ -170,7 +250,19 @@ depaul-faculty-matcher/
 │   ├── 5_fix_data.py            clean data quality issues
 │   ├── 6_fetch_papers.py        fetch publications via OpenAlex
 │   ├── 7_fetch_papers_s2.py     fetch publications via Semantic Scholar + CrossRef
-│   └── 8_clean_papers.py        remove misattributed papers
+│   ├── 8_clean_papers.py        remove misattributed papers
+│   ├── 9_generate_training_data.py   synthetic query/bio pairs for fine-tuning
+│   ├── 10_finetune_specter2.py       train + evaluate 3 configs, keep the best
+│   ├── 11_merge_scholar_csv.py       repair tool: merge a Scholar export
+│   └── 12_recover_missed_faculty.py  repair tool: re-scrape people step 1 missed
+│
+├── web_app.py         ← FastAPI app: routes, advisor prompt + tools, proposals
+├── search.py          ← matching engine: embeddings, ranking stages
+├── auth.py            ← password hashing, sessions
+├── doc_extract.py     ← PDF/DOCX text extraction for uploads
+├── templates/         ← server-rendered pages (_shell.html = shared CSS + nav)
+├── tests/             ← pytest suite
+├── docs/superpowers/  ← design specs and implementation plans, by date
 │
 ├── data/              ← raw source files (input to pipeline)
 │   ├── depaul_faculty_enriched.json
@@ -178,9 +270,13 @@ depaul-faculty-matcher/
 │   ├── depaul_roster_clean.json
 │   └── depaul_roster_clean.csv
 │
-└── faculty.db         ← generated (not in git; rebuild with pipeline/)
-    faculty_index.pkl  ← generated (SPECTER2 embeddings; rebuild with search.py)
-    paper_index.pkl    ← generated (paper embeddings; rebuild with search.py)
+└── generated, not in git:
+    faculty.db          rebuild with pipeline/
+    faculty_index.pkl   SPECTER2 embeddings; rebuilds automatically when text changes
+    paper_index.pkl     per-paper embeddings; same
+    models/             fine-tuned weights (~420MB); retrain with pipeline steps 9-10
+    uploads/            faculty-uploaded CVs and documents
+    start_server.sh     local launch script; holds an API key
 ```
 
 ---
@@ -195,3 +291,8 @@ depaul-faculty-matcher/
 | LiteLLM for chatbot provider routing | Users have different API access; no reason to lock into one provider |
 | Citation cap (>2000) to detect misattribution | More reliable than topic coherence alone — SPECTER2 clusters all biomedical text broadly, so a nursing paper from a random researcher could still score high against a DePaul nurse professor |
 | Diversity filter (max 2 per department) | Without it, queries like "machine learning" return 5 Computing professors; diversity makes results more useful for finding collaborators across disciplines |
+| Advisor stage determined by saved proposal, not chat memory | A reload, a week away, or a truncated history would otherwise lose the researcher's place and restart questions they already answered |
+| Self-edits keyed by email in a separate table | The pipeline rebuilds `faculty` and AUTOINCREMENT reassigns ids, so anything keyed on `faculty_id` would silently reattach a person's corrections to someone else |
+| Recency-led research summaries | Citations accumulate with age, so ranking by them describes people by their oldest successful work rather than their current direction |
+| Literature review capped at 3-5 directly relevant studies | Per AI Institute guidance: a padded review obscures the gap it exists to establish |
+| One `proposals` row per project, not per person | The original `UNIQUE(profile_id)` capped a researcher at one proposal for life |

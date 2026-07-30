@@ -1,14 +1,30 @@
 # DePaul Faculty Expertise & Matching Platform — Architecture & Design
 
-**Status:** Working prototype → production design
+> ## ⚠️ This is a TARGET design, not a description of what exists
+>
+> This document proposes an architecture the project has **not** adopted. It
+> describes Postgres + pgvector, a Next.js front-end, Pydantic validation
+> schemas, and an `api/` + `models/` package layout — none of which are built.
+>
+> **What actually exists today:** a FastAPI monolith (`web_app.py`), SQLite
+> (`faculty.db`), server-rendered HTML templates, and numbered pipeline scripts.
+> For an accurate picture, read **README.md** (what it does, how to run it, which
+> models it uses) and **PROJECT_HISTORY.md** (how it got here and why).
+>
+> Kept because the reasoning about identity resolution, data quality, and
+> explainability still holds and is worth revisiting before any migration.
+> Figures below reflect an earlier, uncleaned roster and are superseded by the
+> counts in PROJECT_HISTORY.md.
+
+**Status:** Proposed target architecture — not implemented
 **Audience:** Contributors, reviewers, and the project owner
-**Scope:** Reviews the current system and specifies the target architecture, with trade-offs for every major decision.
+**Scope:** Reviews the system as of early 2026 and specifies a target architecture, with trade-offs for every major decision.
 
 ---
 
 ## 1. Executive Summary
 
-The platform answers one question well: *"Which faculty work on X, and who could they collaborate with?"* Today that works as a local prototype — a cleaned roster of **2,270 faculty**, **1,095** with research text scraped from their bio pages, embedded with a small sentence-transformer model and searched by cosine similarity.
+The platform answers one question well: *"Which faculty work on X, and who could they collaborate with?"* At the time this was written that worked as a local prototype — a cleaned roster of **2,270 faculty**, **1,095** with research text scraped from their bio pages, embedded with a small sentence-transformer model and searched by cosine similarity. (Both figures predate deduplication and the shift to SPECTER2; see PROJECT_HISTORY.md for current numbers.)
 
 The prototype proves the thesis. The job now is to turn it into something maintainable, explainable, and extensible without over-building.
 
