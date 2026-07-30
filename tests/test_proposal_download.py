@@ -67,6 +67,29 @@ def test_build_proposal_docx_includes_the_staged_gate_sections():
     assert "Nobody has yet audited contestability in county-level deployments." in texts
 
 
+def test_build_proposal_docx_leads_with_the_abstract_and_keeps_ethics():
+    """The abstract opens the document; ethics sits after the methodology."""
+    proposal = {
+        "abstract": "This project audits contestability in county risk scoring.",
+        "background": "Some background.",
+        "methodology": "- Case studies of three counties.",
+        "ethical_considerations": "- Case records stay de-identified under a data-use agreement.",
+        "expected_outcomes": "- A contestability framework.",
+    }
+    texts = _paragraph_texts(_build_proposal_docx("Jane Doe", proposal))
+
+    assert any("Abstract" in t for t in texts)
+    assert "This project audits contestability in county risk scoring." in texts
+    assert any("Ethical Considerations" in t for t in texts)
+    assert "Case records stay de-identified under a data-use agreement." in texts
+
+    abstract = next(i for i, t in enumerate(texts) if "Abstract" in t)
+    background = next(i for i, t in enumerate(texts) if "Background" in t)
+    ethics = next(i for i, t in enumerate(texts) if "Ethical Considerations" in t)
+    outcomes = next(i for i, t in enumerate(texts) if "Expected Outcomes" in t)
+    assert abstract < background < ethics < outcomes
+
+
 def test_build_proposal_docx_lists_references_sorted_by_author():
     import web_app
     refs = [

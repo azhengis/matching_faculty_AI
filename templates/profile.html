@@ -828,14 +828,8 @@ async function logout() {
 }
 
 // ── Research proposal ─────────────────────────────────────────────────────────
-const PROPOSAL_LABELS = {
-  background: 'Background',
-  objectives: 'Objectives',
-  research_questions: 'Research Questions',
-  related_work: 'Related Work',
-  methodology: 'Methodology',
-  expected_outcomes: 'Expected Outcomes',
-};
+// No section-label map here: the proposal panels live in projects.html and
+// advisor.html, which own their own labels. A copy here only went stale.
 
 function proposalTextToHtml(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);

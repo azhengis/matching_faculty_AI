@@ -138,6 +138,35 @@ def test_save_proposal_stores_the_staged_gate_sections(tmp_path, monkeypatch):
     assert row == ("Nobody has audited these systems.", "Caseworkers in Cook County.", "")
 
 
+def test_save_proposal_stores_abstract_and_ethical_considerations(tmp_path, monkeypatch):
+    """The two sections added last must persist like any other.
+
+    Both arrive late in the conversation — ethics alongside the other sections,
+    the abstract after everything else is settled — so each has to save on its
+    own without clearing what came before it.
+    """
+    db_path = _setup(tmp_path, monkeypatch)
+    _profile_with_project(db_path)
+
+    assert _save_proposal(1, {
+        "background": "Caseworkers rely on risk scores nobody has audited.",
+        "ethical_considerations": "- Case records are re-identifiable, so analysis runs on de-identified extracts under a data-use agreement.",
+    }) == {"status": "saved"}
+
+    assert _save_proposal(1, {"abstract": "This project audits county risk scores."}) == {"status": "saved"}
+
+    con = sqlite3.connect(db_path)
+    row = con.execute(
+        "SELECT abstract, ethical_considerations, background FROM proposals WHERE project_id = 1"
+    ).fetchone()
+    con.close()
+    assert row == (
+        "This project audits county risk scores.",
+        "- Case records are re-identifiable, so analysis runs on de-identified extracts under a data-use agreement.",
+        "Caseworkers rely on risk scores nobody has audited.",
+    )
+
+
 def test_save_proposal_rejects_a_call_with_no_section_text(tmp_path, monkeypatch):
     db_path = _setup(tmp_path, monkeypatch)
     _profile_with_project(db_path)
@@ -224,8 +253,9 @@ def test_get_proposal_returns_empty_defaults_when_none_saved(tmp_path, monkeypat
     response = _run(api_project_proposal(1, _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
     assert _body(response) == {
-        "problem_statement": "", "novelty": "", "background": "", "objectives": "",
-        "research_questions": "", "related_work": "", "methodology": "", "expected_outcomes": "",
+        "abstract": "", "problem_statement": "", "novelty": "", "background": "", "objectives": "",
+        "research_questions": "", "related_work": "", "methodology": "",
+        "ethical_considerations": "", "expected_outcomes": "",
         "edited_sections": [],
     }
 

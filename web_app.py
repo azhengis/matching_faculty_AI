@@ -240,6 +240,15 @@ def _init_profiles_db():
     except sqlite3.OperationalError:
         pass  # column already exists from a prior run
 
+    # A one-paragraph abstract summarising the whole proposal, auto-drafted once
+    # the other sections are settled; and the ethical-considerations section a
+    # full academic proposal needs.
+    for _col in ("abstract", "ethical_considerations"):
+        try:
+            con.execute(f"ALTER TABLE proposals ADD COLUMN {_col} TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists from a prior run
+
     # Login sessions. These lived only in a module-level dict, so every restart
     # signed everyone out — invisible in local use beyond the annoyance, but it
     # also meant a deploy logged out every user mid-task.
@@ -1164,8 +1173,9 @@ async def api_profile_faculty_overrides(email: str, req: Request):
 
 
 EMPTY_PROPOSAL = {
-    "problem_statement": "", "novelty": "", "background": "", "objectives": "",
-    "research_questions": "", "related_work": "", "methodology": "", "expected_outcomes": "",
+    "abstract": "", "problem_statement": "", "novelty": "", "background": "", "objectives": "",
+    "research_questions": "", "related_work": "", "methodology": "",
+    "ethical_considerations": "", "expected_outcomes": "",
     "edited_sections": [],
 }
 
@@ -1210,7 +1220,7 @@ def _owned_project(con, user, project_id) -> int | None:
 
 def _read_proposal(con, project_id) -> dict:
     row = con.execute(
-        "SELECT problem_statement, novelty, background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "SELECT abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ethical_considerations, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (project_id,)
     ).fetchone()
     if not row:
@@ -1728,16 +1738,20 @@ Now build the full proposal through genuine back-and-forth. Every section must s
   1. Background — the problem, its context, and why it matters NOW. Draw out: what is actually broken or unknown; who is affected; what changed recently that makes this urgent; and what we still can't answer. Two or three developed paragraphs, not a summary line.
   2. Objectives — what they're trying to find out, build, or change. Push past the first vague statement: is the aim descriptive (produce the record nobody has), evaluative (judge whether something works), or interventional (change practice)? Name the aims explicitly, 2-4 of them, each a full sentence saying what will exist or be known at the end.
   3. Research questions — these were drafted in Stage 1, so DON'T start over. Review what's saved, and deepen it: group them by theme when there's more than one angle (e.g. "Consent and X", "Bias and Y"), and if the proposal now suggests a question they haven't asked, offer it and ask whether it belongs. Aim for 3-5 well-formed questions total.
-  4. Related work — THIS IS WHERE MOST PROPOSALS ARE WEAKEST AND WHERE YOU ADD THE MOST. You already did a first pass in Stage 2; EXPAND it here, do not repeat it. Do not just ask "do you know any papers?" and record the answer. Contribute substance:
-     - Start from the works surfaced during the novelty search, then go wider — call search_literature again for angles you haven't checked yet — 4-6 works in total, and say for EACH what it established and how it connects.
+  4. Literature review (saved as related_work) — THIS IS WHERE MOST PROPOSALS ARE WEAKEST AND WHERE YOU ADD THE MOST. You already did a first pass in Stage 2; EXPAND it here into a real review, do not repeat it. Do not just ask "do you know any papers?" and record the answer. Contribute substance:
+     - GO DEEP ON 3-5 STUDIES, NOT WIDE ON FIFTEEN. Pick the 3-5 works that bear MOST DIRECTLY on the specific gap in the saved novelty claim, and treat each properly: what it did, what it established, and precisely where it stops short of this project. A tight review of five directly-relevant papers is worth far more than a shallow list of fifteen loosely-related ones, and padding the list makes the gap harder to see, not easier.
+     - PREFER RECENT WORK. Favour the last ~5 years, so the review shows where the field is NOW. Reach back further only for a genuinely foundational work the field still builds on — and when you do, say why it still matters.
+     - Choose by relevance to the gap, not by what the search happened to return first. If the novelty search didn't surface enough directly-relevant work, call search_literature again on the narrower phrasing of the gap rather than widening to adjacent topics to pad the count.
      - These are real search hits, but confirm details (exact venue, year) aren't garbled before treating them as citations, and note that coverage isn't exhaustive.
      - Then name THE GAP: what these works do not settle, and where this project sits relative to them. This gap MUST be the same gap as the saved novelty claim, stated in the register of a literature review — if writing it out makes the novelty claim look weaker than it did, say so rather than papering over it, and offer to revisit the claim.
      - Ask which resonate, which are wrong for this project, and what they would add from their own reading.
-     The saved section should read as a short literature review with a gap statement at the end, not a list of names.
-  5. Methodology — don't just take the first idea. Put 2-3 concrete approaches on the table yourself (this is the clearest case for the option block described below — explain each, then list them as pickable lines) (archival/documentary analysis, comparative case studies, interviews, dataset or bias auditing, legal-doctrinal review, computational text analysis) and say what each would and wouldn't get them. Ask {name} to react — which fit, which don't, what to combine. Converge on a multi-part methodology when the project calls for one, and for each component record what it is, what data or material it needs, and what it is meant to establish.
-  6. Expected outcomes — what exists or is known when this is done. Push for 3-5 concrete outcomes (a dataset, a framework, a set of findings, a policy brief, a publication) and, for the significant ones, one clause on who benefits or what changes.
+     The saved section should read as a literature review with a gap statement at the end, not a list of names.
+  5. Methodology — don't just take the first idea. Put 2-3 concrete approaches on the table yourself (this is the clearest case for the option block described below — explain each, then list them as pickable lines) (archival/documentary analysis, comparative case studies, interviews, dataset or bias auditing, legal-doctrinal review, computational text analysis) and say what each would and wouldn't get them. Ask {name} to react — which fit, which don't, what to combine. Converge on a multi-part methodology, and for each component record what it is, HOW THE DATA WILL BE COLLECTED, and HOW IT WILL BE ANALYZED (both matter — a method that says what data but not how it's analyzed isn't settled), and what it is meant to establish.
+  6. Ethical considerations — how this specific project stays ethical. Draw out what actually applies to THEIR data and methods: informed consent, privacy and data protection, risks to participants, bias and fairness in any model, IRB/approval if human subjects are involved, and responsible use of AI. Do NOT save generic boilerplate — tie each point to their real data and approach. A few sentences or a short bulleted list.
+  7. Expected outcomes — what exists or is known when this is done. Push for 3-5 concrete outcomes (a dataset, a framework, a set of findings, a policy brief, a publication) and, for the significant ones, one clause on who benefits or what changes.
+  8. Abstract — write this LAST, once the sections above are settled. A single ~150-250 word paragraph summarising the whole proposal: the problem, the aim, the approach, and the expected contribution. Draft it in the chat, ask {name} to confirm or adjust, then save it. It leads the finished document.
 
-  FORMATTING: research_questions, related_work, methodology, and expected_outcomes are saved as bulleted lists (lines starting with "- ") once there is more than one item — but each bullet is a full, substantive sentence or two, not a fragment. Background and objectives are saved as prose paragraphs. Never save a section as a single short line: if that's all you have, the section isn't settled yet, so keep discussing instead of saving.
+  FORMATTING: research_questions, related_work, methodology, ethical_considerations, and expected_outcomes are saved as bulleted lists (lines starting with "- ") once there is more than one item — but each bullet is a full, substantive sentence or two, not a fragment. Abstract, background, and objectives are saved as prose paragraphs. Never save a section as a single short line: if that's all you have, the section isn't settled yet, so keep discussing instead of saving.
 
 ━━━ BE A COLLABORATOR, NOT AN INTAKE FORM (STAGE 4 — THE PROPOSAL) ━━━
 IMPORTANT — this applies to the PROPOSAL stage, not to problem specification. In Stage 1 you draw the problem out of {name} by asking; you do NOT propose framings, methods, or directions there. Once the problem statement is settled and you're building the proposal (methodology, related work, outcomes), the reverse is true: a question-only advisor produces a thin proposal, so bring something to every exchange:
@@ -1846,13 +1860,15 @@ _ADVISOR_TOOLS = [{
         "parameters": {
             "type": "object",
             "properties": {
+                "abstract": {"type": "string", "description": "A one-paragraph (~150-250 word) summary of the WHOLE proposal — the problem, the aim, the approach, and the expected contribution. Write it LAST, once the other sections are settled, and only after the researcher confirms it. It leads the document."},
                 "novelty": {"type": "string", "description": "What makes this project NEW, settled in Stage 2. A short paragraph on what the existing literature already establishes, followed by an explicit contribution claim of the form 'Nobody has yet ___, and this project will.' Save only after the researcher confirms it. Saving this unlocks Stage 3."},
                 "problem_statement": {"type": "string", "description": "The sharpened, SPECIFIC problem statement settled in Stage 3 — one focused paragraph naming the exact problem, the specific population or setting, the scope, what is unknown, and the novel angle from the saved novelty claim. Save it only after the researcher confirms the wording. Saving this unlocks Stage 4."},
                 "background": {"type": "string", "description": "The problem, its context, and why it matters now. Two or three developed paragraphs of prose — what is broken or unknown, who it affects, what changed recently, and what still can't be answered. Not a one-line summary."},
                 "objectives": {"type": "string", "description": "What the research aims to find out, build, or change. 2-4 aims, each a full sentence naming what will exist or be known at the end. Prose or a bulleted list."},
                 "research_questions": {"type": "string", "description": "3-5 research questions or hypotheses, each a full question. Group by theme when there is more than one angle. Bulleted list (lines starting with '- ')."},
-                "related_work": {"type": "string", "description": "A short literature review: 4-6 specific scholars, works, or research traditions, each with what it established and how it connects to this project — ending with an explicit statement of the GAP this project fills. Bulleted list (lines starting with '- '), with the gap as a final prose line."},
-                "methodology": {"type": "string", "description": "The methodological approach, component by component. For each: what it is, what data or material it needs, and what it is meant to establish. Bulleted list (lines starting with '- ')."},
+                "related_work": {"type": "string", "description": "A focused literature review of 3-5 studies that bear DIRECTLY on the gap in the saved novelty claim, favouring the last ~5 years. For each: what it established and precisely where it stops short of this project. Depth over breadth — do not pad with loosely-related work. Ends with an explicit statement of the GAP this project fills, consistent with the saved novelty claim. Bulleted list (lines starting with '- '), with the gap as a final prose line."},
+                "methodology": {"type": "string", "description": "The methodological approach, component by component. For each: what it is, how data will be COLLECTED, and how it will be ANALYZED, plus what it is meant to establish. Bulleted list (lines starting with '- ')."},
+                "ethical_considerations": {"type": "string", "description": "How the research will be conducted ethically: consent, privacy/data protection, risks to participants, bias and fairness, IRB/approval where relevant, and responsible use of AI. A few sentences or a short bulleted list, specific to THIS project's data and methods — not boilerplate."},
                 "expected_outcomes": {"type": "string", "description": "3-5 concrete outcomes — datasets, frameworks, findings, publications, policy briefs — each with a clause on who benefits or what changes. Bulleted list (lines starting with '- ')."}
             },
             # Deliberately empty: sections are saved one at a time as the
@@ -2084,8 +2100,9 @@ def _advisor_search(query: str, mode: str = "semantic") -> dict:
 
 
 _PROPOSAL_FIELDS = [
-    "problem_statement", "novelty", "background", "objectives", "research_questions",
-    "related_work", "methodology", "expected_outcomes",
+    "abstract", "problem_statement", "novelty", "background", "objectives",
+    "research_questions", "related_work", "methodology", "ethical_considerations",
+    "expected_outcomes",
 ]
 
 
@@ -2135,7 +2152,7 @@ def _save_proposal(project_id, args: dict) -> dict:
 
     con = sqlite3.connect(DB_PATH)
     existing = con.execute(
-        "SELECT problem_statement, novelty, background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "SELECT abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ethical_considerations, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (pid,)
     ).fetchone()
     existing_values = dict(zip(_PROPOSAL_FIELDS, existing)) if existing else {f: "" for f in _PROPOSAL_FIELDS}
@@ -2150,9 +2167,10 @@ def _save_proposal(project_id, args: dict) -> dict:
 
     con.execute(
         """INSERT INTO proposals
-               (project_id, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, expected_outcomes, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+               (project_id, abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ethical_considerations, expected_outcomes, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT(project_id) DO UPDATE SET
+               abstract = excluded.abstract,
                problem_statement = excluded.problem_statement,
                novelty = excluded.novelty,
                background = excluded.background,
@@ -2160,10 +2178,12 @@ def _save_proposal(project_id, args: dict) -> dict:
                research_questions = excluded.research_questions,
                related_work = excluded.related_work,
                methodology = excluded.methodology,
+               ethical_considerations = excluded.ethical_considerations,
                expected_outcomes = excluded.expected_outcomes,
                updated_at = excluded.updated_at""",
-        (pid, values["problem_statement"], values["novelty"], values["background"], values["objectives"],
-         values["research_questions"], values["related_work"], values["methodology"], values["expected_outcomes"])
+        (pid, values["abstract"], values["problem_statement"], values["novelty"], values["background"],
+         values["objectives"], values["research_questions"], values["related_work"], values["methodology"],
+         values["ethical_considerations"], values["expected_outcomes"])
     )
     # A project begun from the chat starts untitled; give it a real title the
     # moment there's something to name it from — the problem statement if we have
@@ -2227,13 +2247,15 @@ def _build_proposal_docx(researcher_name: str, proposal: dict, references: list 
     doc.add_heading(title, level=1)
 
     sections = [
+        ("Abstract", proposal.get("abstract", "")),
         ("Problem Statement", proposal.get("problem_statement", "")),
         ("Novelty and Contribution", proposal.get("novelty", "")),
         ("Introduction / Background", proposal.get("background", "")),
         ("Research Objectives", proposal.get("objectives", "")),
-        ("Possible Research Questions", proposal.get("research_questions", "")),
-        ("Relevant Literature", proposal.get("related_work", "")),
+        ("Research Questions", proposal.get("research_questions", "")),
+        ("Literature Review", proposal.get("related_work", "")),
         ("Methodology", proposal.get("methodology", "")),
+        ("Ethical Considerations", proposal.get("ethical_considerations", "")),
         ("Expected Outcomes", proposal.get("expected_outcomes", "")),
     ]
 
@@ -2285,7 +2307,7 @@ async def api_project_proposal_download(project_id: int, req: Request):
     name  = name_row[0] if name_row else "Researcher"
     title = con.execute("SELECT title FROM projects WHERE id = ?", (project_id,)).fetchone()[0]
     row = con.execute(
-        "SELECT problem_statement, novelty, background, objectives, research_questions, related_work, methodology, expected_outcomes "
+        "SELECT abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ethical_considerations, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (project_id,)
     ).fetchone()
     try:
