@@ -113,13 +113,26 @@ def build_summary(author):
     return " ".join(lines)
 
 
+def _is_full_time(p):
+    """Same heuristic as 4_db_setup.py: trust explicit tags, fall back to title
+    for the ~700 records where employment_status is blank or garbled. Copied
+    rather than imported — these stages are standalone scripts whose module
+    names start with a digit, so they can't import each other."""
+    status = (p.get("employment_status") or "").strip()
+    if status == "Full Time":
+        return True
+    if status == "Part Time":
+        return False
+    return "adjunct" not in (p.get("title") or "").lower()
+
+
 def main():
     with open(JSON_FILE, encoding="utf-8") as f:
         people = json.load(f)
 
     missing = [
         p for p in people
-        if p.get("employment_status") == "Full Time"
+        if _is_full_time(p)
         and not (p.get("research_summary") or "").strip()
     ]
     print(f"Full-time faculty with no research summary: {len(missing)}")

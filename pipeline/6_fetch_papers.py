@@ -209,11 +209,13 @@ def main():
     cur.execute(PAPERS_TABLE_SQL)
     con.commit()
 
-    # All searchable faculty (have a summary or courses)
+    # All faculty in the DB. Publication lookup is by name, independent of
+    # whether the bio scrape found anything -- gating on research_summary/
+    # classes_taught here used to silently skip faculty with thin bio pages
+    # (e.g. an empty "Bio" field on their DePaul profile) even when they have
+    # a real publication record findable by name.
     all_faculty = cur.execute("""
         SELECT id, name, research_summary, classes_taught FROM faculty
-        WHERE TRIM(COALESCE(research_summary,'')) != ''
-           OR TRIM(COALESCE(classes_taught,'')) != ''
         ORDER BY name
     """).fetchall()
 

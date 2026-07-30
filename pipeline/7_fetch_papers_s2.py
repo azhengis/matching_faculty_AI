@@ -227,11 +227,12 @@ def main():
     cur.execute(PAPERS_TABLE_SQL)
     con.commit()
 
-    # All searchable faculty
+    # All faculty in the DB. Don't gate on research_summary/classes_taught --
+    # a faculty member can have an empty DePaul bio page but still have a
+    # real, findable publication record (e.g. a new hire whose profile is
+    # unpopulated). Bio presence and publication record are independent.
     all_faculty = cur.execute("""
         SELECT id, name FROM faculty
-        WHERE TRIM(COALESCE(research_summary,'')) != ''
-           OR TRIM(COALESCE(classes_taught,'')) != ''
         ORDER BY name
     """).fetchall()
 
