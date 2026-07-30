@@ -36,7 +36,8 @@ COPY . .
 ENV DB_PATH=/data/faculty.db
 EXPOSE 8000
 
-# Single worker on purpose. Each worker loads its own copy of SPECTER2 and the
-# paper index (~600MB resident), so a second worker doubles memory for a tool
-# with a handful of concurrent users.
+# Single worker on purpose. Measured steady state is ~280MB resident (SPECTER2's
+# weights are mmap'd from safetensors, so they cost far less than their 440MB
+# on-disk size). Each additional worker loads its own copy, so a second one
+# roughly doubles that for a tool with a handful of concurrent users.
 CMD ["uvicorn", "web_app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

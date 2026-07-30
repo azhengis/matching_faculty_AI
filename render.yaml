@@ -1,0 +1,29 @@
+# Render blueprint — the zero-cost option.
+#
+# Render's free instance type is 512MB, and this app measures ~280MB resident,
+# so it fits. Two things to understand before using it for anything but a test:
+#
+#   1. FREE INSTANCES HAVE NO PERSISTENT DISK. The database lives in the
+#      container filesystem and is destroyed on every restart, redeploy, and
+#      wake-from-sleep. Faculty data comes back (it is baked into the image),
+#      but every account, project, and proposal a tester creates is lost.
+#   2. FREE INSTANCES SLEEP after 15 minutes idle. The next request pays a cold
+#      start: container boot plus ~10s of model load.
+#
+# Upgrading to a Starter instance ($7/mo) plus a 1GB disk removes both problems
+# — add a `disk:` block below and set DATA_DIR=/data.
+services:
+  - type: web
+    name: depaul-faculty-matcher
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: ohio                     # closest Render region to Chicago
+    healthCheckPath: /login          # returns 200 without a session; / redirects
+    envVars:
+      - key: CHATBOT_MODEL
+        value: anthropic/claude-haiku-4-5
+      - key: ANTHROPIC_API_KEY
+        sync: false                  # set in the dashboard; never commit it
+      # DATA_DIR is intentionally unset: with no disk attached, the app falls
+      # back to the image directory, where the seeded faculty.db already is.

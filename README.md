@@ -138,7 +138,21 @@ Generated and not committed: `faculty.db`, `faculty_index.pkl`, `paper_index.pkl
 ## A note on data
 
 Faculty information is collected from public university pages for this project.
-Data files live in this private repository and are not for redistribution.
 Faculty self-edits are stored separately from scraped data (`faculty_overrides`),
 so re-running the pipeline can never overwrite something a person corrected
 about themselves.
+
+> **⚠️ This repository is public, and `data/` is committed to it.**
+> `data/depaul_faculty_enriched.json` holds 2,270 faculty records including
+> 2,240 email addresses. Every one of those is already published on DePaul's
+> own directory, so this is aggregation rather than disclosure — but an
+> aggregated, machine-readable copy of every faculty email is exactly what
+> scrapers want, and it is more exposure than any individual page gives.
+>
+> An earlier version of this note claimed the repository was private. It is
+> not. Decide deliberately whether it should be: making it private, or
+> gitignoring `data/`, are both one-step changes.
+
+The generated database (`faculty.db`) is **not** committed, and must not be —
+it additionally holds user accounts, password hashes, and session tokens. Use
+`pipeline/make_seed_db.py` to produce a public-data-only copy for deployment.

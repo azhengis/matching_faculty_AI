@@ -27,9 +27,11 @@ primary_region = "ord"          # Chicago — closest region to DePaul
   min_machines_running = 1
 
 [[vm]]
-  # 2GB is not padding. Resident set is roughly: torch runtime ~400MB, SPECTER2
-  # weights ~440MB, the paper index ~60MB unpickled plus its numpy copy, and the
-  # faculty index ~4MB. A 1GB machine OOMs while building embeddings on boot.
-  memory = "2gb"
+  # Measured, not guessed: 280MB steady state after a real query encode and a
+  # 25-pair cross-encoder rerank, and 285MB peak while rebuilding the faculty
+  # index from scratch. 512MB leaves comfortable headroom; 256MB does not.
+  # Ship the prebuilt indexes (see docs/DEPLOYMENT.md) so the host never pays
+  # the rebuild cost at all.
+  memory = "512mb"
   cpu_kind = "shared"
   cpus = 2
