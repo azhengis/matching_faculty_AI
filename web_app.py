@@ -241,9 +241,11 @@ def _init_profiles_db():
         pass  # column already exists from a prior run
 
     # A one-paragraph abstract summarising the whole proposal, auto-drafted once
-    # the other sections are settled; and the ethical-considerations section a
-    # full academic proposal needs.
-    for _col in ("abstract", "ethical_considerations"):
+    # the other sections are settled; the ethical-considerations section a full
+    # academic proposal needs; and ai_role, which is the whole point of an AI
+    # Institute tool — where AI and data science actually enter this project,
+    # as method, as subject, or not at all.
+    for _col in ("abstract", "ethical_considerations", "ai_role"):
         try:
             con.execute(f"ALTER TABLE proposals ADD COLUMN {_col} TEXT")
         except sqlite3.OperationalError:
@@ -1174,7 +1176,7 @@ async def api_profile_faculty_overrides(email: str, req: Request):
 
 EMPTY_PROPOSAL = {
     "abstract": "", "problem_statement": "", "novelty": "", "background": "", "objectives": "",
-    "research_questions": "", "related_work": "", "methodology": "",
+    "research_questions": "", "related_work": "", "methodology": "", "ai_role": "",
     "ethical_considerations": "", "expected_outcomes": "",
     "edited_sections": [],
 }
@@ -1220,7 +1222,7 @@ def _owned_project(con, user, project_id) -> int | None:
 
 def _read_proposal(con, project_id) -> dict:
     row = con.execute(
-        "SELECT abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ethical_considerations, expected_outcomes "
+        "SELECT abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ai_role, ethical_considerations, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (project_id,)
     ).fetchone()
     if not row:
@@ -1747,11 +1749,15 @@ Now build the full proposal through genuine back-and-forth. Every section must s
      - Ask which resonate, which are wrong for this project, and what they would add from their own reading.
      The saved section should read as a literature review with a gap statement at the end, not a list of names.
   5. Methodology — don't just take the first idea. Put 2-3 concrete approaches on the table yourself (this is the clearest case for the option block described below — explain each, then list them as pickable lines) (archival/documentary analysis, comparative case studies, interviews, dataset or bias auditing, legal-doctrinal review, computational text analysis) and say what each would and wouldn't get them. Ask {name} to react — which fit, which don't, what to combine. Converge on a multi-part methodology, and for each component record what it is, HOW THE DATA WILL BE COLLECTED, and HOW IT WILL BE ANALYZED (both matter — a method that says what data but not how it's analyzed isn't settled), and what it is meant to establish.
-  6. Ethical considerations — how this specific project stays ethical. Draw out what actually applies to THEIR data and methods: informed consent, privacy and data protection, risks to participants, bias and fairness in any model, IRB/approval if human subjects are involved, and responsible use of AI. Do NOT save generic boilerplate — tie each point to their real data and approach. A few sentences or a short bulleted list.
-  7. Expected outcomes — what exists or is known when this is done. Push for 3-5 concrete outcomes (a dataset, a framework, a set of findings, a policy brief, a publication) and, for the significant ones, one clause on who benefits or what changes.
-  8. Abstract — write this LAST, once the sections above are settled. A single ~150-250 word paragraph summarising the whole proposal: the problem, the aim, the approach, and the expected contribution. Draft it in the chat, ask {name} to confirm or adjust, then save it. It leads the finished document.
+  6. The role of AI and data science — this is why {name} is talking to an AI Institute tool, so do not skip it and do not reduce it to a buzzword. Work out with them where AI genuinely enters THIS project. Two distinct ways in, and it can be either, both, or neither:
+     - AS METHOD — an AI or data-science technique that makes part of this work possible or tractable: classifying or extracting from a corpus too large to hand-code, detecting patterns across cases, auditing a model for bias, simulating scenarios. Name the SPECIFIC technique against their actual data, not "we will use machine learning". Tie it back to the methodology components already settled in section 5.
+     - AS SUBJECT — the project is partly ABOUT an AI system, its outputs, or its consequences. Then the questions are what system, whose deployment, and what about it is being examined.
+     Be honest in BOTH directions. Say plainly what the technique would buy them that a conventional approach would not — and also what it cannot be trusted to do (a classifier that is 85% accurate is not a fact-finder; an LLM extraction still needs a validated sample). If AI genuinely is not central to this project, SAY SO and save that: bolting a method onto research that does not need it produces a weaker proposal, and a clear "AI is peripheral here, and here is why" is a better answer than an invented one. Never oversell.
+  7. Ethical considerations — how this specific project stays ethical. Draw out what actually applies to THEIR data and methods: informed consent, privacy and data protection, risks to participants, bias and fairness in any model, IRB/approval if human subjects are involved, and responsible use of AI. Do NOT save generic boilerplate — tie each point to their real data and approach. A few sentences or a short bulleted list.
+  8. Expected outcomes — what exists or is known when this is done. Push for 3-5 concrete outcomes (a dataset, a framework, a set of findings, a policy brief, a publication) and, for the significant ones, one clause on who benefits or what changes.
+  9. Abstract — write this LAST, once the sections above are settled. A single ~150-250 word paragraph summarising the whole proposal: the problem, the aim, the approach, and the expected contribution. Draft it in the chat, ask {name} to confirm or adjust, then save it. It leads the finished document.
 
-  FORMATTING: research_questions, related_work, methodology, ethical_considerations, and expected_outcomes are saved as bulleted lists (lines starting with "- ") once there is more than one item — but each bullet is a full, substantive sentence or two, not a fragment. Abstract, background, and objectives are saved as prose paragraphs. Never save a section as a single short line: if that's all you have, the section isn't settled yet, so keep discussing instead of saving.
+  FORMATTING: research_questions, related_work, methodology, ai_role, ethical_considerations, and expected_outcomes are saved as bulleted lists (lines starting with "- ") once there is more than one item — but each bullet is a full, substantive sentence or two, not a fragment. Abstract, background, and objectives are saved as prose paragraphs. Never save a section as a single short line: if that's all you have, the section isn't settled yet, so keep discussing instead of saving.
 
 ━━━ BE A COLLABORATOR, NOT AN INTAKE FORM (STAGE 4 — THE PROPOSAL) ━━━
 IMPORTANT — this applies to the PROPOSAL stage, not to problem specification. In Stage 1 you draw the problem out of {name} by asking; you do NOT propose framings, methods, or directions there. Once the problem statement is settled and you're building the proposal (methodology, related work, outcomes), the reverse is true: a question-only advisor produces a thin proposal, so bring something to every exchange:
@@ -1868,6 +1874,7 @@ _ADVISOR_TOOLS = [{
                 "research_questions": {"type": "string", "description": "3-5 research questions or hypotheses, each a full question. Group by theme when there is more than one angle. Bulleted list (lines starting with '- ')."},
                 "related_work": {"type": "string", "description": "A focused literature review of 3-5 studies that bear DIRECTLY on the gap in the saved novelty claim, favouring the last ~5 years. For each: what it established and precisely where it stops short of this project. Depth over breadth — do not pad with loosely-related work. Ends with an explicit statement of the GAP this project fills, consistent with the saved novelty claim. Bulleted list (lines starting with '- '), with the gap as a final prose line."},
                 "methodology": {"type": "string", "description": "The methodological approach, component by component. For each: what it is, how data will be COLLECTED, and how it will be ANALYZED, plus what it is meant to establish. Bulleted list (lines starting with '- ')."},
+                "ai_role": {"type": "string", "description": "Where AI and data science actually enter this project — as a method that makes part of the work possible, as part of the subject being studied, or both. Name the specific technique and what it does that a conventional approach could not, plus what it cannot be trusted to do. An honest 'AI is not central here, and forcing it in would weaken the work' is a valid and valuable answer — save that rather than inventing a use. A short paragraph or bulleted list."},
                 "ethical_considerations": {"type": "string", "description": "How the research will be conducted ethically: consent, privacy/data protection, risks to participants, bias and fairness, IRB/approval where relevant, and responsible use of AI. A few sentences or a short bulleted list, specific to THIS project's data and methods — not boilerplate."},
                 "expected_outcomes": {"type": "string", "description": "3-5 concrete outcomes — datasets, frameworks, findings, publications, policy briefs — each with a clause on who benefits or what changes. Bulleted list (lines starting with '- ')."}
             },
@@ -2101,8 +2108,8 @@ def _advisor_search(query: str, mode: str = "semantic") -> dict:
 
 _PROPOSAL_FIELDS = [
     "abstract", "problem_statement", "novelty", "background", "objectives",
-    "research_questions", "related_work", "methodology", "ethical_considerations",
-    "expected_outcomes",
+    "research_questions", "related_work", "methodology", "ai_role",
+    "ethical_considerations", "expected_outcomes",
 ]
 
 
@@ -2152,7 +2159,7 @@ def _save_proposal(project_id, args: dict) -> dict:
 
     con = sqlite3.connect(DB_PATH)
     existing = con.execute(
-        "SELECT abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ethical_considerations, expected_outcomes "
+        "SELECT abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ai_role, ethical_considerations, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (pid,)
     ).fetchone()
     existing_values = dict(zip(_PROPOSAL_FIELDS, existing)) if existing else {f: "" for f in _PROPOSAL_FIELDS}
@@ -2167,8 +2174,8 @@ def _save_proposal(project_id, args: dict) -> dict:
 
     con.execute(
         """INSERT INTO proposals
-               (project_id, abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ethical_considerations, expected_outcomes, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+               (project_id, abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ai_role, ethical_considerations, expected_outcomes, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT(project_id) DO UPDATE SET
                abstract = excluded.abstract,
                problem_statement = excluded.problem_statement,
@@ -2178,12 +2185,13 @@ def _save_proposal(project_id, args: dict) -> dict:
                research_questions = excluded.research_questions,
                related_work = excluded.related_work,
                methodology = excluded.methodology,
+               ai_role = excluded.ai_role,
                ethical_considerations = excluded.ethical_considerations,
                expected_outcomes = excluded.expected_outcomes,
                updated_at = excluded.updated_at""",
         (pid, values["abstract"], values["problem_statement"], values["novelty"], values["background"],
          values["objectives"], values["research_questions"], values["related_work"], values["methodology"],
-         values["ethical_considerations"], values["expected_outcomes"])
+         values["ai_role"], values["ethical_considerations"], values["expected_outcomes"])
     )
     # A project begun from the chat starts untitled; give it a real title the
     # moment there's something to name it from — the problem statement if we have
@@ -2255,6 +2263,7 @@ def _build_proposal_docx(researcher_name: str, proposal: dict, references: list 
         ("Research Questions", proposal.get("research_questions", "")),
         ("Literature Review", proposal.get("related_work", "")),
         ("Methodology", proposal.get("methodology", "")),
+        ("The Role of AI and Data Science", proposal.get("ai_role", "")),
         ("Ethical Considerations", proposal.get("ethical_considerations", "")),
         ("Expected Outcomes", proposal.get("expected_outcomes", "")),
     ]
@@ -2307,7 +2316,7 @@ async def api_project_proposal_download(project_id: int, req: Request):
     name  = name_row[0] if name_row else "Researcher"
     title = con.execute("SELECT title FROM projects WHERE id = ?", (project_id,)).fetchone()[0]
     row = con.execute(
-        "SELECT abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ethical_considerations, expected_outcomes "
+        "SELECT abstract, problem_statement, novelty, background, objectives, research_questions, related_work, methodology, ai_role, ethical_considerations, expected_outcomes "
         "FROM proposals WHERE project_id = ?", (project_id,)
     ).fetchone()
     try:

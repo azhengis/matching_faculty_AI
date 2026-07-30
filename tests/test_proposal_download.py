@@ -90,6 +90,23 @@ def test_build_proposal_docx_leads_with_the_abstract_and_keeps_ethics():
     assert abstract < background < ethics < outcomes
 
 
+def test_build_proposal_docx_places_the_ai_role_after_methodology():
+    proposal = {
+        "methodology": "- Comparative case studies of three counties.",
+        "ai_role": "- An LLM extracts decision rationales from 12,000 case notes, validated against a hand-coded sample.",
+        "ethical_considerations": "- Records stay de-identified.",
+    }
+    texts = _paragraph_texts(_build_proposal_docx("Jane Doe", proposal))
+
+    assert any("Role of AI" in t for t in texts)
+    assert "An LLM extracts decision rationales from 12,000 case notes, validated against a hand-coded sample." in texts
+
+    method = next(i for i, t in enumerate(texts) if "Methodology" in t)
+    ai     = next(i for i, t in enumerate(texts) if "Role of AI" in t)
+    ethics = next(i for i, t in enumerate(texts) if "Ethical Considerations" in t)
+    assert method < ai < ethics
+
+
 def test_build_proposal_docx_lists_references_sorted_by_author():
     import web_app
     refs = [

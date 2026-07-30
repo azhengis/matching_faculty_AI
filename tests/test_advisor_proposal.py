@@ -167,6 +167,29 @@ def test_save_proposal_stores_abstract_and_ethical_considerations(tmp_path, monk
     )
 
 
+def test_save_proposal_stores_the_ai_role_section(tmp_path, monkeypatch):
+    """Where AI enters the project is its own section, saved like any other.
+
+    Including the honest negative answer — "AI is peripheral here" is a real
+    result the advisor is told to record rather than invent a use.
+    """
+    db_path = _setup(tmp_path, monkeypatch)
+    _profile_with_project(db_path)
+
+    assert _save_proposal(1, {"methodology": "- Comparative case studies of three counties."}) == {"status": "saved"}
+    assert _save_proposal(1, {
+        "ai_role": "- AI is peripheral here: the corpus is 40 case files, small enough to hand-code, "
+                   "so an automated classifier would add error without saving effort.",
+    }) == {"status": "saved"}
+
+    con = sqlite3.connect(db_path)
+    row = con.execute(
+        "SELECT ai_role, methodology FROM proposals WHERE project_id = 1").fetchone()
+    con.close()
+    assert row[0].startswith("- AI is peripheral here")
+    assert row[1] == "- Comparative case studies of three counties."
+
+
 def test_save_proposal_rejects_a_call_with_no_section_text(tmp_path, monkeypatch):
     db_path = _setup(tmp_path, monkeypatch)
     _profile_with_project(db_path)
@@ -254,7 +277,7 @@ def test_get_proposal_returns_empty_defaults_when_none_saved(tmp_path, monkeypat
     assert response.status_code == 200
     assert _body(response) == {
         "abstract": "", "problem_statement": "", "novelty": "", "background": "", "objectives": "",
-        "research_questions": "", "related_work": "", "methodology": "",
+        "research_questions": "", "related_work": "", "methodology": "", "ai_role": "",
         "ethical_considerations": "", "expected_outcomes": "",
         "edited_sections": [],
     }

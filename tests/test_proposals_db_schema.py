@@ -21,7 +21,7 @@ def test_init_profiles_db_creates_proposals_table(tmp_path, monkeypatch):
         "id", "project_id", "background", "objectives", "research_questions",
         "related_work", "methodology", "expected_outcomes", "created_at",
         "updated_at", "edited_sections", "problem_statement", "novelty",
-        "abstract", "ethical_considerations",
+        "abstract", "ethical_considerations", "ai_role",
     ]
     con.close()
 
