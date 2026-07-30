@@ -10,8 +10,10 @@ start_server.sh
 models/
 checkpoints/
 
-# Raw pipeline inputs (~384MB). The image runs the app, not the pipeline.
+# Raw pipeline inputs (~384MB). The image runs the app, not the pipeline —
+# except for the seed database, which the build unpacks to bootstrap itself.
 data/
+!data/seed_faculty.db.gz
 
 .venv/
 __pycache__/

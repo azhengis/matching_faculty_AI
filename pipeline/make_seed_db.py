@@ -19,6 +19,7 @@ Usage:
     python3 pipeline/make_seed_db.py --out /tmp/x.db
 """
 import argparse
+import gzip
 import os
 import shutil
 import sqlite3
@@ -48,6 +49,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default=os.path.join(ROOT, "faculty.db"))
     ap.add_argument("--out", default=os.path.join(ROOT, "seed_faculty.db"))
+    ap.add_argument("--gzip-to", default=None,
+                    help="Also write a gzipped copy here (e.g. data/seed_faculty.db.gz) "
+                         "so a Docker build can ship the database without a manual upload.")
     args = ap.parse_args()
 
     if not os.path.exists(args.source):
@@ -109,6 +113,17 @@ def main():
 
     size = os.path.getsize(args.out) / 1e6
     print(f"\nWrote {args.out}  ({size:.1f} MB, {faculty:,} faculty, no user data)")
+
+    if args.gzip_to:
+        os.makedirs(os.path.dirname(os.path.abspath(args.gzip_to)), exist_ok=True)
+        with open(args.out, "rb") as fin, gzip.open(args.gzip_to, "wb", compresslevel=9) as fout:
+            shutil.copyfileobj(fin, fout)
+        gz = os.path.getsize(args.gzip_to) / 1e6
+        print(f"Wrote {args.gzip_to}  ({gz:.1f} MB compressed)")
+        print("\nThis copy is committed so a host with no persistent disk can build a\n"
+              "working image without a manual data upload. It carries no user data and\n"
+              "no email address that data/depaul_faculty_enriched.json does not already\n"
+              "publish — verify with pipeline/check_seed_pii.py before committing a rebuild.")
 
 
 if __name__ == "__main__":

@@ -2,33 +2,82 @@
 
 The goal: a URL the AI Institute team can open and test against.
 
-## What makes this app awkward to host
+## What it actually needs
 
-Read this before picking a host — three constraints rule out most default choices.
+Measured, not estimated:
 
-**1. It needs ~1.5GB of RAM, steady-state.** SPECTER2's weights, the torch
-runtime, and the unpickled paper index all sit resident. A 512MB or 1GB
-instance will OOM while building embeddings on boot, not gracefully degrade.
+| | |
+|---|---|
+| Steady state | **280 MB** after a real query encode and a 25-pair rerank |
+| Peak, faculty index rebuild | 238 MB (63s) |
+| Peak, paper index rebuild | 262 MB (475s, 18,665 papers) |
 
-**2. It is not serverless-shaped.** Model load takes ~30s and the embedding
-indexes are held in memory between requests. Vercel, Lambda, and Cloud
-Functions are the wrong tool — every cold start would pay the full model load,
-and the 250MB unzipped bundle limit is smaller than torch alone. Use a host
-that runs a persistent process.
+So it fits any 512 MB instance, including free tiers. SPECTER2's weights are
+mmap'd from safetensors and cost far less resident than their 440 MB on disk.
 
-**3. The database must persist and must not be in the image.** `faculty.db`
-holds user accounts (with password hashes), projects, and proposals. It is
-gitignored and `.dockerignore`d for that reason. A container filesystem is
-wiped on every deploy, so it needs a mounted volume — otherwise the first
-redeploy silently destroys every account and proposal.
+Two things still constrain the choice of host:
 
-`DATA_DIR` controls where the database, indexes, and uploads live. It defaults
-to the repo root, so local development is unchanged; production points it at
-the volume.
+**It is not serverless-shaped.** Model load takes ~10s and the indexes stay in
+memory between requests. Vercel, Lambda, and Cloud Functions are the wrong
+tool — torch alone exceeds their bundle limits. Use a host that runs a
+persistent process.
+
+**Writable state needs somewhere to live.** `DATA_DIR` controls where the
+database, indexes, and uploads go. Leave it unset and everything sits beside
+the code, which is right for a free host with an ephemeral filesystem. Set it
+to a mounted volume and user accounts survive redeploys.
 
 ---
 
-## Deploying to Fly.io
+## Option 1 — Render free tier (zero cost)
+
+**Use this to get a link in front of the team.** The repo carries everything
+needed: `render.yaml` describes the service, and the Docker build unpacks a
+committed public-data seed and bakes the embedding indexes into the image, so
+there is no data upload step and no slow first boot.
+
+1. Push to GitHub (done).
+2. At [render.com](https://render.com) → **New** → **Blueprint**, pick this
+   repo. It reads `render.yaml`.
+3. Set `ANTHROPIC_API_KEY` in the dashboard when prompted.
+4. Deploy. First build takes ~15 minutes — most of it is baking the indexes.
+
+### What you are trading away
+
+**Free instances have no persistent disk, and the filesystem is destroyed on
+every spin-down — which happens after 15 minutes without traffic.** Concretely:
+faculty data always comes back, because it is baked into the image. Everything
+a tester creates — their account, their projects, their proposals — does not.
+
+A tester who works through a proposal in one sitting is fine; the container
+stays warm while in use. A tester who comes back tomorrow finds their account
+gone. Say so when you send the link, or use Option 2.
+
+Free instances also get 750 hours/month across the workspace, and the first
+request after a sleep pays ~60s of cold start.
+
+### Making it durable while staying free
+
+Litestream continuously replicates SQLite to object storage and restores on
+boot, which fixes the spin-down problem without paying for a disk. Cloudflare
+R2 and Backblaze B2 both have free tiers that comfortably fit a 12 MB database.
+
+Sketch: add `litestream` to the image, point it at the bucket, and change the
+entrypoint to `litestream restore -if-db-not-exists` then
+`litestream replicate -exec "uvicorn ..."`. Roughly an hour of work, and worth
+it before real faculty rely on it. Not done here.
+
+---
+
+## Option 2 — any host with a volume (~$3-7/month)
+
+Render Starter ($7/mo) plus a 1 GB disk, or an equivalent elsewhere. Add a
+`disk:` block to `render.yaml` mounted at `/data` and set `DATA_DIR=/data`.
+Nothing else changes, and accounts and proposals then survive redeploys.
+
+---
+
+## Option 3 — Fly.io
 
 Fly is preconfigured here (`fly.toml`, `Dockerfile`) because it does persistent
 volumes and always-on machines simply. Render, Railway, or a DePaul-hosted VM

@@ -31,9 +31,27 @@ CrossEncoder('cross-encoder/ms-marco-MiniLM-L-12-v2', max_length=512)"
 
 COPY . .
 
-# faculty.db and the .pkl indexes live on a mounted volume, not in the image:
-# the database holds user accounts and proposals and must survive a redeploy.
-ENV DB_PATH=/data/faculty.db
+# Unpack the committed public-data seed and BUILD THE EMBEDDING INDEXES NOW,
+# at image build time rather than at boot. On a host with no persistent disk
+# (Render's free tier destroys the filesystem on every spin-down), an index
+# built at boot is rebuilt on every wake — 9.5 minutes before the first
+# response. Baked into the image, boot is just the model load.
+#
+# The seed carries public faculty data only; pipeline/check_seed_pii.py gates
+# it. Real user data never enters an image — see DATA_DIR below.
+RUN gunzip -c data/seed_faculty.db.gz > /app/faculty.db \
+    && python -c "\
+import search as sm; \
+p = sm.load_faculty(); m = sm.load_model(); \
+sm.get_index(p, m); sm.get_paper_index(p, m); \
+print('indexes baked')" \
+    && ls -la /app/faculty_index.pkl /app/paper_index.pkl
+
+# Where writable state goes. Unset (the default) means /app — correct for a
+# free host with an ephemeral filesystem, where accounts reset on restart and
+# the baked seed is restored each time. Set DATA_DIR=/data on any host with a
+# mounted volume and user data survives redeploys instead.
+#   docker run -e DATA_DIR=/data -v faculty_data:/data ...
 EXPOSE 8000
 
 # Single worker on purpose. Measured steady state is ~280MB resident (SPECTER2's
