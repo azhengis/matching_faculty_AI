@@ -1,0 +1,23 @@
+# The database holds user accounts, password hashes, and proposals. It goes on
+# the volume, seeded deliberately — never baked into an image that gets pushed
+# to a registry.
+faculty.db
+*.pkl
+uploads/
+start_server.sh
+
+# 420MB of fine-tuned weights that the app only uses when FINETUNED_MODEL is set.
+models/
+checkpoints/
+
+# Raw pipeline inputs (~384MB). The image runs the app, not the pipeline.
+data/
+
+.venv/
+__pycache__/
+*.pyc
+.git/
+.DS_Store
+tests/
+docs/
+*.ipynb

@@ -62,10 +62,16 @@ if CHATBOT_MODEL:
         CHATBOT_MODEL = ""
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
+# DATA_DIR is where everything that must SURVIVE A REDEPLOY lives: the database
+# (user accounts, projects, proposals) and uploaded documents. It defaults to
+# the repo root so local development is unchanged, and is pointed at a mounted
+# volume in production — a container filesystem is ephemeral, so leaving these
+# beside the code means every deploy silently discards user data.
 _ROOT       = os.path.dirname(os.path.abspath(__file__))
-DB_PATH     = os.path.join(_ROOT, "faculty.db")
+DATA_DIR    = os.environ.get("DATA_DIR", _ROOT)
+DB_PATH     = os.environ.get("DB_PATH") or os.path.join(DATA_DIR, "faculty.db")
 TEMPLATES   = Path(_ROOT) / "templates"
-UPLOADS_DIR = os.path.join(_ROOT, "uploads")
+UPLOADS_DIR = os.environ.get("UPLOADS_DIR") or os.path.join(DATA_DIR, "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # ── Shared in-memory state ────────────────────────────────────────────────────

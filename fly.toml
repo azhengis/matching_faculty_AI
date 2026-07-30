@@ -1,0 +1,35 @@
+# Fly.io config. Walkthrough and the data-seeding step: docs/DEPLOYMENT.md
+# `fly launch` will rename the app if this one is taken.
+app = "depaul-faculty-matcher"
+primary_region = "ord"          # Chicago — closest region to DePaul
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Everything that must outlive a deploy goes on the mounted volume.
+  DATA_DIR = "/data"
+  CHATBOT_MODEL = "anthropic/claude-haiku-4-5"
+  # ANTHROPIC_API_KEY is NOT set here — it is a secret.
+  #   fly secrets set ANTHROPIC_API_KEY=sk-...
+
+[[mounts]]
+  source = "faculty_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # Never scale to zero: a cold start reloads SPECTER2 and rebuilds nothing,
+  # but still costs ~30s before the first byte. Suspend keeps memory warm.
+  min_machines_running = 1
+
+[[vm]]
+  # 2GB is not padding. Resident set is roughly: torch runtime ~400MB, SPECTER2
+  # weights ~440MB, the paper index ~60MB unpickled plus its numpy copy, and the
+  # faculty index ~4MB. A 1GB machine OOMs while building embeddings on boot.
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 2

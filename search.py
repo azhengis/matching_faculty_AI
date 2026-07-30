@@ -25,9 +25,17 @@ RUN:
 import os, sys, sqlite3, pickle, re, json, hashlib
 import numpy as np
 
-DB          = "faculty.db"
-INDEX       = "faculty_index.pkl"
-PAPER_INDEX = "paper_index.pkl"
+# Same DATA_DIR contract as web_app.py. These were bare relative paths, which
+# resolve against the CURRENT WORKING DIRECTORY — fine when you always launch
+# from the repo root, silently wrong under a process manager or a container
+# whose workdir differs. Anchored to the module directory by default instead.
+_HERE       = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR   = os.environ.get("DATA_DIR", _HERE)
+DB          = os.environ.get("DB_PATH")  or os.path.join(_DATA_DIR, "faculty.db")
+# The indexes are derived from the DB and rebuild themselves when their input
+# changes, so they belong with the data rather than in the image.
+INDEX       = os.path.join(_DATA_DIR, "faculty_index.pkl")
+PAPER_INDEX = os.path.join(_DATA_DIR, "paper_index.pkl")
 MODEL       = "allenai/specter2"   # adapter version; changed from _base → cache rebuilds
 TOP_K            = 5
 POOL_SIZE        = 30    # kept for complementary mode
