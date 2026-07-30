@@ -82,9 +82,6 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 .proj-textarea{width:100%;padding:12px 14px;font-size:14.5px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;line-height:1.65;resize:vertical;min-height:130px;transition:border-color .15s,box-shadow .15s}
 .proj-textarea::placeholder{color:var(--ink-3)}
 .proj-textarea:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
-.mode-tabs{display:flex;gap:4px;margin-bottom:22px;background:var(--canvas);border-radius:10px;padding:4px}
-.mode-tab{flex:1;padding:9px 10px;background:none;border:none;border-radius:7px;font-size:13.5px;font-weight:600;color:var(--ink-2);cursor:pointer;font-family:inherit;transition:background .15s,color .15s}
-.mode-tab.active{color:var(--navy);background:var(--surface);box-shadow:var(--sh-sm)}
 .tag-input-wrap{display:flex;flex-wrap:wrap;gap:7px;padding:10px 12px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);transition:border-color .15s,box-shadow .15s}
 .tag-input-wrap:focus-within{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
 .tag-chip{display:flex;align-items:center;gap:7px;background:var(--teal-bg);color:var(--teal);border:1px solid #BEE0E2;border-radius:999px;padding:4px 11px;font-size:13px;font-weight:500}
@@ -191,11 +188,6 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
       </div>
 
       <div class="pv-block">
-        <div class="pv-block-label">Current project</div>
-        <div class="pv-prose" id="pv-project"></div>
-      </div>
-
-      <div class="pv-block">
         <div class="pv-block-label">Publications <span class="pv-count" id="pv-papers-count"></span></div>
         <div class="pv-papers" id="pv-papers"></div>
       </div>
@@ -231,7 +223,8 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 
     <div class="btn-group" style="margin-top:24px">
       <a class="btn-scarlet" href="/projects">Go to your projects &rarr;</a>
-      <button class="btn-outline" onclick="startFresh()">Update my profile</button>
+      <button class="btn-outline" onclick="editProfile()">Edit bio &amp; publications</button>
+      <button class="btn-outline" onclick="startFresh()">Not the right person?</button>
     </div>
   </div>
 
@@ -243,17 +236,13 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
     </div>
     <div class="step" id="step-dot-2">
       <div class="step-num">2</div>
-      <div class="step-label">Your bio</div>
-    </div>
-    <div class="step" id="step-dot-3">
-      <div class="step-num">3</div>
-      <div class="step-label">Your project</div>
+      <div class="step-label">Your research</div>
     </div>
   </div>
 
   <!-- ── Step 1: Name search ── -->
   <div id="panel-1" class="panel active">
-    <div class="section-tag">Step 1 of 3</div>
+    <div class="section-tag">Step 1 of 2</div>
     <h2>Find yourself in our database</h2>
     <p class="section-desc">Search by your name so we can pre-fill your profile with your existing research summary and publications.</p>
 
@@ -287,9 +276,9 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
       <button class="btn-change" onclick="goToStep(1)">Not me &rarr; search again</button>
     </div>
 
-    <div class="section-tag">Step 2 of 3</div>
-    <h2>Confirm &amp; enrich your bio</h2>
-    <p class="section-desc">This bio and these research interests are shown to others matching against you &mdash; edit them to make sure they're accurate and current.</p>
+    <div class="section-tag">Step 2 of 2</div>
+    <h2>Confirm &amp; enrich your research profile</h2>
+    <p class="section-desc">This is what others see when they match against you. Most of it was pulled from your DePaul page and OpenAlex, so it may be out of date or wrong &mdash; correct anything that doesn't reflect the work you do now.</p>
 
     <div class="textarea-wrap">
       <div class="field-label">Your bio</div>
@@ -305,7 +294,7 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
     </div>
 
     <div class="papers-section" id="papers-section">
-      <div class="papers-note">Don't see all your papers? That's fine — our database pulls from OpenAlex and may be incomplete. You can always add more context in your project description.</div>
+      <div class="papers-note">Newest first. Untick anything that isn&rsquo;t yours &mdash; name-based matching does misattribute papers. Missing work is normal too: our database pulls from OpenAlex, and you can add a CV or Google Scholar link from your profile to bring more in.</div>
       <div class="papers-head">
         <span class="papers-head-label" id="papers-count-label">Publications</span>
         <div class="select-all-row">
@@ -317,67 +306,10 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
         <span class="spinner"></span>Loading papers...
       </div>
     </div>
-    <div id="papers-manual-note" style="display:none;color:var(--ink-3);font-size:13.5px;padding:12px 0">No publications to confirm for a manual profile — you can add context in your project description on the next step.</div>
+    <div id="papers-manual-note" style="display:none;color:var(--ink-3);font-size:13.5px;padding:12px 0">No publications to confirm for a manual profile &mdash; upload a CV or add a Google Scholar link from your profile to bring your work in.</div>
 
-    <button class="btn-primary" onclick="goToStep(3)" style="width:100%;margin-top:4px">Continue &rarr;</button>
-  </div>
-
-  <!-- ── Step 3: Project description ── -->
-  <div id="panel-3" class="panel">
-    <div class="selected-banner">
-      <div><strong id="s3-name"></strong><br><span id="s3-meta" style="font-size:13px;color:var(--teal)"></span></div>
-      <button class="btn-change" onclick="goToStep(1)">Change profile</button>
-    </div>
-
-    <div class="section-tag">Step 3 of 3</div>
-    <h2>Describe your research project</h2>
-    <p class="section-desc">The advisor will use this to give you personalized suggestions for AI integration and find the right collaborators.</p>
-
-    <div class="mode-tabs">
-      <button type="button" class="mode-tab active" id="mode-tab-type" onclick="setMode('type')">Type it out</button>
-      <button type="button" class="mode-tab" id="mode-tab-upload" onclick="setMode('upload')">Upload a document</button>
-    </div>
-
-    <div id="mode-type">
-      <div class="textarea-wrap">
-        <div class="field-label">What problem are you working on?</div>
-        <textarea class="proj-textarea" id="q-problem"
-          placeholder="What research problem are you working on right now? What are you trying to find out or build?"></textarea>
-      </div>
-      <div class="textarea-wrap">
-        <div class="field-label">What data do you have or could you collect?</div>
-        <textarea class="proj-textarea" id="q-data"
-          placeholder="e.g. survey responses, sensor logs, text corpora, imaging data..."></textarea>
-      </div>
-      <div class="textarea-wrap">
-        <div class="field-label">What's the hardest part of the methodology?</div>
-        <textarea class="proj-textarea" id="q-challenge"
-          placeholder="Where do you get stuck, or what part feels the most uncertain?"></textarea>
-      </div>
-      <div class="textarea-wrap">
-        <div class="field-label">What kind of AI/data-science help are you looking for?</div>
-        <textarea class="proj-textarea" id="q-help"
-          placeholder="A technical co-investigator? A consultant on methods? Something else?"></textarea>
-      </div>
-      <div class="textarea-wrap">
-        <div class="field-label">Anything else you'd like to add? <span style="text-transform:none;font-weight:400">(optional)</span></div>
-        <textarea class="proj-textarea" id="q-extra" style="min-height:80px"
-          placeholder="Anything else that would help the advisor understand your work."></textarea>
-      </div>
-    </div>
-
-    <div id="mode-upload" style="display:none">
-      <div class="textarea-wrap">
-        <div class="field-label">Upload a project description, grant abstract, or research statement</div>
-        <input type="file" id="upload-input" accept=".pdf,.docx" onchange="handleFileUpload(event)">
-        <div class="search-status" id="upload-status"></div>
-        <textarea class="proj-textarea" id="upload-extracted-text" style="display:none;margin-top:10px"
-          placeholder="Extracted text will appear here for you to review before saving."></textarea>
-      </div>
-    </div>
-
-    <button class="btn-primary" id="btn-save" onclick="saveProfile()" style="width:100%">
-      Save Profile &amp; Open Advisor &rarr;
+    <button class="btn-primary" id="btn-save" onclick="saveProfile()" style="width:100%;margin-top:4px">
+      Save profile &rarr;
     </button>
     <div class="search-status" id="save-status" style="margin-top:12px"></div>
   </div>
@@ -394,6 +326,7 @@ let _step        = 1;
 let _manualName  = null;   // set when the user chose "Not listed? Continue manually"
 let _manualEmail = null;
 let _tags        = [];     // current research interest tags
+let _profile     = null;   // the saved profile, kept so Edit can pre-fill from it
 
 // ── On load: require login, then check for an existing profile ───────────────
 (async function init() {
@@ -431,7 +364,6 @@ function showProfileView(profile) {
   document.getElementById('steps').style.display = 'none';
   document.getElementById('panel-1').classList.remove('active');
   document.getElementById('panel-2').classList.remove('active');
-  document.getElementById('panel-3').classList.remove('active');
 
   const name = profile.name || '';
   document.getElementById('pv-name').textContent = name;
@@ -457,7 +389,6 @@ function showProfileView(profile) {
   }
 
   setProse('pv-bio', profile.bio, 'No bio yet — add one so collaborators know your work.');
-  setProse('pv-project', profile.project_description, 'No project described yet.');
 
   const papers = profile.papers || [];
   document.getElementById('pv-papers-count').textContent = papers.length ? `(${papers.length})` : '';
@@ -467,14 +398,52 @@ function showProfileView(profile) {
         `${p.cited_by ? ' · ' + p.cited_by + ' citations' : ''}</div></div>`).join('')
     : '<div class="pv-prose empty">No publications confirmed yet.</div>';
 
+  _profile = profile;
   document.getElementById('profile-view').style.display = 'block';
   loadDocuments();
 }
 
+// ── Editing an existing profile ──────────────────────────────────────────────
+// Everything here is scraped from public sources or typed once and then left
+// alone, so it goes stale and gets things wrong. Editing has to land you in a
+// form that already holds what we think is true, not a blank one: the whole
+// point is correcting what is there. Straight to step 2 — the identity match
+// in step 1 is already settled, and "Not me" is still one click away.
+async function editProfile() {
+  const p = _profile || {};
+
+  _selected = p.faculty_id
+    ? {id: p.faculty_id, name: p.name, title: p.title, dept: p.department, email: p.email, bio: p.bio}
+    : null;
+  _manualName  = p.faculty_id ? null : (p.name || null);
+  _manualEmail = p.faculty_id ? null : (p.email || '');
+
+  const meta = _selected
+    ? [p.title, p.department].filter(Boolean).join(' · ')
+    : 'Manual profile';
+  document.getElementById('selected-name').textContent = p.name || '';
+  document.getElementById('selected-meta').textContent = meta;
+
+  document.getElementById('bio-text').value = p.bio || '';
+  _tags = (p.research_interests || []).slice();
+  renderTags();
+
+  setStepMode(_selected ? 'matched' : 'manual');
+  document.getElementById('profile-view').style.display = 'none';
+  document.getElementById('steps').style.display = 'flex';
+  goToStep(2);
+
+  // Re-offer the full publication list with the previously confirmed ones
+  // ticked, so a correction is a checkbox rather than a re-run of setup.
+  if (_selected) await loadPapers(_selected.id, (p.papers || []).map(x => x.id));
+}
+
+// Re-link this account to a different faculty record. Rare, and destructive
+// enough to the rest of the form that it starts from the name search.
 function startFresh() {
   document.getElementById('profile-view').style.display = 'none';
   document.getElementById('steps').style.display = 'flex';
-  document.getElementById('panel-1').classList.add('active');
+  goToStep(1);
 }
 
 // ── Step navigation ──────────────────────────────────────────────────────────
@@ -484,7 +453,7 @@ function goToStep(n) {
   document.getElementById('panel-' + n).classList.add('active');
 
   // Update step dots
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 2; i++) {
     const dot = document.getElementById('step-dot-' + i);
     dot.className = 'step' + (i < n ? ' done' : i === n ? ' active' : '');
     dot.querySelector('.step-num').textContent = i < n ? '✓' : i;
@@ -551,8 +520,6 @@ async function selectFaculty(p) {
   // Fill step 2 and 3 banners
   document.getElementById('selected-name').textContent = p.name;
   document.getElementById('selected-meta').textContent = [p.title, p.dept].filter(Boolean).join(' · ');
-  document.getElementById('s3-name').textContent = p.name;
-  document.getElementById('s3-meta').textContent = [p.title, p.dept].filter(Boolean).join(' · ');
 
   setStepMode('matched');
   goToStep(2);
@@ -578,8 +545,6 @@ function continueManually() {
 
   document.getElementById('selected-name').textContent = name;
   document.getElementById('selected-meta').textContent = 'Manual profile';
-  document.getElementById('s3-name').textContent = name;
-  document.getElementById('s3-meta').textContent = 'Manual profile';
 
   setStepMode('manual');
   goToStep(2);
@@ -638,9 +603,12 @@ document.getElementById('tag-input').addEventListener('keydown', e => {
 });
 
 // ── Step 2: Papers ───────────────────────────────────────────────────────────
-async function loadPapers(facultyId) {
+// confirmedIds: when re-editing, only these start ticked. Passing null (first
+// run) ticks everything, which is the right default for a fresh profile.
+async function loadPapers(facultyId, confirmedIds) {
   const list = document.getElementById('papers-list');
   list.innerHTML = '<span class="spinner"></span> Loading publications...';
+  const confirmed = confirmedIds ? new Set(confirmedIds) : null;
 
   try {
     const res  = await fetch('/api/profile/papers/' + facultyId);
@@ -658,7 +626,7 @@ async function loadPapers(facultyId) {
 
     list.innerHTML = papers.map(p => `
       <div class="paper-row">
-        <input type="checkbox" class="paper-cb" id="cb-${p.id}" value="${p.id}" checked>
+        <input type="checkbox" class="paper-cb" id="cb-${p.id}" value="${p.id}"${!confirmed || confirmed.has(p.id) ? ' checked' : ''}>
         <label class="paper-label" for="cb-${p.id}">
           <div class="paper-title">${esc(p.title)}</div>
           <div class="paper-meta">${p.year || ''}${p.year && p.cited ? ' &middot; ' : ''}${p.cited ? p.cited + ' citations' : ''}</div>
@@ -678,97 +646,16 @@ function getCheckedPaperIds() {
   return [...document.querySelectorAll('.paper-cb:checked')].map(cb => parseInt(cb.value));
 }
 
-// ── Step 3: Project + save ───────────────────────────────────────────────────
-let _mode = 'type';
-
-function setMode(mode) {
-  _mode = mode;
-  document.getElementById('mode-tab-type').classList.toggle('active', mode === 'type');
-  document.getElementById('mode-tab-upload').classList.toggle('active', mode === 'upload');
-  document.getElementById('mode-type').style.display = mode === 'type' ? 'block' : 'none';
-  document.getElementById('mode-upload').style.display = mode === 'upload' ? 'block' : 'none';
-}
-
-async function handleFileUpload(event) {
-  const file = event.target.files[0];
-  const status = document.getElementById('upload-status');
-  const extractedTA = document.getElementById('upload-extracted-text');
-  extractedTA.style.display = 'none';
-  extractedTA.value = '';
-
-  if (!file) return;
-
-  const name = file.name.toLowerCase();
-  if (!name.endsWith('.pdf') && !name.endsWith('.docx')) {
-    status.textContent = 'Unsupported file type. Please upload a .pdf or .docx file.';
-    status.className   = 'search-status err';
-    return;
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    status.textContent = 'File is too large (10MB max).';
-    status.className   = 'search-status err';
-    return;
-  }
-
-  status.innerHTML = '<span class="spinner"></span> Extracting text...';
-  status.className = 'search-status';
-
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    const res  = await fetch('/api/profile/extract-file', { method: 'POST', body: formData });
-    const data = await res.json();
-
-    if (data.error) {
-      status.textContent = data.error;
-      status.className   = 'search-status err';
-      return;
-    }
-
-    extractedTA.value = data.text;
-    extractedTA.style.display = 'block';
-    status.textContent = 'Review the extracted text below, then save.';
-    status.className = 'search-status';
-  } catch (e) {
-    status.textContent = 'Network error: ' + e.message;
-    status.className   = 'search-status err';
-  }
-}
-
+// ── Save ─────────────────────────────────────────────────────────────────────
 async function saveProfile() {
   const btn    = document.getElementById('btn-save');
   const status = document.getElementById('save-status');
 
-  let proj;
-  if (_mode === 'type') {
-    const problem   = document.getElementById('q-problem').value.trim();
-    const data      = document.getElementById('q-data').value.trim();
-    const challenge = document.getElementById('q-challenge').value.trim();
-    const help      = document.getElementById('q-help').value.trim();
-    const extra     = document.getElementById('q-extra').value.trim();
-
-    if (!problem || !data || !challenge || !help) {
-      status.textContent = 'Please fill in all four required questions before saving.';
-      status.className   = 'search-status err';
-      return;
-    }
-
-    const parts = [
-      'Research problem: ' + problem,
-      'Data available: ' + data,
-      'Methodological challenge: ' + challenge,
-      'Desired AI/data-science help: ' + help,
-    ];
-    if (extra) parts.push('Additional notes: ' + extra);
-    proj = parts.join('\n\n');
-  } else {
-    proj = document.getElementById('upload-extracted-text').value.trim();
-    if (!proj) {
-      status.textContent = 'Please upload a document and review the extracted text before saving.';
-      status.className   = 'search-status err';
-      return;
-    }
+  const bio = document.getElementById('bio-text').value.trim();
+  if (!bio && !_tags.length) {
+    status.textContent = 'Add a bio or at least one research interest so collaborators can find you.';
+    status.className   = 'search-status err';
+    return;
   }
 
   btn.disabled      = true;
@@ -778,8 +665,7 @@ async function saveProfile() {
     faculty_id:           _selected ? _selected.id : null,
     name:                 _selected ? _selected.name : (_manualName || 'Unknown'),
     email:                _selected ? (_selected.email || '') : (_manualEmail || ''),
-    bio_text:             document.getElementById('bio-text').value.trim(),
-    project_description:  proj,
+    bio_text:             bio,
     confirmed_paper_ids:  getCheckedPaperIds(),
     research_interests:   _tags,
   };

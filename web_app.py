@@ -760,7 +760,6 @@ async def api_profile_save(req: Request):
     faculty_id   = body.get("faculty_id")
     name         = (body.get("name") or "").strip()
     bio_text     = (body.get("bio_text") or "").strip()
-    project_desc = (body.get("project_description") or "").strip()
     paper_ids    = json.dumps(body.get("confirmed_paper_ids", []))
     interests    = json.dumps(body.get("research_interests", []))
     if not name:
@@ -768,6 +767,20 @@ async def api_profile_save(req: Request):
 
     email = user["email"]
     con = sqlite3.connect(DB_PATH)
+
+    # project_description is no longer collected here — a profile describes
+    # durable research identity, and one "current project" pinned to it goes
+    # stale the moment the next project starts. Projects own their own intake.
+    # An OMITTED key preserves whatever is already stored, so editing a bio
+    # can't silently wipe the description an older profile still carries; an
+    # explicitly supplied key still writes, which keeps the API honest.
+    if "project_description" in body:
+        project_desc = (body.get("project_description") or "").strip()
+    else:
+        prior = con.execute(
+            "SELECT project_description FROM profiles WHERE user_id = ?", (user["id"],)
+        ).fetchone()
+        project_desc = (prior[0] or "") if prior else ""
     con.execute(
         """INSERT INTO profiles
                (user_id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests, updated_at)
