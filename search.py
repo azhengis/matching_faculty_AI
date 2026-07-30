@@ -252,19 +252,51 @@ def load_faculty():
     # of the index entirely, so searching their name returned nothing at all.
     rows = con.execute("SELECT * FROM faculty").fetchall()
 
-    # Most-cited titles per faculty, used to synthesise a research summary for
-    # anyone who has no bio and no courses. Capped because a single profile can
-    # carry over a thousand papers, and a wall of titles dilutes the embedding.
-    TITLES_FOR_SUMMARY = 12
-    top_titles_by_id = {}
+    # Titles per faculty, used to synthesise a research summary for anyone who
+    # has no bio and no courses. Capped because a single profile can carry over
+    # a thousand papers, and a wall of titles dilutes the embedding.
+    #
+    # RECENCY LEADS. This used to take the 12 most-CITED titles, which describes
+    # people by their biggest hit rather than their current work: a professor
+    # whose 2008 paper still dominates their citation count got embedded — and
+    # therefore matched — on research they may have left a decade ago. Citations
+    # accumulate with age, so ranking by them structurally favours old work.
+    #
+    # So the summary is mostly RECENT work (what they do now), with a short tail
+    # of their most-cited work of any age. The tail is deliberate: Bamshad's
+    # point was that recency identifies someone's research areas, but broader
+    # expertise still matters for matching — a collaborator search should still
+    # be able to reach the methods someone built their reputation on.
+    TITLES_RECENT = 9          # newest first — what they work on now
+    TITLES_SEMINAL = 3         # most-cited of any age — what they're known for
+    TITLES_FOR_SUMMARY = TITLES_RECENT + TITLES_SEMINAL
+
+    recent_by_id, seminal_by_id = {}, {}
     for r in con.execute(
         "SELECT faculty_id, title FROM papers "
         "WHERE TRIM(COALESCE(title,'')) != '' "
-        "ORDER BY faculty_id, cited_by_count DESC"
+        "ORDER BY faculty_id, COALESCE(year, 0) DESC, cited_by_count DESC"
     ):
-        bucket = top_titles_by_id.setdefault(r["faculty_id"], [])
-        if len(bucket) < TITLES_FOR_SUMMARY:
+        bucket = recent_by_id.setdefault(r["faculty_id"], [])
+        if len(bucket) < TITLES_RECENT:
             bucket.append(r["title"].strip())
+
+    for r in con.execute(
+        "SELECT faculty_id, title FROM papers "
+        "WHERE TRIM(COALESCE(title,'')) != '' "
+        "ORDER BY faculty_id, cited_by_count DESC, COALESCE(year, 0) DESC"
+    ):
+        bucket = seminal_by_id.setdefault(r["faculty_id"], [])
+        if len(bucket) < TITLES_SEMINAL:
+            bucket.append(r["title"].strip())
+
+    # Recent first, then any most-cited titles not already covered. Dict keys
+    # dedupe while preserving order, so a paper that is both recent and seminal
+    # is listed once, in its recent position.
+    top_titles_by_id = {
+        fid: list(dict.fromkeys(titles + seminal_by_id.get(fid, [])))[:TITLES_FOR_SUMMARY]
+        for fid, titles in recent_by_id.items()
+    }
 
     # Load self-edited overrides, keyed by lowercased email
     override_rows = con.execute(

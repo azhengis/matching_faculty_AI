@@ -698,11 +698,15 @@ async def api_faculty_profile(faculty_id: int, req: Request):
             except ValueError:
                 interests = []
 
+    # Newest first. Someone deciding whether to approach this person as a
+    # collaborator needs to know what they work on NOW; sorting by citations
+    # led with whatever they were doing when their biggest paper landed, which
+    # can be a decade off their current direction.
     papers = [
         {"title": t, "year": y, "cited_by": c or 0}
         for t, y, c in con.execute(
             "SELECT title, year, cited_by_count FROM papers WHERE faculty_id = ? "
-            "ORDER BY cited_by_count DESC, year DESC LIMIT 40", (faculty_id,)
+            "ORDER BY COALESCE(year, 0) DESC, cited_by_count DESC LIMIT 40", (faculty_id,)
         ).fetchall()
     ]
     paper_total = con.execute(
@@ -863,7 +867,7 @@ async def api_profile_me(req: Request):
         ph  = ",".join("?" * len(paper_ids))
         prows = con.execute(
             f"SELECT id, title, year, cited_by_count FROM papers WHERE id IN ({ph}) "
-            "ORDER BY cited_by_count DESC, year DESC", paper_ids).fetchall()
+            "ORDER BY COALESCE(year, 0) DESC, cited_by_count DESC", paper_ids).fetchall()
         papers = [{"id": r[0], "title": r[1] or "", "year": r[2], "cited_by": r[3] or 0} for r in prows]
     # Title/department/college come from the faculty record this profile is linked
     # to, so the profile can show a proper header instead of a bare name. Tolerant
