@@ -327,6 +327,7 @@ let _manualName  = null;   // set when the user chose "Not listed? Continue manu
 let _manualEmail = null;
 let _tags        = [];     // current research interest tags
 let _profile     = null;   // the saved profile, kept so Edit can pre-fill from it
+let _firstRun    = false;  // no profile existed when the page loaded
 
 // ── On load: require login, then check for an existing profile ───────────────
 (async function init() {
@@ -347,6 +348,10 @@ let _profile     = null;   // the saved profile, kept so Edit can pre-fill from 
   } catch (e) {
     // Network hiccup — treat as no existing profile.
   }
+
+  // First-run setup and later edits end differently: setup flows straight
+  // into the advisor conversation, edits return to the profile view.
+  _firstRun = !existing;
 
   if (existing) {
     showProfileView(existing);
@@ -685,8 +690,25 @@ async function saveProfile() {
       return;
     }
 
-    // Show the full profile view (with document upload) instead of jumping
-    // straight to the advisor — the user continues there when ready.
+    // FIRST-RUN setup flows straight into the advisor conversation — profile,
+    // then the problem interview, with no stop at a project list in between.
+    // That's the staged flow the tool is built around: the researcher finishes
+    // saying who they are and is immediately asked what they're working on.
+    // EDITS never do this: someone correcting their bio goes back to their
+    // profile, not into a surprise chat.
+    if (_firstRun) {
+      try {
+        const pres = await fetch('/api/projects', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ start_blank: true })
+        });
+        const pdata = await pres.json();
+        if (pres.ok) { window.location.href = `/advisor?project=${pdata.project_id}`; return; }
+        // If project creation fails, fall through to the profile view rather
+        // than stranding them on a dead button.
+      } catch (e) {}
+    }
+
     try {
       const meRes = await fetch('/api/profile/me');
       if (meRes.ok) {
