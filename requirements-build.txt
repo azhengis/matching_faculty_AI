@@ -1,8 +1,8 @@
 # BUILD-TIME dependencies — NOT installed in the deployed image.
 #
-# Needed to export SPECTER2 to ONNX (pipeline/13_export_onnx.py), rebuild the
-# embedding indexes (pipeline/14_build_onnx_index.py), fine-tune the model
-# (pipeline/9, 10), and run the test that pins ONNX output against
+# Needed to export SPECTER2 to ONNX (pipeline/13_export_onnx.py), build the
+# embedding indexes (done inside the Docker builder stage), fine-tune the
+# model (pipeline/9, 10), and run the test that pins ONNX output against
 # sentence-transformers.
 #
 # Install on top of requirements.txt:

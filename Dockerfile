@@ -28,8 +28,13 @@ RUN pip install --no-cache-dir torch==2.13.0 \
         --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt requirements-build.txt ./
-RUN grep -v '^torch==' requirements-build.txt > /tmp/build.txt \
-    && pip install --no-cache-dir -r /tmp/build.txt
+# The filtered copy MUST land beside requirements.txt: requirements-build.txt
+# begins with `-r requirements.txt`, and pip resolves that relative to the
+# including file's own directory. Writing it to /tmp made pip look for
+# /tmp/requirements.txt and fail the build.
+RUN grep -v '^torch==' requirements-build.txt > ./build-filtered.txt \
+    && pip install --no-cache-dir -r ./build-filtered.txt \
+    && rm ./build-filtered.txt
 
 COPY . .
 
