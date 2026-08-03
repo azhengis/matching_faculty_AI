@@ -58,4 +58,8 @@ EXPOSE 8000
 # weights are mmap'd from safetensors, so they cost far less than their 440MB
 # on-disk size). Each additional worker loads its own copy, so a second one
 # roughly doubles that for a tool with a handful of concurrent users.
-CMD ["uvicorn", "web_app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Bind to $PORT when the platform sets one (Render and most PaaS hosts inject
+# it and health-check that exact port), falling back to 8000 locally. Hardcoding
+# 8000 passes locally and then fails the health check on deploy, which is a
+# miserable thing to debug through a 15-minute build loop.
+CMD ["sh", "-c", "uvicorn web_app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

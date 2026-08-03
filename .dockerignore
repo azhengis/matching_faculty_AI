@@ -12,7 +12,10 @@ checkpoints/
 
 # Raw pipeline inputs (~384MB). The image runs the app, not the pipeline —
 # except for the seed database, which the build unpacks to bootstrap itself.
-data/
+# NOTE: `data/*` not `data/` — excluding the directory itself can stop the
+# builder walking into it, which silently makes the exception below a no-op
+# and produces an image with no database in it.
+data/*
 !data/seed_faculty.db.gz
 
 .venv/
