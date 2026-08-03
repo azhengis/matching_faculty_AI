@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1
-FROM python:3.11-slim
+# 3.13, not 3.11. numpy 2.5.1 (pinned in requirements.txt) declares
+# requires-python >=3.12 and publishes no cp311 wheel at all, so a 3.11 base
+# fails the install outright. 3.13 also matches the venv the pins were
+# generated from, so what builds here is what was tested locally.
+FROM python:3.13-slim
 
 # libgomp1 is required by torch; the rest of the build-essential chain is not,
 # so we stay on slim rather than the full image (~700MB saved).
