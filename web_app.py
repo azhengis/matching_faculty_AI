@@ -1208,9 +1208,13 @@ EMPTY_PROPOSAL = {
     "edited_sections": [],
 }
 
-# The intake questions asked before the chat begins. Each one feeds a specific
-# section of the proposal, so answering them drafts the document rather than
-# just briefing the advisor — and the panel is never empty when you arrive.
+# Historical: the intake form that rendered these questions is gone. The UI
+# now starts every project straight in the advisor chat, which interviews for
+# the same ground one question at a time — Bamshad's "structured interview
+# flow", and unlike the form it can't seed vague answers into proposal
+# sections past the Stage-1 specificity gates. Kept because the create
+# endpoint still accepts intake payloads (API callers, older clients), and
+# each key still maps to the proposal section it seeds.
 PROJECT_INTAKE = [
     {"key": "background",
      "label": "What are you investigating, and why does it matter now?",

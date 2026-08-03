@@ -38,16 +38,6 @@
 #detail-people-slot .person:hover .person-remove,.person-remove:focus-visible{opacity:1}
 .person-remove:hover{background:#F5EAEA;color:var(--scarlet)}
 
-/* ── Intake: each question names the section it becomes ── */
-.intake-head{margin-bottom:26px}
-.feeds{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--teal);background:var(--teal-bg);border-radius:999px;padding:3px 10px;margin-left:9px;vertical-align:2px}
-.intake-q{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:20px 22px;margin-bottom:14px}
-.intake-q label{display:block;font-size:15.5px;font-weight:650;margin-bottom:4px;line-height:1.45}
-.intake-hint{font-size:13px;color:var(--ink-3);margin-bottom:12px}
-.intake-actions{display:flex;gap:11px;align-items:center;margin-top:22px;flex-wrap:wrap}
-.intake-note{font-size:13px;color:var(--ink-3)}
-.err{color:#9B2020;font-size:13.5px;min-height:19px;margin-top:10px}
-
 /* ── Detail view ── */
 .detail-proposal{background:var(--paper);border:1px solid var(--paper-line);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:28px 30px}
 .detail-section{margin-bottom:22px}
@@ -76,27 +66,11 @@
           <h1 id="greeting">Your research</h1>
           <p class="lede">Each project has its own proposal, its own conversation, and its own collaborators.</p>
         </div>
-        <button class="btn btn-accent" onclick="showIntake()">New project</button>
+        <button class="btn btn-accent" id="btn-new" onclick="startProject(this)">New project</button>
       </div>
       <!-- Pick up where you left off: the reason most visits happen. -->
       <div id="resume-slot"></div>
       <div id="list-slot"></div>
-    </div>
-
-    <!-- ── Intake view ── -->
-    <div id="intake-view" style="display:none">
-      <a class="back-link" href="#" onclick="showList(); return false;">← All projects</a>
-      <div class="page-head intake-head">
-        <div class="eyebrow">New project</div>
-        <h1>Tell us about the research</h1>
-        <p class="lede">Each answer becomes a section of your proposal. Rough notes are fine — the advisor works through them with you next, and you can edit anything later.</p>
-      </div>
-      <div id="intake-slot"></div>
-      <div class="intake-actions">
-        <button class="btn btn-accent" id="btn-create" onclick="createProject()">Start the conversation →</button>
-        <span class="intake-note">You can leave questions blank and fill them in while you talk.</span>
-      </div>
-      <div class="err" id="intake-err"></div>
     </div>
 
     <!-- ── Detail view ── -->
@@ -140,7 +114,7 @@ const SECTION_LABELS = {
 };
 const SECTION_ORDER = Object.keys(SECTION_LABELS);
 
-let _projects = [], _intake = [];
+let _projects = [];
 let _detailId = null;   // project currently open in the detail view
 
 (async function init() {
@@ -167,7 +141,6 @@ let _detailId = null;   // project currently open in the detail view
 
   const open = new URLSearchParams(location.search).get('open');
   if (open) { showDetail(open); return; }
-  if (!_projects.length) { showIntake(); return; }
   showList();
 })();
 
@@ -176,12 +149,11 @@ async function loadProjects() {
     const res  = await fetch('/api/projects');
     const data = await res.json();
     _projects  = data.projects || [];
-    _intake    = data.intake   || [];
   } catch (e) { _projects = []; }
 }
 
 function hideAll() {
-  ['list-view','intake-view','detail-view'].forEach(id =>
+  ['list-view','detail-view'].forEach(id =>
     document.getElementById(id).style.display = 'none');
 }
 
@@ -198,8 +170,8 @@ function showList() {
     slot.innerHTML = `
       <div class="empty">
         <h3>No projects yet</h3>
-        <p>A project is one piece of research. Answer a few questions about it, talk it through with the advisor, and it becomes a proposal — with collaborators attached.</p>
-        <button class="btn btn-accent" onclick="showIntake()">Start your first project</button>
+        <p>A project is one piece of research. Talk it through with the advisor — it asks the questions, one at a time, and the proposal builds itself beside the conversation.</p>
+        <button class="btn btn-accent" onclick="startProject(this)">Start your first project</button>
       </div>`;
     return;
   }
@@ -260,48 +232,24 @@ function sectionChips(written) {
 }
 
 // ── Intake ───────────────────────────────────────────────────────────────────
-function showIntake() {
-  hideAll();
-  document.getElementById('intake-view').style.display = 'block';
-  document.getElementById('intake-err').textContent = '';
-
-  document.getElementById('intake-slot').innerHTML = _intake.map(q => `
-    <div class="intake-q">
-      <label for="q-${q.key}">${esc(q.label)}<span class="feeds">${esc(q.feeds)}</span></label>
-      <div class="intake-hint">${esc(q.hint)}</div>
-      <textarea class="textarea" id="q-${q.key}" placeholder="Your notes…"></textarea>
-    </div>`).join('');
-}
-
-async function createProject() {
-  const btn = document.getElementById('btn-create');
-  const err = document.getElementById('intake-err');
-  const intake = {};
-  _intake.forEach(q => {
-    const el = document.getElementById('q-' + q.key);
-    if (el) intake[q.key] = el.value;
-  });
-
-  if (!Object.values(intake).some(v => (v || '').trim())) {
-    err.textContent = 'Answer at least one question so the advisor has somewhere to start.';
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = 'Starting…';
-  err.textContent = '';
+// Chat-first, per Bamshad's guidance: the advisor IS the intake. A form of
+// open questions accepted whatever vagueness it was given and seeded it
+// straight into proposal sections, bypassing the Stage-1 specificity gates the
+// advisor enforces one question at a time. Anyone with existing notes can
+// paste them as their first chat message — Stage 1 interviews from there.
+async function startProject(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
   try {
     const res  = await fetch('/api/projects', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ intake })
+      body: JSON.stringify({ start_blank: true })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not start the project');
     window.location.href = `/advisor?project=${data.project_id}`;
   } catch (e) {
-    err.textContent = e.message;
-    btn.disabled = false;
-    btn.textContent = 'Start the conversation →';
+    alert(e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'New project'; }
   }
 }
 
