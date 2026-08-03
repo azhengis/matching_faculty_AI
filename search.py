@@ -166,15 +166,36 @@ class _SPECTER2Adapter:
 
 
 def load_model():
-    """Return the best available SPECTER2 model.
+    """Return the best available SPECTER2 encoder.
 
     Priority order:
-      1. Fine-tuned DePaul model (FINETUNED_MODEL env var set after running
-         pipeline/10_finetune_specter2.py)
+      0. ONNX int8  — what the deployed app uses. No torch, ~50MB of runtime
+         against torch's ~200MB and 110MB of weights against 440MB. With torch
+         the app measured ~834MB resident on Linux and OOMed a 512MB instance.
+      1. Fine-tuned DePaul model (FINETUNED_MODEL, from pipeline/10)
       2. SPECTER2 + proximity adapter  (best off-the-shelf accuracy)
-      3. SPECTER2 base  (fallback if 'adapters' library not installed)
+      3. SPECTER2 base  (fallback if 'adapters' is not installed)
+
+    ONNX comes FIRST but is skipped when FINETUNED_MODEL is set, so fine-tuning
+    experiments still run against their own weights.
+
+    On mixing int8 queries with the fp32-built index: measured, it is fine —
+    92% top-5 overlap and 10/10 top-1 agreement against the fp32 reference,
+    slightly BETTER than rebuilding the index in int8 (88%), because
+    quantizing only the query perturbs one side instead of both. So the
+    committed indexes stay as sentence-transformers built them.
     """
     finetuned_path = os.environ.get("FINETUNED_MODEL", "")
+
+    if not finetuned_path:
+        try:
+            import onnx_encoder
+            if onnx_encoder.is_available():
+                print("  Using ONNX int8 SPECTER2 (no torch)")
+                return onnx_encoder.OnnxEncoder()
+        except ImportError:
+            pass  # onnxruntime absent — fall through to the torch paths
+
     if finetuned_path and os.path.isdir(finetuned_path):
         from sentence_transformers import SentenceTransformer
         print(f"  Using fine-tuned DePaul model: {finetuned_path}")

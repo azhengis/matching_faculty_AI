@@ -26,3 +26,6 @@ __pycache__/
 tests/
 docs/
 *.ipynb
+
+# Built in the builder stage; a stale local copy must not shadow it.
+onnx_model/

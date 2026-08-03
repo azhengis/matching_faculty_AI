@@ -28,3 +28,6 @@ models/
 
 # Generated deployment seed (rebuild with pipeline/make_seed_db.py)
 seed_faculty.db
+
+# Exported ONNX model (built by pipeline/13_export_onnx.py, ~110MB)
+onnx_model/
