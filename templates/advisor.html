@@ -389,7 +389,7 @@ async function openProject(projectId, opts = {}) {
   await callAdvisorAPI(
     opts.fresh        ? "Let's start a new project."
     : project.session_id ? 'I’m back — where were we?'
-                         : 'Hello — I just filled in the intake for this project.');
+                         : 'Hello — this project already has some sections written.');
 }
 
 // Once a project is chosen the menu is stale — drop it so it can't be re-clicked.
