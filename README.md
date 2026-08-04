@@ -46,7 +46,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
 export ANTHROPIC_API_KEY="sk-..."                  # or any LiteLLM-supported provider
-export CHATBOT_MODEL="anthropic/claude-haiku-4-5"
+export CHATBOT_MODEL="anthropic/claude-sonnet-5"
 .venv/bin/python3 -m uvicorn web_app:app --port 8000
 ```
 
@@ -66,7 +66,7 @@ variable. `CHATBOT_MODEL="ollama/llama3.2:3b"` runs it against a free local mode
 | **SPECTER2 + proximity adapter** | Better retrieval accuracy than the base model | Used automatically **if the `adapters` package is installed**. It currently isn't, so the app runs on `specter2_base` — `pip install adapters` is the upgrade. |
 | **Fine-tuned SPECTER2** (`models/specter2_depaul_*`) | SPECTER2 further trained on synthetic (query → faculty bio) pairs | Optional, and takes priority over both above. Set `FINETUNED_MODEL` to the directory to use it. See pipeline steps 9–10. |
 | **ms-marco-MiniLM-L-12-v2** cross-encoder | Reranks the top ~25 candidates | ~120MB, ~80ms for 25 pairs, no GPU. Catches cases where embedding similarity is fooled by abstract-sounding text. |
-| **LLM via LiteLLM** (Claude Haiku 4.5 by default) | Query expansion, match explanation, and the advisor conversation | Provider-agnostic — no reason to lock the project to one vendor. |
+| **LLM via LiteLLM** (Claude Sonnet by default) | Query expansion, match explanation, and the advisor conversation | Provider-agnostic — no reason to lock the project to one vendor. |
 | **OpenAlex** | Publications, research topics, live literature search | Free, open, no API key. |
 | **Semantic Scholar + CrossRef** | Publication fallback | Catches people OpenAlex misses. |
 | **FastAPI + SQLite** | Web app and storage | 1,389 rows is a small dataset. A single file that moves with the repo beats a server. |

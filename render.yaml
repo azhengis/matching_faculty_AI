@@ -22,7 +22,7 @@ services:
     healthCheckPath: /login          # returns 200 without a session; / redirects
     envVars:
       - key: CHATBOT_MODEL
-        value: anthropic/claude-haiku-4-5
+        value: anthropic/claude-sonnet-5   # Sonnet, not Haiku: the advisor is the product, and Haiku kept grading answers ("that's a big canvas") through four prompt iterations. ~3x per-token cost, still tens of cents per full proposal conversation.
       - key: ANTHROPIC_API_KEY
         sync: false                  # set in the dashboard; never commit it
       # DATA_DIR is intentionally unset: with no disk attached, the app falls

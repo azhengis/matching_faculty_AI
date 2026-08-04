@@ -165,7 +165,7 @@ Create a **Web Service** from the repo, Docker environment.
 
 - Instance type: **Standard** or larger (2GB). Starter is 512MB and will OOM.
 - Add a **Disk**: 3GB, mount path `/data`.
-- Environment: `DATA_DIR=/data`, `CHATBOT_MODEL=anthropic/claude-haiku-4-5`,
+- Environment: `DATA_DIR=/data`, `CHATBOT_MODEL=anthropic/claude-sonnet-5`,
   and `ANTHROPIC_API_KEY` as a secret.
 - Health check path: `/login` (it returns 200 without a session; `/` redirects).
 
@@ -202,7 +202,7 @@ After=network.target
 [Service]
 WorkingDirectory=/opt/faculty-matcher
 Environment=DATA_DIR=/var/lib/faculty-matcher
-Environment=CHATBOT_MODEL=anthropic/claude-haiku-4-5
+Environment=CHATBOT_MODEL=anthropic/claude-sonnet-5
 EnvironmentFile=/etc/faculty-matcher.env      # holds ANTHROPIC_API_KEY, chmod 600
 ExecStart=/opt/faculty-matcher/.venv/bin/uvicorn web_app:app --host 127.0.0.1 --port 8000
 Restart=always
