@@ -36,17 +36,32 @@ RUN grep -v '^torch==' requirements-build.txt > ./build-filtered.txt \
     && pip install --no-cache-dir -r ./build-filtered.txt \
     && rm ./build-filtered.txt
 
-COPY . .
+# NO `COPY . .` IN THIS STAGE — that is the caching. Each expensive step
+# copies exactly the files it reads, so its layer is reused unless those
+# specific files change. With the whole repo copied first, every commit —
+# including a one-line prompt tweak — invalidated everything below and paid
+# the full model export and index build again: ~30 minutes per deploy while
+# iterating on wording. With targeted copies, those commits rebuild only the
+# cheap runtime stage and deploy in a few minutes.
 
-# Export + quantize: 437MB fp32 -> 110MB int8. The script deletes the fp32
-# graph afterwards so it cannot reach the runtime image by accident.
+# Export + quantize: 437MB fp32 -> 110MB int8. Self-contained script (no
+# project imports — verified by AST scan; keep it that way or this layer's
+# file set below must grow with it). Deletes the fp32 graph afterwards so it
+# cannot reach the runtime image by accident. Reruns only when the script
+# itself (or a layer above) changes.
+COPY pipeline/13_export_onnx.py pipeline/
 RUN python pipeline/13_export_onnx.py --out /build/onnx_model
 
 # Build the indexes with the fp32 reference model, NOT the quantized one.
 # Measured: serving int8 queries against an fp32-built index gives 92% top-5
 # overlap and 10/10 top-1 agreement against the fp32 reference, versus 88%
 # when the index is rebuilt in int8 — quantizing one side beats quantizing
-# both. It is also far faster to build.
+# both. Needs only search.py and the seed: search.py's onnx_encoder import is
+# lazy inside load_model(), which this step never calls (verified by running
+# exactly this in a directory containing only these two files). Reruns only
+# when search.py or the seed data changes — which is when it SHOULD.
+COPY search.py ./
+COPY data/seed_faculty.db.gz data/
 RUN gunzip -c data/seed_faculty.db.gz > /build/faculty.db \
     && python -c "\
 import search as sm; \
