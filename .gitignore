@@ -31,3 +31,6 @@ seed_faculty.db
 
 # Exported ONNX model (built by pipeline/13_export_onnx.py, ~110MB)
 onnx_model/
+
+# Conversation eval transcripts (generated per run; send, don't commit)
+evals/transcripts/
