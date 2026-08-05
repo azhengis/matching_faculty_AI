@@ -386,10 +386,16 @@ async function openProject(projectId, opts = {}) {
   // conversation is actually starting (fresh project or empty history).
   if (project.chat_history && project.chat_history.length > 0) return;
 
+  // Kickoffs must assert NOTHING about the project's contents. An earlier
+  // variant said "this project already has some sections written" — for a
+  // blank project that is a lie, and the model believed it: it asked the
+  // researcher to paste a draft that never existed. The server-side prompt
+  // dispatches the first message on the ACTUAL saved proposal, so the kickoff
+  // only needs to open the conversation, never to describe it.
   await callAdvisorAPI(
     opts.fresh        ? "Let's start a new project."
     : project.session_id ? 'I’m back — where were we?'
-                         : 'Hello — this project already has some sections written.');
+                         : 'Hello.');
 }
 
 // Once a project is chosen the menu is stale — drop it so it can't be re-clicked.
