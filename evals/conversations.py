@@ -133,14 +133,14 @@ def check_reply(reply: str, is_opener: bool) -> list[str]:
 
 def run():
     s = requests.Session()
-    r = s.post(f"{BASE}/api/auth/login", json={"email": EMAIL, "password": PASSWORD})
+    r = s.post(f"{BASE}/api/auth/login", json={"email": EMAIL, "password": PASSWORD}, timeout=60)
     if r.status_code != 200:
-        s.post(f"{BASE}/api/auth/signup", json={"email": EMAIL, "password": PASSWORD})
+        s.post(f"{BASE}/api/auth/signup", json={"email": EMAIL, "password": PASSWORD}, timeout=60)
         s.post(f"{BASE}/api/profile/save", json={
             "faculty_id": None, "name": "Vincent Tester",
             "bio_text": "Professor of sociology studying housing insecurity and "
                         "eviction in Chicago.",
-            "confirmed_paper_ids": [], "research_interests": ["housing"]})
+            "confirmed_paper_ids": [], "research_interests": ["housing"]}, timeout=60)
 
     OUT.mkdir(exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
@@ -148,7 +148,7 @@ def run():
     summary = []
 
     for sc in SCENARIOS:
-        pid = s.post(f"{BASE}/api/projects", json={"start_blank": True}).json()["project_id"]
+        pid = s.post(f"{BASE}/api/projects", json={"start_blank": True}, timeout=60).json()["project_id"]
         lines = [f"# {sc['name']}", "", f"*{sc['why']}*", ""]
         sc_problems = []
 
