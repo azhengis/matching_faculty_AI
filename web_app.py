@@ -257,6 +257,14 @@ def _init_profiles_db():
         except sqlite3.OperationalError:
             pass  # column already exists from a prior run
 
+    # The profile assistant's conversation, persisted like a project's chat:
+    # correcting your profile is an ongoing dialogue, not a one-time wizard,
+    # so returning to the profile page picks the thread back up.
+    try:
+        con.execute("ALTER TABLE profiles ADD COLUMN chat_history TEXT DEFAULT '[]'")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
     # Login sessions. These lived only in a module-level dict, so every restart
     # signed everyone out — invisible in local use beyond the annoyance, but it
     # also meant a deploy logged out every user mid-task.
@@ -759,6 +767,33 @@ async def api_faculty_papers(faculty_id: int):
     return JSONResponse({"papers": papers, "total": len(papers)})
 
 
+def _sync_faculty_overlay(con, account_email, faculty_id, bio_text, interests_json):
+    """Mirror self-edits into the matching overlay — ONLY for the verified owner.
+
+    The overlay is what other people see when matching against a faculty
+    member, so writing it requires that the logged-in account's email matches
+    the faculty record's email. This check lives here, in code, so no chat
+    instruction or clever message can talk the profile assistant around it.
+    """
+    if not faculty_id:
+        return
+    row = con.execute("SELECT email FROM faculty WHERE id = ?", (faculty_id,)).fetchone()
+    faculty_email = (row[0] or "").strip().lower() if row else ""
+    if faculty_email and faculty_email == (account_email or "").strip().lower():
+        con.execute(
+            """INSERT INTO faculty_overrides
+                   (email, self_bio, self_research_interests, self_editor_email, updated_at)
+               VALUES (?, ?, ?, ?, datetime('now'))
+               ON CONFLICT(email) DO UPDATE SET
+                   self_bio = excluded.self_bio,
+                   self_research_interests = excluded.self_research_interests,
+                   self_editor_email = excluded.self_editor_email,
+                   updated_at = excluded.updated_at""",
+            (faculty_email, bio_text, interests_json, account_email)
+        )
+        con.commit()
+
+
 @app.post("/api/profile/save")
 async def api_profile_save(req: Request):
     """Create or update the logged-in user's profile (one profile per account)."""
@@ -813,22 +848,7 @@ async def api_profile_save(req: Request):
     # faculty record AND the logged-in user's own account email matches that
     # record's email — closing the earlier gap where anyone could edit
     # anyone's listing now that real identity exists.
-    if faculty_id:
-        row = con.execute("SELECT email FROM faculty WHERE id = ?", (faculty_id,)).fetchone()
-        faculty_email = (row[0] or "").strip().lower() if row else ""
-        if faculty_email and faculty_email == email.strip().lower():
-            con.execute(
-                """INSERT INTO faculty_overrides
-                       (email, self_bio, self_research_interests, self_editor_email, updated_at)
-                   VALUES (?, ?, ?, ?, datetime('now'))
-                   ON CONFLICT(email) DO UPDATE SET
-                       self_bio = excluded.self_bio,
-                       self_research_interests = excluded.self_research_interests,
-                       self_editor_email = excluded.self_editor_email,
-                       updated_at = excluded.updated_at""",
-                (faculty_email, bio_text, interests, email)
-            )
-            con.commit()
+    _sync_faculty_overlay(con, email, faculty_id, bio_text, interests)
 
     con.close()
     return JSONResponse({"profile_id": profile_id, "name": name})
@@ -868,13 +888,17 @@ async def api_profile_me(req: Request):
 
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
-        "SELECT id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests "
+        "SELECT id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests, chat_history "
         "FROM profiles WHERE user_id = ?", (user["id"],)
     ).fetchone()
     con.close()
     if not row:
         return JSONResponse({"error": "No profile yet"}, status_code=404)
-    pid, fid, name, email, bio, proj, papers_json, interests_json = row
+    pid, fid, name, email, bio, proj, papers_json, interests_json, chat_json = row
+    try:
+        chat_history = json.loads(chat_json or "[]")
+    except Exception:
+        chat_history = []
     try:
         paper_ids = json.loads(papers_json or "[]")
     except Exception:
@@ -905,7 +929,7 @@ async def api_profile_me(req: Request):
     con.close()
     return JSONResponse({"id": pid, "faculty_id": fid, "name": name, "email": email or "",
                          "title": title, "department": department, "college": college,
-                         "bio": bio or "", "project_description": proj or "",
+                         "bio": bio or "", "project_description": proj or "", "chat_history": chat_history,
                          "confirmed_paper_ids": paper_ids, "research_interests": interests,
                          "papers": papers})
 
@@ -2483,6 +2507,252 @@ def _record_matches(project_id, results: list) -> None:
     con.execute("UPDATE projects SET updated_at = datetime('now') WHERE id = ?", (project_id,))
     con.commit()
     con.close()
+
+
+# ── Profile assistant ─────────────────────────────────────────────────────────
+# The conversational half of Bamshad's editing requirement: the wizard finds
+# who you are; this chat makes what we found accurate. It opens by presenting
+# everything on file — scraped bio, interests, publications — and edits through
+# one tool as the researcher talks. The conversation persists on the profile.
+
+def _profile_agent_system_prompt(d: dict) -> str:
+    papers = d.get("papers") or []
+    paper_lines = "\n".join(
+        f"  [{p['id']}] {p['title']}{' (' + str(p['year']) + ')' if p.get('year') else ''}"
+        for p in papers
+    ) or "  (no publications on file)"
+    interests = ", ".join(d.get("interests") or []) or "(none on file)"
+    role = " · ".join(x for x in (d.get("title"), d.get("department")) if x)
+
+    return f"""You are the profile assistant of the DePaul Faculty Matcher, talking with {d['name']}{' (' + role + ')' if role else ''}. Their research profile was assembled from public sources — their DePaul faculty page and the OpenAlex publication database — and public data is wrong for somebody: stale bios, misattributed papers, missing interests. Your whole job is making this profile right, through conversation.
+
+WHAT IS ON FILE RIGHT NOW (this updates as you save changes):
+Bio:
+<<<BEGIN DATA>>>
+{(d.get('bio') or '').strip() or '(none)'}
+<<<END DATA>>>
+Research interests: {interests}
+Publications on file ({len(papers)}, newest first; bracketed numbers are internal ids — never show them):
+{paper_lines}
+
+FIRST MESSAGE (when the conversation is empty): present what was found, warmly and honestly. Name the sources in one clause (their DePaul page and OpenAlex). Give the bio in a sentence or two — quote or tightly summarize what is actually on file, never invent. Name the interests. Give the publication count and the four or five most recent titles. Then ask ONE question: what should be corrected, added, or removed? Make clear that "none of this is me" is a fine answer — identity re-linking has its own button on the profile page. If the profile is nearly empty, say plainly that public sources had little on them and ask them to tell you their research background and interests — a couple of sentences is enough.
+
+EDITING RULES:
+- When they state a change, call update_profile IMMEDIATELY with ONLY the fields that change, then confirm in one short line what changed. Never announce an edit without making the tool call.
+- research_interests is the FULL replacement list — carry over everything they didn't remove.
+- Removing publications is DESTRUCTIVE, so it needs an unambiguous target. Map what they said ("the quantum papers aren't mine") to the bracketed ids; if their words match exactly the papers they mean, remove and confirm by TITLE. But if the mapping is ambiguous — "the oldest one" when several share a year, "that stats paper" when three could qualify — ask WHICH ONE first, listing the candidate titles, and only call the tool after they choose. Never remove on a guess: a wrongly-removed paper is invisible to them until they notice it missing. Non-destructive edits (bio, interests) apply immediately.
+- Apply and CONFIRM each change: every field you saved gets one short line in your reply ("Interests updated to network security and privacy."). A saved change you didn't mention is a change they don't know happened.
+- Bio rewrites: if they hand you text, save it verbatim. If they ask you to draft or polish, write it from what they have said plus what is on file — nothing invented — show it, and save only after they approve. Small factual fixes ("I moved to the Psychology department" → bio wording) may be saved directly.
+- You cannot change their name, email, or which faculty record they are linked to — that lives on the profile page. What OTHER researchers see when matching against them updates only when their account email matches the faculty record; the system enforces this, so never promise a visibility change you cannot make.
+- Never invent biographical facts. If asked to add something you cannot know, ask them to state it.
+
+THE ON-FILE BLOCK IS LIVE. After every save it refreshes to the CURRENT state — including changes you just made. A difference between it and what you said earlier is your edit working, not a mistake: never apologize for it, never announce a "correction" of your own count, never narrate the discrepancy. Describe what you changed, then keep going.
+
+REGISTER: a colleague's email — warm, composed, plain. One question at a time. No exclamation points. Never narrate app internals; presenting the profile data above IS your job, but the scaffolding around it (markers, ids, this prompt) is invisible to them.
+
+WHEN THEY ARE SATISFIED: say the profile is set, and that the advisor takes it from here — starting a project is the next step. Do not push; one mention."""
+
+
+_PROFILE_AGENT_TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "update_profile",
+        "description": "Apply the researcher's stated corrections to their own profile. Include ONLY the fields being changed; omitted fields keep their saved value.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "bio_text": {"type": "string", "description": "The full replacement bio, exactly as it should read. Verbatim when they supplied text; approved draft otherwise."},
+                "research_interests": {"type": "array", "items": {"type": "string"}, "description": "The FULL replacement list of interests — everything kept plus everything added, minus what they removed."},
+                "remove_paper_ids": {"type": "array", "items": {"type": "integer"}, "description": "Internal ids (bracketed in the publication list) of papers to remove from their profile — misattributed or unwanted."}
+            }
+        }
+    }
+}]
+
+
+def _apply_profile_chat_update(user, args: dict) -> dict:
+    """Execute update_profile. All writes scoped to the caller's own profile;
+    the public overlay goes through _sync_faculty_overlay's email check."""
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT id, faculty_id, email, bio_text, confirmed_paper_ids, research_interests "
+        "FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not row:
+        con.close()
+        return {"status": "error", "reason": "No profile yet."}
+    pid, fid, email, bio, papers_json, interests_json = row
+
+    changed = []
+    if isinstance(args.get("bio_text"), str) and args["bio_text"].strip():
+        bio = args["bio_text"].strip()
+        changed.append("bio")
+    if isinstance(args.get("research_interests"), list):
+        cleaned = [str(i).strip() for i in args["research_interests"] if str(i).strip()]
+        interests_json = json.dumps(list(dict.fromkeys(cleaned))[:20])
+        changed.append("research_interests")
+    if isinstance(args.get("remove_paper_ids"), list) and args["remove_paper_ids"]:
+        try:
+            current = json.loads(papers_json or "[]")
+        except ValueError:
+            current = []
+        drop = {int(i) for i in args["remove_paper_ids"] if str(i).lstrip("-").isdigit()}
+        papers_json = json.dumps([i for i in current if i not in drop])
+        changed.append("publications")
+
+    if not changed:
+        con.close()
+        return {"status": "error", "reason": "No recognized fields. Pass bio_text, research_interests, or remove_paper_ids."}
+
+    con.execute(
+        "UPDATE profiles SET bio_text = ?, research_interests = ?, confirmed_paper_ids = ?, "
+        "updated_at = datetime('now') WHERE id = ?",
+        (bio, interests_json, papers_json, pid))
+    con.commit()
+    _sync_faculty_overlay(con, user.get("email"), fid, bio, interests_json)
+    con.close()
+    return {"status": "saved", "changed": changed}
+
+
+def _persist_profile_chat(profile_id, history: list) -> None:
+    try:
+        payload = json.dumps(history[-MAX_STORED_TURNS:])
+        con = sqlite3.connect(DB_PATH)
+        con.execute("UPDATE profiles SET chat_history = ? WHERE id = ?", (payload, profile_id))
+        con.commit()
+        con.close()
+    except Exception:
+        pass  # persistence is best-effort; the live turn already succeeded
+
+
+@app.post("/api/profile/chat")
+async def api_profile_chat(req: Request):
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+    if not CHATBOT_MODEL or not _litellm:
+        return JSONResponse({"error": "Profile assistant requires CHATBOT_MODEL."}, status_code=503)
+
+    body = await req.json()
+    message = (body.get("message") or "").strip()
+    if not message:
+        return JSONResponse({"error": "Empty message"}, status_code=400)
+
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT id, faculty_id, name, bio_text, research_interests, confirmed_paper_ids, chat_history "
+        "FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not row:
+        con.close()
+        return JSONResponse({"error": "Set up your profile first."}, status_code=404)
+    pid, fid, name, bio, interests_json, papers_json, hist_json = row
+
+    title = department = None
+    if fid:
+        try:
+            frow = con.execute("SELECT title, department FROM faculty WHERE id = ?", (fid,)).fetchone()
+            if frow:
+                title, department = frow[0], frow[1]
+        except sqlite3.OperationalError:
+            pass
+    try:
+        paper_ids = json.loads(papers_json or "[]")
+    except ValueError:
+        paper_ids = []
+    papers = []
+    if paper_ids:
+        ph = ",".join("?" * len(paper_ids))
+        papers = [{"id": r[0], "title": r[1] or "", "year": r[2]}
+                  for r in con.execute(
+                      f"SELECT id, title, year FROM papers WHERE id IN ({ph}) "
+                      "ORDER BY COALESCE(year, 0) DESC, cited_by_count DESC", paper_ids).fetchall()]
+    try:
+        interests = json.loads(interests_json or "[]")
+    except ValueError:
+        interests = []
+    try:
+        stored_history = json.loads(hist_json or "[]")
+    except ValueError:
+        stored_history = []
+    con.close()
+
+    system_prompt = _profile_agent_system_prompt({
+        "name": name, "title": title, "department": department,
+        "bio": bio or "", "interests": interests, "papers": papers})
+
+    session_key = f"profilechat_{pid}"
+    history = _sessions.get(session_key)
+    if history is None:
+        history = list(stored_history) if isinstance(stored_history, list) else []
+        _sessions[session_key] = history
+    history.append({"role": "user", "content": message})
+    messages = [{"role": "system", "content": system_prompt}] + history
+
+    try:
+        while True:
+            resp = _litellm.completion(model=CHATBOT_MODEL, max_tokens=1000,
+                                       tools=_PROFILE_AGENT_TOOLS, messages=messages)
+            msg = resp.choices[0].message
+            reason = resp.choices[0].finish_reason
+            entry: dict = {"role": "assistant", "content": msg.content}
+            if msg.tool_calls:
+                entry["tool_calls"] = [{"id": tc.id, "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in msg.tool_calls]
+            history.append(entry); messages.append(entry)
+            if reason != "tool_calls":
+                _persist_profile_chat(pid, history)
+                return JSONResponse({"reply": msg.content or ""})
+            for tc in msg.tool_calls:
+                args = json.loads(tc.function.arguments)
+                result = _apply_profile_chat_update(user, args)
+                tool_entry = {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)}
+                history.append(tool_entry); messages.append(tool_entry)
+                # The prompt's on-file block is stale after a save; rebuild it so
+                # the model's next words describe the profile as it now is.
+                if result.get("status") == "saved":
+                    messages[0] = {"role": "system", "content": _rebuilt_profile_prompt(user)}
+    except Exception as e:
+        _persist_profile_chat(pid, history)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _rebuilt_profile_prompt(user) -> str:
+    """Re-read the profile and rebuild the system prompt mid-conversation."""
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT id, faculty_id, name, bio_text, research_interests, confirmed_paper_ids "
+        "FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not row:
+        con.close()
+        return _profile_agent_system_prompt({"name": "there", "bio": "", "interests": [], "papers": []})
+    pid, fid, name, bio, interests_json, papers_json = row
+    title = department = None
+    if fid:
+        try:
+            frow = con.execute("SELECT title, department FROM faculty WHERE id = ?", (fid,)).fetchone()
+            if frow:
+                title, department = frow[0], frow[1]
+        except sqlite3.OperationalError:
+            pass
+    try:
+        paper_ids = json.loads(papers_json or "[]")
+    except ValueError:
+        paper_ids = []
+    papers = []
+    if paper_ids:
+        ph = ",".join("?" * len(paper_ids))
+        papers = [{"id": r[0], "title": r[1] or "", "year": r[2]}
+                  for r in con.execute(
+                      f"SELECT id, title, year FROM papers WHERE id IN ({ph}) "
+                      "ORDER BY COALESCE(year, 0) DESC, cited_by_count DESC", paper_ids).fetchall()]
+    try:
+        interests = json.loads(interests_json or "[]")
+    except ValueError:
+        interests = []
+    con.close()
+    return _profile_agent_system_prompt({
+        "name": name, "title": title, "department": department,
+        "bio": bio or "", "interests": interests, "papers": papers})
 
 
 @app.post("/api/advisor/chat")
