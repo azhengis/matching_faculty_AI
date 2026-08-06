@@ -356,10 +356,16 @@ async function openProject(projectId, opts = {}) {
 
     // Scripted kickoff messages are sent to the API without ever being shown,
     // so don't show them on replay either.
+    // Every kickoff string this app has EVER sent — old ones stay listed
+    // because they live on in stored histories, and an unlisted one renders
+    // as a ghost message the user never typed.
     const scripted = [
       "Let's start a new project.",
       'I’m back — where were we?',
       'Hello — I just filled in the intake for this project.',
+      'Hello — this project already has some sections written.',
+      'Hello — this project already has some sections written',
+      'Hello.',
     ];
 
     // Render each stored message (except tool messages)

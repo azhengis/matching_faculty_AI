@@ -146,6 +146,25 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 .btn-download{display:inline-block;margin-top:18px;padding:11px 19px;background:var(--navy);color:#fff;border:none;border-radius:var(--r-sm);font-size:13.5px;font-weight:600;cursor:pointer;text-decoration:none;box-shadow:var(--sh-sm);transition:background .15s}
 .btn-download:hover{background:var(--navy-lift)}
 
+/* ── Profile assistant chat ── */
+.pchat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);margin-bottom:22px;display:flex;flex-direction:column}
+.pchat-head{padding:14px 20px 0}
+.pchat-hint{font-size:12.5px;color:var(--ink-3);margin-left:10px}
+.pchat-messages{padding:14px 20px;max-height:420px;min-height:120px;overflow-y:auto;display:flex;flex-direction:column;gap:11px}
+.pmsg{display:flex;gap:9px;align-items:flex-start}
+.pmsg.user{flex-direction:row-reverse}
+.pavatar{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;background:var(--navy)}
+.pmsg.user .pavatar{background:var(--teal)}
+.pbubble{padding:11px 15px;max-width:82%;line-height:1.6;font-size:14px;border-radius:var(--r-md);background:var(--canvas);border:1px solid var(--border)}
+.pmsg.user .pbubble{background:var(--navy);color:#fff;border:none;border-bottom-right-radius:4px}
+.pbubble p{margin-bottom:7px}.pbubble p:last-child{margin-bottom:0}
+.pbubble ul,.pbubble ol{padding-left:18px;margin-bottom:7px}.pbubble li{margin-bottom:2px}
+.pbubble strong{font-weight:600}
+.pchat-inputrow{display:flex;gap:9px;padding:12px 20px 16px;border-top:1px solid var(--border)}
+.pchat-input{flex:1;padding:10px 13px;font-size:14px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;resize:none}
+.pchat-input:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
+.pchat-typing{font-size:13px;color:var(--ink-3);padding:2px 0}
+
 /* ── Loading ── */
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -166,6 +185,17 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 
   <!-- Full profile view (shown once the logged-in user has a saved profile) -->
   <div id="profile-view" style="display:none">
+   <!-- The profile assistant: "here's what we found — what should I fix?"
+        This conversation persists; corrections happen here in plain words,
+        and the form below stays as the manual fallback. -->
+   <div class="pchat" id="pchat">
+     <div class="pchat-head"><span class="section-tag">Profile assistant</span><span class="pchat-hint">Tell it what to fix — “that paper isn’t mine”, “add health informatics to my interests”.</span></div>
+     <div class="pchat-messages" id="pchat-messages"></div>
+     <div class="pchat-inputrow">
+       <textarea class="pchat-input" id="pchat-input" rows="1" placeholder="What should be corrected, added, or removed?"></textarea>
+       <button class="btn-primary" id="pchat-send" onclick="pchatSend()">Send</button>
+     </div>
+   </div>
    <div class="split">
     <div class="profile-summary">
       <div class="pv-header">
@@ -406,6 +436,7 @@ function showProfileView(profile) {
   _profile = profile;
   document.getElementById('profile-view').style.display = 'block';
   loadDocuments();
+  pchatInit(profile.chat_history || []);
 }
 
 // ── Editing an existing profile ──────────────────────────────────────────────
@@ -445,6 +476,88 @@ async function editProfile() {
 
 // Re-link this account to a different faculty record. Rare, and destructive
 // enough to the rest of the form that it starts from the name search.
+// ── Profile assistant chat ───────────────────────────────────────────────────
+function pchatMd(text) {
+  let h = esc(text);
+  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>');
+  h = h.replace(/^[-•]\s+(.+)$/gm, '<li>$1</li>');
+  h = h.replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>' + m + '</ul>');
+  h = h.replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>');
+  return '<p>' + h + '</p>';
+}
+
+function pchatBubble(role, html) {
+  const box = document.getElementById('pchat-messages');
+  const div = document.createElement('div');
+  div.className = 'pmsg ' + role;
+  const who = role === 'user' ? 'You' : 'AI';
+  div.innerHTML = `<div class="pavatar">${who}</div><div class="pbubble">${html}</div>`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function pchatTyping(on) {
+  let t = document.getElementById('pchat-typing');
+  if (on && !t) {
+    t = document.createElement('div');
+    t.id = 'pchat-typing'; t.className = 'pchat-typing';
+    t.textContent = 'Thinking…';
+    document.getElementById('pchat-messages').appendChild(t);
+  } else if (!on && t) t.remove();
+}
+
+// Kickoffs are app-sent signals, never shown — same rule as the advisor.
+const PCHAT_SCRIPTED = ['Hello.'];
+
+function pchatInit(history) {
+  const box = document.getElementById('pchat-messages');
+  box.innerHTML = '';
+  (history || []).forEach(m => {
+    if (m.role === 'user' && PCHAT_SCRIPTED.includes(m.content)) return;
+    if (m.role === 'user' && m.content) pchatBubble('user', esc(m.content));
+    else if (m.role === 'assistant' && m.content) pchatBubble('bot', pchatMd(m.content));
+  });
+  // A brand-new profile has no thread yet: fire the hidden kickoff so the
+  // assistant opens with what it found.
+  if (!(history || []).some(m => m.role === 'assistant' && m.content)) {
+    pchatCall('Hello.', true);
+  }
+}
+
+async function pchatCall(message, hidden) {
+  if (!hidden) pchatBubble('user', esc(message));
+  pchatTyping(true);
+  document.getElementById('pchat-send').disabled = true;
+  try {
+    const res  = await fetch('/api/profile/chat', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ message })
+    });
+    const data = await res.json();
+    pchatTyping(false);
+    if (data.error) pchatBubble('bot', '<span style="color:#9B2020">' + esc(data.error) + '</span>');
+    else pchatBubble('bot', pchatMd(data.reply || ''));
+  } catch (e) {
+    pchatTyping(false);
+    pchatBubble('bot', '<span style="color:#9B2020">Network error: ' + esc(e.message) + '</span>');
+  }
+  document.getElementById('pchat-send').disabled = false;
+}
+
+function pchatSend() {
+  const input = document.getElementById('pchat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  pchatCall(msg, false);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target && e.target.id === 'pchat-input' && e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault(); pchatSend();
+  }
+});
+
 function startFresh() {
   document.getElementById('profile-view').style.display = 'none';
   document.getElementById('steps').style.display = 'flex';
@@ -522,14 +635,45 @@ async function selectFaculty(p) {
   _manualName = null;
   _manualEmail = null;
 
-  // Fill step 2 and 3 banners
-  document.getElementById('selected-name').textContent = p.name;
-  document.getElementById('selected-meta').textContent = [p.title, p.dept].filter(Boolean).join(' · ');
+  // First-run goes straight to the assistant: save everything we found —
+  // scraped bio, any self-edits on record, every publication — then land on
+  // the profile view, where the chat opens with "here's what we found" and
+  // the reviewing happens in conversation. The form (Edit bio & publications)
+  // remains the manual fallback.
+  const status = document.getElementById('search-status');
+  status.textContent = 'Setting up your profile…';
+  status.className = 'search-status';
 
-  setStepMode('matched');
-  goToStep(2);
-  loadPapers(p.id);
-  loadOverrides(p.email, p.bio || '');
+  let bio = p.bio || '', interests = [];
+  try {
+    if (p.email) {
+      const r = await fetch('/api/profile/faculty-overrides/' + encodeURIComponent(p.email));
+      if (r.ok) {
+        const d = await r.json();
+        if ((d.self_bio || '').trim()) bio = d.self_bio;
+        if (Array.isArray(d.self_research_interests)) interests = d.self_research_interests;
+      }
+    }
+  } catch (e) {}
+  let ids = [];
+  try {
+    const r = await fetch('/api/profile/papers/' + p.id);
+    if (r.ok) ids = ((await r.json()).papers || []).map(x => x.id);
+  } catch (e) {}
+
+  try {
+    const res = await fetch('/api/profile/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ faculty_id: p.id, name: p.name, bio_text: bio,
+                             confirmed_paper_ids: ids, research_interests: interests })
+    });
+    if (!res.ok) throw new Error('save failed');
+    const me = await fetch('/api/profile/me');
+    if (me.ok) { showProfileView(await me.json()); return; }
+  } catch (e) {
+    status.textContent = 'Could not set up the profile — please try again.';
+    status.className = 'search-status err';
+  }
 }
 
 function showManualEntry() {
@@ -548,12 +692,20 @@ function continueManually() {
   _manualName = name;
   _manualEmail = document.getElementById('manual-email').value.trim();
 
-  document.getElementById('selected-name').textContent = name;
-  document.getElementById('selected-meta').textContent = 'Manual profile';
-
-  setStepMode('manual');
-  goToStep(2);
-  loadOverrides(null);
+  // Nothing to prefill for a manual profile — save the bare identity and let
+  // the assistant ask for background and interests conversationally.
+  fetch('/api/profile/save', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ faculty_id: null, name: name, bio_text: '',
+                           confirmed_paper_ids: [], research_interests: [] })
+  }).then(async res => {
+    if (!res.ok) throw new Error('save failed');
+    const me = await fetch('/api/profile/me');
+    if (me.ok) showProfileView(await me.json());
+  }).catch(() => {
+    document.getElementById('search-status').textContent = 'Could not set up the profile — please try again.';
+    document.getElementById('search-status').className = 'search-status err';
+  });
 }
 
 function setStepMode(mode) {
@@ -690,25 +842,9 @@ async function saveProfile() {
       return;
     }
 
-    // FIRST-RUN setup flows straight into the advisor conversation — profile,
-    // then the problem interview, with no stop at a project list in between.
-    // That's the staged flow the tool is built around: the researcher finishes
-    // saying who they are and is immediately asked what they're working on.
-    // EDITS never do this: someone correcting their bio goes back to their
-    // profile, not into a surprise chat.
-    if (_firstRun) {
-      try {
-        const pres = await fetch('/api/projects', {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ start_blank: true })
-        });
-        const pdata = await pres.json();
-        if (pres.ok) { window.location.href = `/advisor?project=${pdata.project_id}`; return; }
-        // If project creation fails, fall through to the profile view rather
-        // than stranding them on a dead button.
-      } catch (e) {}
-    }
-
+    // The profile assistant owns first-run now: every save path lands on the
+    // profile view, where the chat presents what's on file. The assistant
+    // suggests starting a project once the profile is settled.
     try {
       const meRes = await fetch('/api/profile/me');
       if (meRes.ok) {
