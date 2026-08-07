@@ -86,6 +86,13 @@ MAX_DOCUMENT_CHARS   = 6000       # per document — a full CV blows the context
 # just OpenAlex's politeness convention for the shared pool.
 OPENALEX_BASE      = "https://api.openalex.org"
 OPENALEX_MAILTO    = os.environ.get("OPENALEX_MAILTO", "aruzhanzhengis19@gmail.com")
+
+# Email-only sign-in for demos: type a DePaul email, land in your profile, no
+# password. OFF unless explicitly enabled, and it must stay off anywhere the
+# URL is shared, because it is impersonation by design — anyone who knows a
+# colleague's address becomes them. Enable it for a controlled walkthrough
+# (TEST_LOGIN=1), then turn it off.
+TEST_LOGIN = os.environ.get("TEST_LOGIN", "").strip().lower() in ("1", "true", "yes")
 LIT_SEARCH_RESULTS = 8            # works returned to the advisor per novelty query
 _auth_sessions: dict[str, int] = {}   # session_token → user_id (cache over auth_sessions)
 SESSION_DAYS = 30                     # login lifetime; swept on startup
@@ -620,15 +627,33 @@ async def api_auth_login(req: Request):
     email    = (body.get("email") or "").strip().lower()
     password = body.get("password") or ""
 
+    if not email:
+        return JSONResponse({"error": "Email required."}, status_code=400)
+
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
         "SELECT id, password_hash, password_salt FROM users WHERE email = ?", (email,)
     ).fetchone()
-    con.close()
-    if not row or not auth.verify_password(password, row[1], row[2]):
-        return JSONResponse({"error": "Incorrect email or password."}, status_code=401)
 
-    user_id = row[0]
+    if TEST_LOGIN and not password:
+        # Demo mode: the email IS the credential. Create the account on first
+        # sight so a tester can walk in with a real DePaul address and have the
+        # profile assistant recognise them immediately.
+        if not row:
+            pw_hash, salt = auth.hash_password(secrets.token_urlsafe(32))
+            cur = con.execute(
+                "INSERT INTO users (email, password_hash, password_salt) VALUES (?, ?, ?)",
+                (email, pw_hash, salt))
+            con.commit()
+            user_id = cur.lastrowid
+        else:
+            user_id = row[0]
+        con.close()
+    else:
+        con.close()
+        if not row or not auth.verify_password(password, row[1], row[2]):
+            return JSONResponse({"error": "Incorrect email or password."}, status_code=401)
+        user_id = row[0]
     token = secrets.token_urlsafe(32)
     _start_session(token, user_id)
     response = JSONResponse({"email": email})
@@ -645,6 +670,12 @@ async def api_auth_logout(req: Request):
     response = JSONResponse({"status": "logged_out"})
     response.delete_cookie("session_token")
     return response
+
+
+@app.get("/api/auth/mode")
+async def api_auth_mode():
+    """Whether email-only sign-in is enabled, so the login page can match."""
+    return JSONResponse({"test_login": TEST_LOGIN})
 
 
 @app.get("/api/auth/me")
@@ -1749,8 +1780,10 @@ NEVER narrate the app's internal state to {name}. No "the proposal panel is empt
   - What system, robot, or application context would you use to study it?
   - Why is this problem timely now? (Has something changed in the technology, literature, or application landscape that makes this worth pursuing?)
 
-  If you already have notes, an abstract, or a rough draft, feel free to paste them. Otherwise, we can develop the idea through a few questions.
+  If you already have notes, an abstract, or a rough draft, feel free to paste them. Otherwise, we can develop the idea through a few questions — and if you'd rather ask how this works, or go straight to finding collaborators for work you already have, just say so.
   ---
+
+  THE LAST CLAUSE IS A REAL OFFER, NOT DECORATION. {name} may answer with a question ("how does this work?", "what do you do with what I tell you?") or a request ("just find me people who do causal inference"). Take it at face value: answer the question plainly, or run the collaborator search against what their profile already says, and only return to the interview when they want a proposal. The stages exist to serve them, not to be marched through — a researcher steered into an interview they didn't ask for stops answering honestly.
 
   What must carry over every time: the background sentence built from THEIR profile (skip it silently if the profile is thin — never remark on what you don't have); reassurance BEFORE the questions, not after; the one-sentence path; the three questions adapted to their field, each with a parenthetical that shows what kind of answer fits ("What system, robot, or application context" becomes "What population, setting, or data" for a social scientist, "What corpus, archive, or period" for a humanist); and the paste invitation with the interview alternative. Nothing else — no questions about them personally, and no explaining your starting point in any phrasing (four variants of that have leaked: "the proposal panel is empty", "marked as 'not described yet' in the intake form", "what I can see on my end is a blank slate", "I'm not seeing the content on my end" — the justification IS the leak; the background sentence grounds you in what you DO know, then you simply ask).
 

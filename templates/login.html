@@ -92,6 +92,32 @@ h2{font-family:var(--serif);font-size:26px;font-weight:normal;margin-bottom:6px;
 </div>
 
 <script>
+// Demo mode hides the password field entirely: typing a DePaul email signs
+// you in and the profile assistant greets you by name. The server decides —
+// this only matches the form to it.
+(async function () {
+  try {
+    const r = await fetch('/api/auth/mode');
+    if (!r.ok) return;
+    const { test_login } = await r.json();
+    if (!test_login) return;
+    const pw = document.getElementById('password-input');
+    if (pw) {
+      pw.value = '';
+      const field = pw.closest('.field');
+      if (field) field.style.display = 'none'; else pw.style.display = 'none';
+    }
+    const tabs = document.querySelector('.tabs');
+    if (tabs) tabs.style.display = 'none';
+    const sub = document.getElementById('form-sub');
+    if (sub) sub.textContent = 'Demo sign-in: enter your DePaul email — no password needed.';
+    const btn = document.getElementById('btn-submit');
+    if (btn) btn.textContent = 'Continue';
+    const title = document.getElementById('form-title');
+    if (title) title.textContent = 'Sign in';
+  } catch (e) {}
+})();
+
 let _mode = 'login';
 
 function setMode(mode) {
