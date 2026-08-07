@@ -888,6 +888,76 @@ async def api_profile_save(req: Request):
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
 
 
+@app.post("/api/profile/automatch")
+async def api_profile_automatch(req: Request):
+    """Build a profile from the account email alone, if the directory knows it.
+
+    Most DePaul faculty appear in the scraped directory under their real
+    address, so someone signing in as jdoe@depaul.edu can skip the name search
+    entirely: we find the record, pull the scraped bio (or their own prior
+    self-edit, which outranks it), every publication on file, and hand them
+    straight to the profile assistant.
+
+    Email equality is the same ownership rule the matching overlay uses, so
+    this grants nothing extra — it just spares a click. No match, or a profile
+    that already exists, is a 404 and the caller falls back to the search.
+    """
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    email = (user.get("email") or "").strip().lower()
+    if not email:
+        return JSONResponse({"error": "No email on the account"}, status_code=404)
+
+    con = sqlite3.connect(DB_PATH)
+    if con.execute("SELECT 1 FROM profiles WHERE user_id = ?", (user["id"],)).fetchone():
+        con.close()
+        return JSONResponse({"error": "Profile already exists"}, status_code=404)
+
+    try:
+        frow = con.execute(
+            "SELECT id, name, research_summary FROM faculty WHERE LOWER(TRIM(email)) = ?",
+            (email,)).fetchone()
+    except sqlite3.OperationalError:
+        frow = None
+    if not frow:
+        con.close()
+        return JSONResponse({"error": "No faculty record for this email"}, status_code=404)
+
+    faculty_id, name, scraped_bio = frow
+
+    # A previous self-edit is the person's own words — it outranks the scrape.
+    bio = (scraped_bio or "").strip()
+    interests = []
+    orow = con.execute(
+        "SELECT self_bio, self_research_interests FROM faculty_overrides WHERE email = ?",
+        (email,)).fetchone()
+    if orow:
+        if (orow[0] or "").strip():
+            bio = orow[0].strip()
+        try:
+            interests = json.loads(orow[1] or "[]")
+        except ValueError:
+            interests = []
+
+    paper_ids = [r[0] for r in con.execute(
+        "SELECT id FROM papers WHERE faculty_id = ? "
+        "ORDER BY COALESCE(year, 0) DESC, cited_by_count DESC", (faculty_id,)).fetchall()]
+
+    con.execute(
+        """INSERT INTO profiles
+               (user_id, faculty_id, name, email, bio_text, project_description,
+                confirmed_paper_ids, research_interests, updated_at)
+           VALUES (?, ?, ?, ?, ?, '', ?, ?, datetime('now'))""",
+        (user["id"], faculty_id, name, email, bio,
+         json.dumps(paper_ids), json.dumps(interests)))
+    con.commit()
+    con.close()
+    return JSONResponse({"matched": True, "name": name, "faculty_id": faculty_id,
+                         "papers": len(paper_ids)})
+
+
 @app.post("/api/profile/extract-file")
 async def api_profile_extract_file(file: UploadFile = File(...)):
     """Extract text from an uploaded .pdf or .docx for review before saving."""

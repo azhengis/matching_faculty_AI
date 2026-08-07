@@ -380,8 +380,21 @@ let _firstRun    = false;  // no profile existed when the page loaded
   }
 
   // First-run setup and later edits end differently: setup flows straight
-  // into the advisor conversation, edits return to the profile view.
+  // into the assistant, edits return to the profile view.
   _firstRun = !existing;
+
+  // No profile yet? The directory may already know this email — if so, build
+  // the profile from it and go straight to the assistant, skipping the name
+  // search entirely. A miss just falls through to the search as before.
+  if (!existing) {
+    try {
+      const auto = await fetch('/api/profile/automatch', { method: 'POST' });
+      if (auto.ok) {
+        const me = await fetch('/api/profile/me');
+        if (me.ok) existing = await me.json();
+      }
+    } catch (e) {}
+  }
 
   if (existing) {
     showProfileView(existing);
