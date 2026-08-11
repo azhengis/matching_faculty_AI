@@ -492,14 +492,14 @@ function pchatTyping(on) {
 
 // Kickoffs are app-sent signals, never shown — same rule as the advisor.
 const PCHAT_SCRIPTED = ['Hello.'];
-const PCHAT_HIDDEN_PREFIX = '[The researcher attached a document:';
+const PCHAT_HIDDEN_PREFIXES = ['[The researcher attached a document:', '[The researcher added a link:'];
 
 function pchatInit(history) {
   const box = document.getElementById('pchat-messages');
   box.innerHTML = '';
   (history || []).forEach(m => {
     if (m.role === 'user' && PCHAT_SCRIPTED.includes(m.content)) return;
-    if (m.role === 'user' && (m.content || '').startsWith(PCHAT_HIDDEN_PREFIX)) return;
+    if (m.role === 'user' && PCHAT_HIDDEN_PREFIXES.some(x => (m.content || '').startsWith(x))) return;
     if (m.role === 'user' && m.content) pchatBubble('user', esc(m.content));
     else if (m.role === 'assistant' && m.content) pchatBubble('bot', pchatMd(m.content));
   });
@@ -556,11 +556,29 @@ async function pchatCall(message, hidden) {
   document.getElementById('pchat-send').disabled = false;
 }
 
-function pchatSend() {
+// A pasted URL is a source, not just a sentence: save it so the server
+// fetches the page, then let the assistant read what came back.
+const URL_RE = /https?:\/\/[^\s)>\]]+/i;
+
+async function pchatSend() {
   const input = document.getElementById('pchat-input');
   const msg = input.value.trim();
   if (!msg) return;
   input.value = '';
+  const found = msg.match(URL_RE);
+  if (found) {
+    pchatBubble('user', esc(msg));
+    pchatTyping(true);
+    try {
+      await fetch('/api/profile/links', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ url: found[0], label: found[0] })
+      });
+    } catch (e) {}
+    pchatTyping(false);
+    await pchatCall('[The researcher added a link: ' + found[0] + '. Its page text is in the links section above. Read it and say what you can use.]', true);
+    return;
+  }
   pchatCall(msg, false);
 }
 

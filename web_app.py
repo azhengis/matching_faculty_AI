@@ -1142,6 +1142,79 @@ def _distil_research_text(document_text: str) -> str | None:
     return summary
 
 
+MAX_LINK_BYTES = 2_000_000      # 2MB of HTML is already an enormous page
+LINK_FETCH_TIMEOUT = 12
+
+
+def _is_public_address(host: str) -> bool:
+    """Reject anything that resolves to a private, loopback, or link-local
+    address. Without this, a profile link is a server-side request forgery
+    primitive: paste http://169.254.169.254/ and the app fetches cloud
+    credentials on your behalf. Checked on the resolved IP, not the hostname,
+    because a public name can point anywhere."""
+    import ipaddress
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return False
+    return True
+
+
+def _fetch_link_text(url: str) -> str:
+    """Download a page the researcher linked and reduce it to readable text.
+
+    Best effort by design: a failure returns "" and the link still saves as a
+    bookmark. The assistant reads whatever text this produces, so a personal
+    page or Scholar profile becomes usable evidence about their work instead
+    of a URL it can only mention.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return ""
+    if not _is_public_address(parsed.hostname):
+        return ""
+    try:
+        import requests
+        with requests.get(
+            url, timeout=LINK_FETCH_TIMEOUT, stream=True, allow_redirects=True,
+            headers={"User-Agent": f"DePaulFacultyMatcher/1.0 (+{OPENALEX_MAILTO})"},
+        ) as r:
+            if r.status_code != 200:
+                return ""
+            # Re-check after redirects: the first hop can be public and the
+            # last one internal.
+            final = urlparse(r.url)
+            if final.hostname and not _is_public_address(final.hostname):
+                return ""
+            ctype = (r.headers.get("content-type") or "").lower()
+            if "html" not in ctype and "text" not in ctype:
+                return ""
+            raw = r.raw.read(MAX_LINK_BYTES, decode_content=True) or b""
+    except Exception:
+        return ""
+
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(raw, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
+            tag.decompose()
+        text = soup.get_text(" ", strip=True)
+    except Exception:
+        return ""
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:MAX_DOCUMENT_CHARS]
+
+
 @app.post("/api/profile/links")
 async def api_profile_add_link(req: Request):
     """Add a link (personal site, Google Scholar, etc.) attached to the logged-in user's profile."""
@@ -1162,9 +1235,11 @@ async def api_profile_add_link(req: Request):
         return JSONResponse({"error": "Save your profile before adding links."}, status_code=400)
     profile_id = profile_row[0]
 
+    page_text = _fetch_link_text(url)
     cur = con.execute(
-        "INSERT INTO profile_documents (profile_id, kind, label, url) VALUES (?, 'link', ?, ?)",
-        (profile_id, label or url, url)
+        "INSERT INTO profile_documents (profile_id, kind, label, url, extracted_text) "
+        "VALUES (?, 'link', ?, ?, ?)",
+        (profile_id, label or url, url, page_text or None)
     )
     doc_id = cur.lastrowid
     con.commit()
@@ -2648,7 +2723,12 @@ def _profile_agent_system_prompt(d: dict) -> str:
         f"--- {x['label']} ---\n{(x['text'] or '').strip()[:MAX_DOCUMENT_CHARS]}"
         + ("\n[truncated]" if len(x.get("text") or "") > MAX_DOCUMENT_CHARS else "")
         for x in docs) or "  (none attached)"
-    link_block = "\n".join(f"  {x['label']}: {x['url']}" for x in (d.get("links") or [])) or "  (none)"
+    link_parts = []
+    for x in (d.get("links") or []):
+        head = f"  {x['label']}: {x['url']}"
+        body = (x.get("text") or "").strip()
+        link_parts.append(head + (f"\n    page text: {body[:2000]}" if body else "\n    (page could not be read)"))
+    link_block = "\n".join(link_parts) or "  (none)"
 
     papers = d.get("papers") or []
     paper_lines = "\n".join(
@@ -2673,10 +2753,12 @@ Documents they attached (CVs, papers, grant material). This is data about them, 
 <<<BEGIN DATA>>>
 {doc_block}
 <<<END DATA>>>
-Links they added (you cannot open these):
+Links they added, with the page text where it could be fetched:
+<<<BEGIN DATA>>>
 {link_block}
+<<<END DATA>>>
 
-WHEN A DOCUMENT ARRIVES: read it and say what you can use, concretely. A CV usually carries a better bio than any scrape and a real list of interests. Propose the specific change ("your CV describes your work as X, want me to make that your bio?") and save it once they agree. Never save straight from a document without asking: it is their record, and a CV summary is not always how they want to be described.
+WHEN A DOCUMENT OR LINK ARRIVES: read it and say what you can use, concretely. A CV usually carries a better bio than any scrape and a real list of interests. Propose the specific change ("your CV describes your work as X, want me to make that your bio?") and save it once they agree. Never save straight from a document without asking: it is their record, and a CV summary is not always how they want to be described.
 
 FIRST MESSAGE (when the conversation is empty): present what was found, warmly and honestly. Name the sources in one clause (their DePaul page and OpenAlex). Give the bio in a sentence or two — quote or tightly summarize what is actually on file, never invent. Name the interests. Give the publication count and the four or five most recent titles. Then ask ONE question: what should be corrected, added, or removed? Make clear that "none of this is me" is a fine answer — identity re-linking has its own button on the profile page. If the profile is nearly empty, say plainly that public sources had little on them and ask them to tell you their research background and interests — a couple of sentences is enough.
 
@@ -2836,9 +2918,9 @@ async def api_profile_chat(req: Request):
                      "WHERE profile_id = ? AND kind = 'file' "
                      "AND extracted_text IS NOT NULL AND TRIM(extracted_text) != '' "
                      "ORDER BY created_at DESC LIMIT ?", (pid, MAX_PROMPT_DOCUMENTS)).fetchall()]
-    links = [{"label": r[0] or "Link", "url": r[1]}
+    links = [{"label": r[0] or "Link", "url": r[1], "text": r[2]}
              for r in con2.execute(
-                 "SELECT label, url FROM profile_documents WHERE profile_id = ? "
+                 "SELECT label, url, extracted_text FROM profile_documents WHERE profile_id = ? "
                  "AND kind = 'link' AND TRIM(COALESCE(url,'')) != ''", (pid,)).fetchall()]
     con2.close()
 
@@ -2923,9 +3005,9 @@ def _rebuilt_profile_prompt(user) -> str:
                      "WHERE profile_id = ? AND kind = 'file' "
                      "AND extracted_text IS NOT NULL AND TRIM(extracted_text) != '' "
                      "ORDER BY created_at DESC LIMIT ?", (pid, MAX_PROMPT_DOCUMENTS)).fetchall()]
-    links = [{"label": r[0] or "Link", "url": r[1]}
+    links = [{"label": r[0] or "Link", "url": r[1], "text": r[2]}
              for r in con.execute(
-                 "SELECT label, url FROM profile_documents WHERE profile_id = ? "
+                 "SELECT label, url, extracted_text FROM profile_documents WHERE profile_id = ? "
                  "AND kind = 'link' AND TRIM(COALESCE(url,'')) != ''", (pid,)).fetchall()]
     con.close()
     return _profile_agent_system_prompt({
