@@ -73,17 +73,33 @@ def test_a_prior_self_edit_outranks_the_scrape(tmp_path, monkeypatch):
     assert me["research_interests"] == ["fairness"]
 
 
-def test_unknown_email_does_not_match(tmp_path, monkeypatch):
-    _, cookies = _setup(tmp_path, monkeypatch, "stranger@depaul.edu")
+def test_unknown_email_gets_an_empty_profile_not_a_search_box(tmp_path, monkeypatch):
+    """Nobody meets a name search. An address the directory doesn't know still
+    lands in the assistant, with an empty profile to fill in by talking."""
+    db_path, cookies = _setup(tmp_path, monkeypatch, "stranger@depaul.edu")
     r = _run(web_app.api_profile_automatch(_FakeRequest(cookies=cookies)))
-    assert r.status_code == 404
+    assert r.status_code == 200
+    assert json.loads(r.body) == {"matched": False, "created_empty": True}
+
+    con = sqlite3.connect(db_path)
+    fid, bio, papers = con.execute(
+        "SELECT faculty_id, bio_text, confirmed_paper_ids FROM profiles").fetchone()
+    con.close()
+    assert fid is None and bio == "" and json.loads(papers) == []
 
 
-def test_a_near_miss_address_does_not_match(tmp_path, monkeypatch):
-    """Matching is exact-after-normalization — no fuzzy name or domain logic,
-    because a false match hands someone another person's profile."""
-    _, cookies = _setup(tmp_path, monkeypatch, "jane@depaul.education")
-    assert _run(web_app.api_profile_automatch(_FakeRequest(cookies=cookies))).status_code == 404
+def test_a_near_miss_address_is_never_linked_to_the_record(tmp_path, monkeypatch):
+    """Matching stays exact-after-normalization. A near miss may get an empty
+    profile, but it must never be attached to somebody else's faculty record,
+    because that would hand over their publications and their overlay."""
+    db_path, cookies = _setup(tmp_path, monkeypatch, "jane@depaul.education")
+    r = _run(web_app.api_profile_automatch(_FakeRequest(cookies=cookies)))
+    assert json.loads(r.body)["matched"] is False
+
+    con = sqlite3.connect(db_path)
+    fid = con.execute("SELECT faculty_id FROM profiles").fetchone()[0]
+    con.close()
+    assert fid is None
 
 
 def test_existing_profile_is_never_overwritten(tmp_path, monkeypatch):
