@@ -151,9 +151,11 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 .pbubble ul,.pbubble ol{padding-left:18px;margin-bottom:7px}.pbubble li{margin-bottom:2px}
 .pbubble strong{font-weight:600}
 .pchat-inputrow{display:flex;gap:9px;padding:12px 20px 16px;border-top:1px solid var(--border)}
-.pchat-attach{padding:10px 14px;background:var(--surface);color:var(--navy);border:1px solid var(--border-2);border-radius:var(--r-sm);font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
-.pchat-attach:hover{background:var(--canvas);border-color:var(--navy-lift)}
+.pchat-attach{width:38px;height:38px;flex-shrink:0;align-self:flex-end;display:flex;align-items:center;justify-content:center;padding:0;background:var(--surface);color:var(--ink-2);border:1px solid var(--border-2);border-radius:var(--r-sm);cursor:pointer;font-family:inherit;transition:background .15s,color .15s,border-color .15s}
+.pchat-attach:hover{background:var(--canvas);color:var(--navy);border-color:var(--navy-lift)}
 .pchat-attach:disabled{opacity:.5;cursor:not-allowed}
+.pchat-attach svg{width:17px;height:17px}
+.pchat-attach.busy{font-size:11px;font-weight:600;color:var(--ink-3)}
 .pchat-input{flex:1;padding:10px 13px;font-size:14px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;resize:none}
 .pchat-input:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
 .pchat-typing{font-size:13px;color:var(--ink-3);padding:2px 0}
@@ -186,8 +188,10 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
      <div class="pchat-messages" id="pchat-messages"></div>
      <div class="pchat-inputrow">
        <input type="file" id="pchat-file" accept=".pdf,.docx" style="display:none" onchange="pchatAttach(event)">
-       <button class="pchat-attach" id="pchat-attach-btn" onclick="document.getElementById('pchat-file').click()" title="Attach a CV, paper, or grant document">Attach</button>
        <textarea class="pchat-input" id="pchat-input" rows="1" placeholder="What should be corrected, added, or removed?"></textarea>
+       <button class="pchat-attach" id="pchat-attach-btn" onclick="document.getElementById('pchat-file').click()" title="Attach a CV, paper, or grant document" aria-label="Attach a document">
+         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8.5 8.7 13.3a2.2 2.2 0 0 1-3.1-3.1l5.6-5.6a3.4 3.4 0 0 1 4.8 4.8l-5.6 5.6a4.6 4.6 0 0 1-6.5-6.5l4.9-4.9"/></svg>
+       </button>
        <button class="btn-primary" id="pchat-send" onclick="pchatSend()">Send</button>
      </div>
    </div>
@@ -520,7 +524,10 @@ async function pchatAttach(ev) {
   ev.target.value = '';
   if (!file) return;
   const btn = document.getElementById('pchat-attach-btn');
-  btn.disabled = true; btn.textContent = 'Reading…';
+  const icon = btn.innerHTML;               // keep the icon to restore after
+  btn.disabled = true;
+  btn.classList.add('busy');
+  btn.textContent = '…';
   pchatBubble('user', esc('Attached: ' + file.name));
   try {
     const fd = new FormData();
@@ -536,7 +543,9 @@ async function pchatAttach(ev) {
   } catch (e) {
     pchatBubble('bot', '<span style="color:#9B2020">Upload failed: ' + esc(e.message) + '</span>');
   }
-  btn.disabled = false; btn.textContent = 'Attach';
+  btn.disabled = false;
+  btn.classList.remove('busy');
+  btn.innerHTML = icon;
 }
 
 async function pchatCall(message, hidden) {
