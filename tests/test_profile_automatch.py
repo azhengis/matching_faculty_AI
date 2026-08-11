@@ -117,3 +117,67 @@ def test_existing_profile_is_never_overwritten(tmp_path, monkeypatch):
 def test_requires_login(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch, "jane@depaul.edu")
     assert _run(web_app.api_profile_automatch(_FakeRequest())).status_code == 401
+
+
+def test_invisible_characters_in_the_directory_still_match(tmp_path, monkeypatch):
+    """21 scraped addresses carry a trailing zero-width space. Those people
+    could never be matched by anything a human types."""
+    db_path, cookies = _setup(tmp_path, monkeypatch, "jbrooke@depaul.edu")
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO faculty (id, name, email, research_summary) "
+                "VALUES (9, 'J Brooke', 'jbrooke@depaul.edu​', 'Summary.')")
+    con.commit(); con.close()
+
+    r = _run(web_app.api_profile_automatch(_FakeRequest(cookies=cookies)))
+    assert json.loads(r.body)["matched"] is True
+
+
+def test_matches_across_depaul_subdomains(tmp_path, monkeypatch):
+    """Signing in as name@depaul.edu should find name@cs.depaul.edu. Nobody
+    remembers which subdomain the directory captured."""
+    db_path, cookies = _setup(tmp_path, monkeypatch, "mobasher@depaul.edu")
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO faculty (id, name, email, research_summary) "
+                "VALUES (10, 'Bamshad Mobasher', 'mobasher@cs.depaul.edu', 'Summary.')")
+    con.commit(); con.close()
+
+    r = _run(web_app.api_profile_automatch(_FakeRequest(cookies=cookies)))
+    assert json.loads(r.body)["matched"] is True
+    assert json.loads(r.body)["name"] == "Bamshad Mobasher"
+
+
+def test_a_different_local_part_never_matches(tmp_path, monkeypatch):
+    """bmobasher@ is not mobasher@. Guessing they are the same person is how
+    you sign someone in as a colleague."""
+    db_path, cookies = _setup(tmp_path, monkeypatch, "bmobasher@cs.depaul.edu")
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO faculty (id, name, email, research_summary) "
+                "VALUES (11, 'Bamshad Mobasher', 'mobasher@cs.depaul.edu', 'Summary.')")
+    con.commit(); con.close()
+
+    r = _run(web_app.api_profile_automatch(_FakeRequest(cookies=cookies)))
+    assert json.loads(r.body)["matched"] is False
+
+
+def test_an_ambiguous_local_part_is_refused(tmp_path, monkeypatch):
+    """Two people sharing a local part across subdomains: match neither."""
+    db_path, cookies = _setup(tmp_path, monkeypatch, "jsmith@depaul.edu")
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO faculty (id, name, email) VALUES (12, 'J Smith', 'jsmith@cs.depaul.edu')")
+    con.execute("INSERT INTO faculty (id, name, email) VALUES (13, 'Jo Smith', 'jsmith@cdm.depaul.edu')")
+    con.commit(); con.close()
+
+    r = _run(web_app.api_profile_automatch(_FakeRequest(cookies=cookies)))
+    assert json.loads(r.body)["matched"] is False
+
+
+def test_non_depaul_domain_does_not_get_the_subdomain_fallback(tmp_path, monkeypatch):
+    """The fallback is for DePaul subdomains only, not for any address that
+    happens to share a local part."""
+    db_path, cookies = _setup(tmp_path, monkeypatch, "mobasher@gmail.com")
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO faculty (id, name, email) VALUES (14, 'B M', 'mobasher@cs.depaul.edu')")
+    con.commit(); con.close()
+
+    r = _run(web_app.api_profile_automatch(_FakeRequest(cookies=cookies)))
+    assert json.loads(r.body)["matched"] is False

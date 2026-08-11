@@ -894,6 +894,51 @@ async def api_profile_save(req: Request):
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
 
 
+def _normalize_email(value: str) -> str:
+    """Lowercase, strip whitespace, and drop the invisible characters the bio
+    scrape left behind. 21 directory addresses carry a trailing zero-width
+    space, which makes them unmatchable against anything a human types."""
+    if not value:
+        return ""
+    return re.sub(r"[\s\u200b\u200c\u200d\ufeff]", "", value).lower()
+
+
+def _find_faculty_by_email(con, email: str):
+    """Look up a faculty record for a sign-in address.
+
+    Exact match first, on normalized text. Failing that, match the local part
+    across DePaul subdomains: the directory has people under depaul.edu,
+    cs.depaul.edu, cdm.depaul.edu and more, and nobody remembers which one the
+    scrape captured. Only accepted when exactly ONE record matches, because a
+    wrong match hands over someone else's publications.
+
+    Deliberately no fuzzy matching on names or initials: bmobasher and
+    mobasher are different people as far as this is concerned, and guessing
+    they are the same is how you sign someone in as a colleague.
+    """
+    target = _normalize_email(email)
+    if not target or "@" not in target:
+        return None
+
+    rows = con.execute(
+        "SELECT id, name, research_summary, email FROM faculty "
+        "WHERE TRIM(COALESCE(email,'')) != ''").fetchall()
+
+    exact = [r for r in rows if _normalize_email(r[3]) == target]
+    if len(exact) == 1:
+        return exact[0][:3]
+
+    local, _, domain = target.partition("@")
+    if not domain.endswith("depaul.edu"):
+        return None
+    same_local = [r for r in rows
+                  if _normalize_email(r[3]).partition("@")[0] == local
+                  and _normalize_email(r[3]).partition("@")[2].endswith("depaul.edu")]
+    if len(same_local) == 1:
+        return same_local[0][:3]
+    return None
+
+
 @app.post("/api/profile/automatch")
 async def api_profile_automatch(req: Request):
     """Build a profile from the account email alone, if the directory knows it.
@@ -922,9 +967,7 @@ async def api_profile_automatch(req: Request):
         return JSONResponse({"error": "Profile already exists"}, status_code=404)
 
     try:
-        frow = con.execute(
-            "SELECT id, name, research_summary FROM faculty WHERE LOWER(TRIM(email)) = ?",
-            (email,)).fetchone()
+        frow = _find_faculty_by_email(con, email)
     except sqlite3.OperationalError:
         frow = None
     if not frow:
@@ -2769,6 +2812,8 @@ Links they added, with the page text where it could be fetched:
 <<<END DATA>>>
 
 WHEN A DOCUMENT OR LINK ARRIVES: read it and say what you can use, concretely. A CV usually carries a better bio than any scrape and a real list of interests. Propose the specific change ("your CV describes your work as X, want me to make that your bio?") and save it once they agree. Never save straight from a document without asking: it is their record, and a CV summary is not always how they want to be described.
+
+IF THE PROFILE IS EMPTY BECAUSE NO DIRECTORY RECORD MATCHED: say so plainly and give the likely reason, which is almost always that the address they signed in with differs from the one DePaul's directory lists (people appear under depaul.edu, cs.depaul.edu, cdm.depaul.edu, and their listed address often predates the one they use). Tell them the fix: "Not the right person?" on this page searches by name and links the record, publications included. Then carry on and take their background by hand, so they are never stuck waiting.
 
 IF THE NAME IS MISSING: that is the first thing to fix. Ask what they would like to be called, before anything else. Never guess a name from their email address. They can also set it with the Edit button next to their name on the page, so mention that once if they would rather type it.
 
