@@ -102,6 +102,15 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 
 /* ── Polished profile view ── */
 .pv-header{display:flex;gap:18px;align-items:center;padding-bottom:22px;margin-bottom:24px;border-bottom:1px solid var(--border)}
+.pv-namerow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pv-edit-btn{background:none;border:1px solid var(--border-2);border-radius:999px;font-size:11.5px;color:var(--ink-2);cursor:pointer;font-family:inherit;padding:4px 12px;transition:background .15s,color .15s}
+.pv-edit-btn:hover{background:var(--canvas);color:var(--navy)}
+.pv-identity{border:1px solid var(--border);border-radius:var(--r-md);background:var(--canvas);padding:16px 18px;margin-bottom:18px}
+.pv-identity-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.pv-identity-row label{font-size:11.5px;font-weight:700;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em;width:110px;flex-shrink:0}
+.pv-identity-row .text-input{flex:1}
+.pv-identity-actions{display:flex;align-items:center;gap:10px;margin-top:4px}
+.pv-avatar img{width:100%;height:100%;object-fit:cover;border-radius:16px}
 .pv-avatar{width:64px;height:64px;border-radius:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:25px;font-weight:600;color:#fff;background:linear-gradient(135deg,var(--navy),var(--navy-lift));letter-spacing:.01em}
 .pv-headtext{min-width:0}
 .pv-header h2{font-family:var(--serif);font-size:26px;font-weight:normal;letter-spacing:-.01em;margin:0 0 3px;line-height:1.15}
@@ -199,9 +208,35 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
       <div class="pv-header">
         <div class="pv-avatar" id="pv-avatar"></div>
         <div class="pv-headtext">
-          <h2 id="pv-name"></h2>
+          <div class="pv-namerow">
+            <h2 id="pv-name"></h2>
+            <button class="pv-edit-btn" id="pv-edit-btn" onclick="toggleIdentityForm()">Edit</button>
+          </div>
           <div class="pv-role" id="pv-role"></div>
           <div class="pv-contact" id="pv-contact"></div>
+        </div>
+      </div>
+
+      <!-- Name, contact email, and photo: typed, not described to the
+           assistant. Changing the contact email here does not change the
+           sign-in account or the linked faculty record. -->
+      <div class="pv-identity" id="pv-identity" style="display:none">
+        <div class="pv-identity-row">
+          <label for="id-name">Name</label>
+          <input type="text" id="id-name" class="text-input" placeholder="How you want to be listed">
+        </div>
+        <div class="pv-identity-row">
+          <label for="id-email">Contact email</label>
+          <input type="text" id="id-email" class="text-input" placeholder="you@depaul.edu">
+        </div>
+        <div class="pv-identity-row">
+          <label for="id-photo">Photo</label>
+          <input type="file" id="id-photo" accept="image/*">
+        </div>
+        <div class="pv-identity-actions">
+          <button class="btn-primary" onclick="saveIdentity()">Save</button>
+          <button class="btn-outline" onclick="toggleIdentityForm()">Cancel</button>
+          <span class="search-status" id="id-status"></span>
         </div>
       </div>
 
@@ -385,10 +420,17 @@ function showProfileView(profile) {
   document.getElementById('panel-1').classList.remove('active');
   document.getElementById('panel-2').classList.remove('active');
 
-  const name = profile.name || '';
-  document.getElementById('pv-name').textContent = name;
-  document.getElementById('pv-avatar').textContent =
-    name.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0].toUpperCase()).join('') || '?';
+  const name = (profile.name || '').trim();
+  const nameEl = document.getElementById('pv-name');
+  nameEl.textContent = name || 'Add your name';
+  nameEl.style.opacity = name ? '' : '.5';
+  const av = document.getElementById('pv-avatar');
+  if (profile.has_photo) {
+    av.innerHTML = `<img src="/api/profile/photo?t=${Date.now()}" alt="">`;
+  } else {
+    av.textContent = name.split(/\s+/).filter(Boolean).slice(0, 2)
+      .map(s => s[0].toUpperCase()).join('') || '?';
+  }
 
   const role = [profile.title, profile.department, profile.college].filter(Boolean).join(' · ');
   const roleEl = document.getElementById('pv-role');
@@ -460,6 +502,68 @@ async function editProfile() {
 
 // Re-link this account to a different faculty record. Rare, and destructive
 // enough to the rest of the form that it starts from the name search.
+// ── Identity: name, contact email, photo ─────────────────────────────────────
+function toggleIdentityForm() {
+  const box = document.getElementById('pv-identity');
+  const open = box.style.display !== 'none';
+  if (open) { box.style.display = 'none'; return; }
+  document.getElementById('id-name').value  = (_profile && _profile.name) || '';
+  document.getElementById('id-email').value = (_profile && _profile.email) || '';
+  document.getElementById('id-status').textContent = '';
+  box.style.display = 'block';
+  document.getElementById('id-name').focus();
+}
+
+async function saveIdentity() {
+  const status = document.getElementById('id-status');
+  const name  = document.getElementById('id-name').value.trim();
+  const email = document.getElementById('id-email').value.trim();
+  if (!name) {
+    status.textContent = 'Name cannot be empty.';
+    status.className = 'search-status err';
+    return;
+  }
+  status.textContent = 'Saving…';
+  status.className = 'search-status';
+  try {
+    const res = await fetch('/api/profile/identity', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name, email })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not save');
+
+    const file = document.getElementById('id-photo').files[0];
+    if (file) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const pres = await fetch('/api/profile/photo', { method: 'POST', body: fd });
+      const pdata = await pres.json();
+      if (!pres.ok || pdata.error) throw new Error(pdata.error || 'Photo upload failed');
+    }
+
+    const me = await fetch('/api/profile/me');
+    if (me.ok) {
+      const fresh = await me.json();
+      // Keep the chat where it is; only the header needs redrawing.
+      _profile = fresh;
+      const nameEl = document.getElementById('pv-name');
+      nameEl.textContent = fresh.name || 'Add your name';
+      nameEl.style.opacity = fresh.name ? '' : '.5';
+      document.getElementById('pv-contact').innerHTML =
+        fresh.email ? `<a href="mailto:${esc(fresh.email)}">${esc(fresh.email)}</a>` : '';
+      const av = document.getElementById('pv-avatar');
+      if (fresh.has_photo) av.innerHTML = `<img src="/api/profile/photo?t=${Date.now()}" alt="">`;
+      else av.textContent = (fresh.name || '').split(/\s+/).filter(Boolean).slice(0, 2)
+        .map(s => s[0].toUpperCase()).join('') || '?';
+    }
+    document.getElementById('pv-identity').style.display = 'none';
+  } catch (e) {
+    status.textContent = e.message;
+    status.className = 'search-status err';
+  }
+}
+
 // ── Profile assistant chat ───────────────────────────────────────────────────
 function pchatMd(text) {
   let h = esc(text);

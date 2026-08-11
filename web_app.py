@@ -264,6 +264,12 @@ def _init_profiles_db():
         except sqlite3.OperationalError:
             pass  # column already exists from a prior run
 
+    # Profile photo, stored like an uploaded document and served by id.
+    try:
+        con.execute("ALTER TABLE profiles ADD COLUMN photo_file TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
     # The profile assistant's conversation, persisted like a project's chat:
     # correcting your profile is an ongoing dialogue, not a one-time wizard,
     # so returning to the profile page picks the thread back up.
@@ -924,13 +930,16 @@ async def api_profile_automatch(req: Request):
     if not frow:
         # Not in the directory: still make a profile, empty, so they land in
         # the assistant and fill it in by talking rather than meeting a search
-        # box. The name is a placeholder the assistant asks them to correct.
+        # box. The name is left BLANK on purpose. Deriving one from the address
+        # produced "Azhengis" for azhengis@depaul.edu, which is worse than
+        # nothing: it looks like the system knows you and got it wrong. The
+        # assistant asks for it instead.
         con.execute(
             """INSERT INTO profiles
                    (user_id, faculty_id, name, email, bio_text, project_description,
                     confirmed_paper_ids, research_interests, updated_at)
                VALUES (?, NULL, ?, ?, '', '', '[]', '[]', datetime('now'))""",
-            (user["id"], email.split("@")[0].replace(".", " ").title(), email))
+            (user["id"], "", email))
         con.commit()
         con.close()
         return JSONResponse({"matched": False, "created_empty": True})
@@ -999,13 +1008,13 @@ async def api_profile_me(req: Request):
 
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
-        "SELECT id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests, chat_history "
+        "SELECT id, faculty_id, name, email, bio_text, project_description, confirmed_paper_ids, research_interests, chat_history, photo_file "
         "FROM profiles WHERE user_id = ?", (user["id"],)
     ).fetchone()
     con.close()
     if not row:
         return JSONResponse({"error": "No profile yet"}, status_code=404)
-    pid, fid, name, email, bio, proj, papers_json, interests_json, chat_json = row
+    pid, fid, name, email, bio, proj, papers_json, interests_json, chat_json, photo_file = row
     try:
         chat_history = json.loads(chat_json or "[]")
     except Exception:
@@ -1041,6 +1050,7 @@ async def api_profile_me(req: Request):
     return JSONResponse({"id": pid, "faculty_id": fid, "name": name, "email": email or "",
                          "title": title, "department": department, "college": college,
                          "bio": bio or "", "project_description": proj or "", "chat_history": chat_history,
+                         "has_photo": bool(photo_file),
                          "confirmed_paper_ids": paper_ids, "research_interests": interests,
                          "papers": papers})
 
@@ -2760,6 +2770,8 @@ Links they added, with the page text where it could be fetched:
 
 WHEN A DOCUMENT OR LINK ARRIVES: read it and say what you can use, concretely. A CV usually carries a better bio than any scrape and a real list of interests. Propose the specific change ("your CV describes your work as X, want me to make that your bio?") and save it once they agree. Never save straight from a document without asking: it is their record, and a CV summary is not always how they want to be described.
 
+IF THE NAME IS MISSING: that is the first thing to fix. Ask what they would like to be called, before anything else. Never guess a name from their email address. They can also set it with the Edit button next to their name on the page, so mention that once if they would rather type it.
+
 FIRST MESSAGE (when the conversation is empty): present what was found, warmly and honestly. Name the sources in one clause (their DePaul page and OpenAlex). Give the bio in a sentence or two — quote or tightly summarize what is actually on file, never invent. Name the interests. Give the publication count and the four or five most recent titles. Then ask ONE question: what should be corrected, added, or removed? Make clear that "none of this is me" is a fine answer — identity re-linking has its own button on the profile page. If the profile is nearly empty, say plainly that public sources had little on them and ask them to tell you their research background and interests — a couple of sentences is enough.
 
 EDITING RULES:
@@ -2858,6 +2870,93 @@ def _persist_profile_chat(profile_id, history: list) -> None:
         con.close()
     except Exception:
         pass  # persistence is best-effort; the live turn already succeeded
+
+
+@app.post("/api/profile/identity")
+async def api_profile_identity(req: Request):
+    """Change the name and contact email shown on your own profile.
+
+    Separate from the profile assistant on purpose: these are the fields that
+    say who you are, and typing them beats describing them. Changing the
+    contact email here does NOT change the account you sign in with, and does
+    not re-link the faculty record, so it cannot be used to claim someone
+    else's publications.
+    """
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    email = (body.get("email") or "").strip()
+    if not name:
+        return JSONResponse({"error": "Name cannot be empty."}, status_code=400)
+    if email and ("@" not in email or " " in email):
+        return JSONResponse({"error": "That doesn't look like an email address."}, status_code=400)
+
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute("SELECT id FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not row:
+        con.close()
+        return JSONResponse({"error": "No profile yet."}, status_code=404)
+    con.execute("UPDATE profiles SET name = ?, email = ?, updated_at = datetime('now') WHERE id = ?",
+                (name[:120], email[:200], row[0]))
+    con.commit(); con.close()
+    return JSONResponse({"name": name, "email": email})
+
+
+@app.post("/api/profile/photo")
+async def api_profile_photo_upload(req: Request, file: UploadFile = File(...)):
+    """Store a profile photo. Images only, re-encoded name, size capped."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+        return JSONResponse({"error": "Use a JPG, PNG, GIF, or WebP image."}, status_code=400)
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"error": "Image is too large (10MB max)."}, status_code=400)
+
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute("SELECT id, photo_file FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    if not row:
+        con.close()
+        return JSONResponse({"error": "No profile yet."}, status_code=404)
+    profile_id, previous = row
+
+    # Random stored name: the uploaded filename never touches the filesystem,
+    # so "../../etc/passwd" is not a path we can be talked into writing to.
+    stored = secrets.token_hex(16) + ext
+    with open(os.path.join(UPLOADS_DIR, stored), "wb") as f:
+        f.write(content)
+    con.execute("UPDATE profiles SET photo_file = ? WHERE id = ?", (stored, profile_id))
+    con.commit(); con.close()
+
+    if previous:
+        try:
+            os.remove(os.path.join(UPLOADS_DIR, previous))
+        except OSError:
+            pass  # a missing old file is not worth failing the upload over
+    return JSONResponse({"photo": True})
+
+
+@app.get("/api/profile/photo")
+async def api_profile_photo(req: Request):
+    """Serve the logged-in user's own photo."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute("SELECT photo_file FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    con.close()
+    if not row or not row[0]:
+        return JSONResponse({"error": "No photo"}, status_code=404)
+    path = os.path.join(UPLOADS_DIR, os.path.basename(row[0]))
+    if not os.path.exists(path):
+        return JSONResponse({"error": "No photo"}, status_code=404)
+    return FileResponse(path)
 
 
 @app.post("/api/profile/chat")
