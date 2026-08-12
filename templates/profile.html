@@ -263,10 +263,12 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 
     <div class="btn-group" style="margin-top:24px">
       <a class="btn-scarlet" href="/projects">Go to your projects &rarr;</a>
-      <button class="btn-outline" onclick="startFresh()">Not the right person?</button>
     </div>
 
-  <!-- ── Step 1: Name search ── -->
+  <!-- Fallback only. Everyone normally arrives via /api/profile/automatch,
+       which builds a profile from the sign-in email (matched or empty) and
+       shows the assistant. This panel is what remains if that call fails
+       outright, so the page is never a dead end. -->
   <div id="panel-1" class="panel active">
     <h2>Find your faculty record</h2>
     <p class="section-desc">Search by name to link your profile to the right record, along with its publications.</p>
@@ -610,11 +612,6 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Re-link to a different faculty record. The only route back to the search.
-function startFresh() {
-  document.getElementById('profile-view').style.display = 'none';
-  document.getElementById('panel-1').classList.add('active');
-}
 
 
 async function searchFaculty() {
