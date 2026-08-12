@@ -138,14 +138,21 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 .btn-download:hover{background:var(--navy-lift)}
 
 /* ── Profile assistant chat ── */
-.pchat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);margin-bottom:22px;display:flex;flex-direction:column}
+.pv-split{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;align-items:start;margin-bottom:22px}
+@media(max-width:1100px){.pv-split{grid-template-columns:1fr}}
+.pv-rail{min-width:0}
+@media(min-width:1101px){
+  .pv-rail{position:sticky;top:38px;max-height:calc(100vh - 76px);overflow-y:auto}
+  .pv-rail .profile-summary{margin-bottom:0}
+}
+.pchat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);display:flex;flex-direction:column;height:calc(100vh - 76px);min-height:520px}
 .pchat-head{padding:14px 20px 0}
-.pchat-messages{padding:14px 20px;max-height:420px;min-height:120px;overflow-y:auto;display:flex;flex-direction:column;gap:11px}
+.pchat-messages{padding:16px 22px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
 .pmsg{display:flex;gap:9px;align-items:flex-start}
 .pmsg.user{flex-direction:row-reverse}
 .pavatar{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;background:var(--navy)}
 .pmsg.user .pavatar{background:var(--teal)}
-.pbubble{padding:11px 15px;max-width:82%;line-height:1.6;font-size:14px;border-radius:var(--r-md);background:var(--canvas);border:1px solid var(--border)}
+.pbubble{padding:12px 16px;max-width:86%;line-height:1.65;font-size:14.5px;border-radius:var(--r-md);background:var(--canvas);border:1px solid var(--border)}
 .pmsg.user .pbubble{background:var(--navy);color:#fff;border:none;border-bottom-right-radius:4px}
 .pbubble p{margin-bottom:7px}.pbubble p:last-child{margin-bottom:0}
 .pbubble ul,.pbubble ol{padding-left:18px;margin-bottom:7px}.pbubble li{margin-bottom:2px}
@@ -180,9 +187,10 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 
   <!-- Full profile view (shown once the logged-in user has a saved profile) -->
   <div id="profile-view" style="display:none">
-   <!-- The profile assistant: "here's what we found — what should I fix?"
-        This conversation persists; corrections happen here in plain words,
-        and the form below stays as the manual fallback. -->
+   <!-- Chat left, profile right: the conversation is the work, the card is
+        the reference you check while doing it. Same arrangement as the
+        advisor page, where the chat sits beside the proposal panel. -->
+   <div class="pv-split">
    <div class="pchat" id="pchat">
      <div class="pchat-head"><span class="section-tag">Profile assistant</span></div>
      <div class="pchat-messages" id="pchat-messages"></div>
@@ -195,7 +203,7 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
        <button class="btn-primary" id="pchat-send" onclick="pchatSend()">Send</button>
      </div>
    </div>
-   <div>
+   <aside class="pv-rail">
     <div class="profile-summary">
       <div class="pv-header">
         <div class="pv-avatar" id="pv-avatar"></div>
@@ -250,11 +258,13 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 
    </div>
 
+   </aside>
+   </div>
+
     <div class="btn-group" style="margin-top:24px">
       <a class="btn-scarlet" href="/projects">Go to your projects &rarr;</a>
       <button class="btn-outline" onclick="startFresh()">Not the right person?</button>
     </div>
-  </div>
 
   <!-- ── Step 1: Name search ── -->
   <div id="panel-1" class="panel active">
