@@ -159,6 +159,28 @@ def _current_user(req: Request) -> dict | None:
     return {"id": row[0], "email": row[1]}
 
 
+def _add_column(con, table: str, column: str, decl: str) -> None:
+    """Add a column if it isn't there yet, and ONLY tolerate that it already is.
+
+    Every migration below used to be a bare `except sqlite3.OperationalError:
+    pass`, which swallows "no such table" just as happily as "duplicate column
+    name". That is how four `projects` migrations sat above their own CREATE
+    TABLE for months without anyone noticing: on an existing database the
+    columns were already there, and on a fresh one the ALTER hit a table that
+    did not exist yet, quietly did nothing, and produced an install missing
+    chat_history, gap_map, lit_references, and mode. It could only ever have
+    broken a first deploy, which is the one run nobody had done.
+
+    Narrowing the except is the actual fix. A misordered or malformed migration
+    now raises at startup, where it is one traceback instead of a mystery.
+    """
+    try:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
+
+
 # ── Profiles table (added to existing faculty.db) ─────────────────────────────
 def _init_profiles_db():
     """Create profiles table if it doesn't exist.
@@ -179,15 +201,9 @@ def _init_profiles_db():
             -- future columns: user_id INTEGER, auth_provider TEXT
         )
     """)
-    try:
-        con.execute("ALTER TABLE profiles ADD COLUMN research_interests TEXT DEFAULT '[]'")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "profiles", "research_interests", "TEXT DEFAULT '[]'")
 
-    try:
-        con.execute("ALTER TABLE profiles ADD COLUMN user_id INTEGER REFERENCES users(id)")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "profiles", "user_id", "INTEGER REFERENCES users(id)")
     # SQLite disallows `ALTER TABLE ... ADD COLUMN ... UNIQUE` outright (even on
     # an empty table), so the UNIQUE constraint is enforced via a separate
     # unique index instead. This still works as the ON CONFLICT(user_id)
@@ -234,25 +250,16 @@ def _init_profiles_db():
     # as a JSON list of field names. save_proposal skips these so the advisor
     # can't silently overwrite someone's own wording mid-conversation; the
     # researcher can hand a section back with "let the advisor update this".
-    try:
-        con.execute("ALTER TABLE proposals ADD COLUMN edited_sections TEXT DEFAULT '[]'")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "proposals", "edited_sections", "TEXT DEFAULT '[]'")
 
     # The sharpened, specific problem statement the advisor converges on before
     # any proposal section is drafted.
-    try:
-        con.execute("ALTER TABLE proposals ADD COLUMN problem_statement TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "proposals", "problem_statement", "TEXT")
 
     # What makes the project new: what already exists, and the contribution this
     # project adds on top. Settled before the problem statement is written, so a
     # solved problem gets caught before anyone builds a proposal on it.
-    try:
-        con.execute("ALTER TABLE proposals ADD COLUMN novelty TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "proposals", "novelty", "TEXT")
 
     # A one-paragraph abstract summarising the whole proposal, auto-drafted once
     # the other sections are settled; the ethical-considerations section a full
@@ -260,24 +267,15 @@ def _init_profiles_db():
     # Institute tool — where AI and data science actually enter this project,
     # as method, as subject, or not at all.
     for _col in ("abstract", "ethical_considerations", "ai_role"):
-        try:
-            con.execute(f"ALTER TABLE proposals ADD COLUMN {_col} TEXT")
-        except sqlite3.OperationalError:
-            pass  # column already exists from a prior run
+        _add_column(con, "proposals", _col, "TEXT")
 
     # Profile photo, stored like an uploaded document and served by id.
-    try:
-        con.execute("ALTER TABLE profiles ADD COLUMN photo_file TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "profiles", "photo_file", "TEXT")
 
     # The profile assistant's conversation, persisted like a project's chat:
     # correcting your profile is an ongoing dialogue, not a one-time wizard,
     # so returning to the profile page picks the thread back up.
-    try:
-        con.execute("ALTER TABLE profiles ADD COLUMN chat_history TEXT DEFAULT '[]'")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "profiles", "chat_history", "TEXT DEFAULT '[]'")
 
     # A short summary of what this researcher actually works on, drafted by the
     # assistant from EVERYTHING on file — publications, an attached CV, grant
@@ -285,10 +283,7 @@ def _init_profiles_db():
     # got published. Distinct from the bio on purpose: the bio is how someone
     # describes themselves and stays theirs to write, while this is the system
     # reading the evidence and saying what problems they have been working on.
-    try:
-        con.execute("ALTER TABLE profiles ADD COLUMN research_activities TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "profiles", "research_activities", "TEXT")
 
     # Login sessions. These lived only in a module-level dict, so every restart
     # signed everyone out — invisible in local use beyond the annoyance, but it
@@ -340,10 +335,7 @@ def _init_profiles_db():
     # this person is represented in the search index. The raw extracted text is
     # unusable for that: SPECTER2 sees only the first few hundred tokens, which
     # on a CV is the name, address, and degrees — the least matchable part.
-    try:
-        con.execute("ALTER TABLE profile_documents ADD COLUMN research_summary TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists (fresh install above, or a prior run)
+    _add_column(con, "profile_documents", "research_summary", "TEXT")
 
     # A researcher works on several projects at once. Each one carries its own
     # intake answers, its own advisor chat session, its own proposal, and its
@@ -367,38 +359,26 @@ def _init_profiles_db():
     # restart silently wiped the conversation while the project still claimed
     # a session_id — the advisor then reintroduced itself and re-asked
     # questions the researcher had already answered.
-    try:
-        con.execute("ALTER TABLE projects ADD COLUMN chat_history TEXT DEFAULT '[]'")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "projects", "chat_history", "TEXT DEFAULT '[]'")
 
     # The research-gap map: the works the novelty search surfaced plus the
     # project's own focus, each given a 2D coordinate, so the advisor can SHOW
     # the researcher where their project sits relative to existing work — the
     # gap being the open space it lands in. Refreshed on each novelty search.
-    try:
-        con.execute("ALTER TABLE projects ADD COLUMN gap_map TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "projects", "gap_map", "TEXT")
 
     # Real papers the novelty search surfaced, accumulated across searches and
     # deduped, so they can serve as the project's reference list — shown in the
     # panel and included in the downloaded proposal. ("references" is a SQL
     # reserved word, hence the column name.)
-    try:
-        con.execute("ALTER TABLE projects ADD COLUMN lit_references TEXT DEFAULT '[]'")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "projects", "lit_references", "TEXT DEFAULT '[]'")
 
     # How this project started: 'problem' (they arrived with something in mind)
     # or 'explore' (they want directions suggested from their own background).
     # It only changes the FIRST message — once a direction is picked, the saved
     # proposal drives the stages exactly as it does for any other project — but
     # it has to persist, or resuming an exploration reopens it as an interview.
-    try:
-        con.execute("ALTER TABLE projects ADD COLUMN mode TEXT DEFAULT 'problem'")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "projects", "mode", "TEXT DEFAULT 'problem'")
 
     # Collaborators surfaced for a project, kept so "people you matched with"
     # survives the chat session that produced them.
@@ -434,10 +414,7 @@ def _init_profiles_db():
     # Each match's most query-relevant publications, as JSON, so the card can
     # show WHY this person fits — grounded in their actual work, not just a bio
     # snippet.
-    try:
-        con.execute("ALTER TABLE project_matches ADD COLUMN relevant_work TEXT DEFAULT '[]'")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
+    _add_column(con, "project_matches", "relevant_work", "TEXT DEFAULT '[]'")
 
     _migrate_proposals_to_projects(con)
 
