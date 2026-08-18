@@ -107,3 +107,28 @@ def test_explore_hands_back_to_stage_one_once_a_direction_is_chosen():
 
     assert "explore mode is over" in explore
     assert "Stage 1" in explore
+
+
+def test_the_opening_does_not_summarise_past_work_back_at_them():
+    """Bamshad: the first interaction should focus on the new problem rather
+    than referencing past work, so a faculty member moving into a new field is
+    not framed as continuing the old one. The profile is still fully available
+    to the model; it just does not lead."""
+    problem, _ = web_app._advisor_system_prompt({
+        "name": "Vincent", "project_title": "t", "project_mode": "problem",
+        "bio": "Formal methods.", "papers": [], "proposal": {}})
+
+    assert "OPEN ON THE NEW WORK, NOT THE OLD" in problem
+    assert "does not have to relate to their previous work" in problem
+    # The old instruction to lead with their research area must be gone.
+    assert "Show you know their work" not in problem
+
+
+def test_explore_mode_is_exempt_from_that_rule():
+    """Suggesting directions from existing work is the entire point of Explore."""
+    explore, _ = web_app._advisor_system_prompt({
+        "name": "Vincent", "project_title": "t", "project_mode": "explore",
+        "bio": "Formal methods.", "papers": [], "proposal": {}})
+
+    assert "The exception is EXPLORE mode" in explore
+    assert "EXPLORE MODE" in explore
