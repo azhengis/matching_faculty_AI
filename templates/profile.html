@@ -109,6 +109,13 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 .pv-block{margin-bottom:24px}
 .pv-block:last-child{margin-bottom:0}
 .pv-block-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);margin-bottom:10px}
+.pv-block-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.pv-block-head .pv-block-label{margin-bottom:0}
+.pv-editor{border:1px solid var(--border);border-radius:var(--r-md);background:var(--canvas);padding:14px 15px}
+.pv-editor textarea{width:100%;padding:10px 12px;font-size:14px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;line-height:1.65;resize:vertical;transition:border-color .15s,box-shadow .15s}
+.pv-editor textarea:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
+.pv-editor-hint{font-size:12px;color:var(--ink-3);line-height:1.55;margin-bottom:9px}
+.pv-editor-actions{display:flex;align-items:center;gap:10px;margin-top:10px}
 .pv-count{color:var(--ink-3);font-weight:600}
 .pv-chips{display:flex;flex-wrap:wrap;gap:7px}
 .pv-chip{font-size:12.5px;color:var(--teal);background:var(--teal-bg);border:1px solid #BEE0E2;border-radius:999px;padding:5px 13px}
@@ -241,13 +248,37 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
       </div>
 
       <div class="pv-block" id="pv-interests-block">
-        <div class="pv-block-label">Research interests</div>
+        <div class="pv-block-head">
+          <div class="pv-block-label">Research interests</div>
+          <button class="pv-edit-btn" onclick="toggleFieldEditor('interests')">Edit</button>
+        </div>
         <div class="pv-chips" id="pv-interests"></div>
+        <div class="pv-editor" id="pv-interests-editor" style="display:none">
+          <div class="pv-editor-hint">One per line. A phrase says more than a single word &mdash; &ldquo;fairness auditing of clinical risk models&rdquo; beats &ldquo;fairness&rdquo;.</div>
+          <textarea id="pv-interests-input" rows="6"></textarea>
+          <div class="pv-editor-actions">
+            <button class="btn-primary" onclick="saveField('interests')">Save</button>
+            <button class="btn-outline" onclick="toggleFieldEditor('interests')">Cancel</button>
+            <span class="search-status" id="pv-interests-status"></span>
+          </div>
+        </div>
       </div>
 
       <div class="pv-block">
-        <div class="pv-block-label">Bio</div>
+        <div class="pv-block-head">
+          <div class="pv-block-label">Bio</div>
+          <button class="pv-edit-btn" onclick="toggleFieldEditor('bio')">Edit</button>
+        </div>
         <div class="pv-prose" id="pv-bio"></div>
+        <div class="pv-editor" id="pv-bio-editor" style="display:none">
+          <div class="pv-editor-hint">Your own words. This is what other researchers read when they match against you.</div>
+          <textarea id="pv-bio-input" rows="8"></textarea>
+          <div class="pv-editor-actions">
+            <button class="btn-primary" onclick="saveField('bio')">Save</button>
+            <button class="btn-outline" onclick="toggleFieldEditor('bio')">Cancel</button>
+            <span class="search-status" id="pv-bio-status"></span>
+          </div>
+        </div>
       </div>
 
       <div class="pv-block">
@@ -360,8 +391,11 @@ function setProse(id, text, placeholder) {
   el.classList.toggle('empty', !t);
 }
 
-function showProfileView(profile) {
-  document.getElementById('panel-1').classList.remove('active');
+// Renders the panel only. Kept separate from showProfileView so saving a field
+// can redraw the profile without touching the conversation beside it —
+// re-running pchatInit would clear the live thread and re-render it from the
+// persisted copy.
+function renderProfilePanel(profile) {
 
   const name = (profile.name || '').trim();
   const nameEl = document.getElementById('pv-name');
@@ -384,14 +418,9 @@ function showProfileView(profile) {
     profile.email ? `<a href="mailto:${esc(profile.email)}">${esc(profile.email)}</a>` : '';
 
   const interests = profile.research_interests || [];
-  const ib = document.getElementById('pv-interests-block');
-  if (interests.length) {
-    ib.style.display = '';
-    document.getElementById('pv-interests').innerHTML =
-      interests.map(i => `<span class="pv-chip">${esc(i)}</span>`).join('');
-  } else {
-    ib.style.display = 'none';
-  }
+  document.getElementById('pv-interests').innerHTML = interests.length
+    ? interests.map(i => `<span class="pv-chip">${esc(i)}</span>`).join('')
+    : '<div class="pv-prose empty">None yet — add a few so collaborators can find you.</div>';
 
   setProse('pv-bio', profile.bio, 'No bio yet — add one so collaborators know your work.');
 
@@ -405,18 +434,81 @@ function showProfileView(profile) {
 
   _profile = profile;
   document.getElementById('profile-view').style.display = 'block';
+}
+
+function showProfileView(profile) {
+  document.getElementById('panel-1').classList.remove('active');
+  renderProfilePanel(profile);
   pchatInit(profile.chat_history || []);
 }
 
-// ── Editing an existing profile ──────────────────────────────────────────────
-// Everything here is scraped from public sources or typed once and then left
-// alone, so it goes stale and gets things wrong. Editing has to land you in a
-// form that already holds what we think is true, not a blank one: the whole
-// point is correcting what is there. Straight to step 2 — the identity match
-// in step 1 is already settled, and "Not me" is still one click away.
+// ── Typing the bio and interests directly ────────────────────────────────────
+// The assistant can edit both, and for "rewrite this from my CV" it is the
+// better tool. But describing a change you could just type is a strange way to
+// fix a typo, and not everyone wants to discuss their own bio with a chatbot.
+// Both editors write the same fields, so they cannot disagree.
+const FIELD_EDITORS = {
+  bio: {
+    box:   'pv-bio-editor',
+    input: 'pv-bio-input',
+    status:'pv-bio-status',
+    read:  p => p.bio || '',
+    body:  v => ({bio_text: v}),
+  },
+  interests: {
+    box:   'pv-interests-editor',
+    input: 'pv-interests-input',
+    status:'pv-interests-status',
+    read:  p => (p.research_interests || []).join('\n'),
+    // One per line. Blank lines are dropped by the server, so a trailing
+    // newline while typing is harmless.
+    body:  v => ({research_interests: v.split('\n').map(x => x.trim()).filter(Boolean)}),
+  },
+};
 
-// Re-link this account to a different faculty record. Rare, and destructive
-// enough to the rest of the form that it starts from the name search.
+function toggleFieldEditor(field) {
+  const cfg = FIELD_EDITORS[field];
+  const box = document.getElementById(cfg.box);
+  const opening = box.style.display === 'none';
+  if (opening) {
+    // Always reload from the saved profile, so Cancel then Edit shows what is
+    // actually stored rather than the abandoned draft.
+    document.getElementById(cfg.input).value = cfg.read(_profile || {});
+    document.getElementById(cfg.status).textContent = '';
+  }
+  box.style.display = opening ? 'block' : 'none';
+  if (opening) document.getElementById(cfg.input).focus();
+}
+
+async function saveField(field) {
+  const cfg = FIELD_EDITORS[field];
+  const status = document.getElementById(cfg.status);
+  const value = document.getElementById(cfg.input).value;
+
+  status.className = 'search-status';
+  status.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/profile/fields', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(cfg.body(value)),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not save');
+
+    // Re-render from the server's copy so the panel and the assistant's
+    // on-file block agree about what is stored.
+    const fresh = await fetch('/api/profile/me');
+    if (fresh.ok) {
+      renderProfilePanel(await fresh.json());
+    }
+    document.getElementById(cfg.box).style.display = 'none';
+  } catch (e) {
+    status.className = 'search-status err';
+    status.textContent = e.message;
+  }
+}
+
 // ── Identity: name, contact email, photo ─────────────────────────────────────
 function toggleIdentityForm() {
   const box = document.getElementById('pv-identity');
@@ -458,20 +550,8 @@ async function saveIdentity() {
     }
 
     const me = await fetch('/api/profile/me');
-    if (me.ok) {
-      const fresh = await me.json();
-      // Keep the chat where it is; only the header needs redrawing.
-      _profile = fresh;
-      const nameEl = document.getElementById('pv-name');
-      nameEl.textContent = fresh.name || 'Add your name';
-      nameEl.style.opacity = fresh.name ? '' : '.5';
-      document.getElementById('pv-contact').innerHTML =
-        fresh.email ? `<a href="mailto:${esc(fresh.email)}">${esc(fresh.email)}</a>` : '';
-      const av = document.getElementById('pv-avatar');
-      if (fresh.has_photo) av.innerHTML = `<img src="/api/profile/photo?t=${Date.now()}" alt="">`;
-      else av.textContent = (fresh.name || '').split(/\s+/).filter(Boolean).slice(0, 2)
-        .map(s => s[0].toUpperCase()).join('') || '?';
-    }
+    // Panel only — the chat beside it keeps its place.
+    if (me.ok) renderProfilePanel(await me.json());
     document.getElementById('pv-identity').style.display = 'none';
   } catch (e) {
     status.textContent = e.message;
@@ -573,6 +653,14 @@ async function pchatCall(message, hidden) {
     pchatTyping(false);
     if (data.error) pchatBubble('bot', '<span style="color:#9B2020">' + esc(data.error) + '</span>');
     else pchatBubble('bot', pchatMd(data.reply || ''));
+    // The assistant just wrote to the profile; redraw the panel so it doesn't
+    // sit stale beside a message announcing the change.
+    if (data.saved) {
+      try {
+        const me = await fetch('/api/profile/me');
+        if (me.ok) renderProfilePanel(await me.json());
+      } catch (e) {}
+    }
   } catch (e) {
     pchatTyping(false);
     pchatBubble('bot', '<span style="color:#9B2020">Network error: ' + esc(e.message) + '</span>');

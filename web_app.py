@@ -80,6 +80,7 @@ _sessions: dict[str, list] = {}   # session_id → conversation history (mirrors
 MAX_STORED_TURNS = 80             # transcript tail kept per project; the proposal is the durable record
 MAX_PROMPT_DOCUMENTS = 3          # newest uploaded documents shown to the advisor
 MAX_DOCUMENT_CHARS   = 6000       # per document — a full CV blows the context window otherwise
+MAX_BIO_CHARS        = 8000       # a typed bio; generous, but not a pasted thesis
 
 # Live literature search (OpenAlex) — lets the advisor judge novelty against what
 # actually exists rather than its training memory. Free, no API key; a mailto is
@@ -3040,6 +3041,62 @@ async def api_profile_identity(req: Request):
     return JSONResponse({"name": name, "email": email})
 
 
+@app.post("/api/profile/fields")
+async def api_profile_fields(req: Request):
+    """Type the bio and research interests directly, without the assistant.
+
+    The assistant can edit both, and for a rewrite from a CV it is the better
+    tool. But describing a change you could simply type is a strange way to fix
+    a typo, and some people would rather not discuss their own bio with a
+    chatbot at all. Both editors write the same columns through the same
+    overlay sync, so the two can never disagree about what is on file.
+
+    Only keys that are present are written, so the bio editor cannot clobber
+    interests and vice versa. Unlike the assistant's path, an empty bio IS
+    accepted here: clearing your own bio is a deliberate act when you typed
+    it, whereas a model sending an empty string is a mistake worth refusing.
+    """
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    body = await req.json()
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute(
+        "SELECT id, faculty_id, bio_text, research_interests FROM profiles WHERE user_id = ?",
+        (user["id"],)).fetchone()
+    if not row:
+        con.close()
+        return JSONResponse({"error": "No profile yet."}, status_code=404)
+    pid, fid, bio, interests_json = row
+
+    changed = []
+    if "bio_text" in body:
+        bio = str(body.get("bio_text") or "").strip()[:MAX_BIO_CHARS]
+        changed.append("bio")
+    if "research_interests" in body:
+        raw = body.get("research_interests") or []
+        if not isinstance(raw, list):
+            con.close()
+            return JSONResponse({"error": "research_interests must be a list."}, status_code=400)
+        cleaned = [str(i).strip() for i in raw if str(i).strip()]
+        interests_json = json.dumps(list(dict.fromkeys(cleaned))[:20])
+        changed.append("research_interests")
+
+    if not changed:
+        con.close()
+        return JSONResponse({"error": "Nothing to save."}, status_code=400)
+
+    con.execute(
+        "UPDATE profiles SET bio_text = ?, research_interests = ?, updated_at = datetime('now') "
+        "WHERE id = ?", (bio, interests_json, pid))
+    con.commit()
+    _sync_faculty_overlay(con, user.get("email"), fid, bio, interests_json)
+    con.close()
+    return JSONResponse({"changed": changed, "bio": bio,
+                         "research_interests": json.loads(interests_json or "[]")})
+
+
 @app.post("/api/profile/photo")
 async def api_profile_photo_upload(req: Request, file: UploadFile = File(...)):
     """Store a profile photo. Images only, re-encoded name, size capped."""
@@ -3173,6 +3230,7 @@ async def api_profile_chat(req: Request):
     # every save, so a cache prefix would miss more often than it hits.
     messages = [{"role": "system", "content": system_prompt}] + _recent(history)
 
+    saved = False   # reported to the page so it can redraw the profile panel
     try:
         while True:
             resp = _litellm.completion(model=CHATBOT_MODEL, max_tokens=1000,
@@ -3187,7 +3245,7 @@ async def api_profile_chat(req: Request):
             history.append(entry); messages.append(entry)
             if reason != "tool_calls":
                 _persist_profile_chat(pid, history)
-                return JSONResponse({"reply": msg.content or ""})
+                return JSONResponse({"reply": msg.content or "", "saved": saved})
             for tc in msg.tool_calls:
                 args = json.loads(tc.function.arguments)
                 result = _apply_profile_chat_update(user, args)
@@ -3196,6 +3254,7 @@ async def api_profile_chat(req: Request):
                 # The prompt's on-file block is stale after a save; rebuild it so
                 # the model's next words describe the profile as it now is.
                 if result.get("status") == "saved":
+                    saved = True
                     messages[0] = {"role": "system", "content": _rebuilt_profile_prompt(user)}
     except Exception as e:
         _persist_profile_chat(pid, history)
