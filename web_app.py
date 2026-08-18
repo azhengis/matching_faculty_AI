@@ -305,34 +305,6 @@ def _init_profiles_db():
     # Sweep expired rows on startup so the table can't grow without bound.
     con.execute("DELETE FROM auth_sessions WHERE datetime(expires_at) <= datetime('now')")
 
-    # The advisor conversation, as the JSON message list the model is sent.
-    # Previously this lived only in a module-level dict, so every server
-    # restart silently wiped the conversation while the project still claimed
-    # a session_id — the advisor then reintroduced itself and re-asked
-    # questions the researcher had already answered.
-    try:
-        con.execute("ALTER TABLE projects ADD COLUMN chat_history TEXT DEFAULT '[]'")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
-
-    # The research-gap map: the works the novelty search surfaced plus the
-    # project's own focus, each given a 2D coordinate, so the advisor can SHOW
-    # the researcher where their project sits relative to existing work — the
-    # gap being the open space it lands in. Refreshed on each novelty search.
-    try:
-        con.execute("ALTER TABLE projects ADD COLUMN gap_map TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
-
-    # Real papers the novelty search surfaced, accumulated across searches and
-    # deduped, so they can serve as the project's reference list — shown in the
-    # panel and included in the downloaded proposal. ("references" is a SQL
-    # reserved word, hence the column name.)
-    try:
-        con.execute("ALTER TABLE projects ADD COLUMN lit_references TEXT DEFAULT '[]'")
-    except sqlite3.OperationalError:
-        pass  # column already exists from a prior run
-
     # User accounts. One profile per user (profiles.user_id, added in a
     # later migration step) enforces the one-account-one-profile model.
     con.execute("""
@@ -389,6 +361,44 @@ def _init_profiles_db():
             updated_at  TEXT DEFAULT (datetime('now'))
         )
     """)
+
+    # The advisor conversation, as the JSON message list the model is sent.
+    # Previously this lived only in a module-level dict, so every server
+    # restart silently wiped the conversation while the project still claimed
+    # a session_id — the advisor then reintroduced itself and re-asked
+    # questions the researcher had already answered.
+    try:
+        con.execute("ALTER TABLE projects ADD COLUMN chat_history TEXT DEFAULT '[]'")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
+    # The research-gap map: the works the novelty search surfaced plus the
+    # project's own focus, each given a 2D coordinate, so the advisor can SHOW
+    # the researcher where their project sits relative to existing work — the
+    # gap being the open space it lands in. Refreshed on each novelty search.
+    try:
+        con.execute("ALTER TABLE projects ADD COLUMN gap_map TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
+    # Real papers the novelty search surfaced, accumulated across searches and
+    # deduped, so they can serve as the project's reference list — shown in the
+    # panel and included in the downloaded proposal. ("references" is a SQL
+    # reserved word, hence the column name.)
+    try:
+        con.execute("ALTER TABLE projects ADD COLUMN lit_references TEXT DEFAULT '[]'")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
+
+    # How this project started: 'problem' (they arrived with something in mind)
+    # or 'explore' (they want directions suggested from their own background).
+    # It only changes the FIRST message — once a direction is picked, the saved
+    # proposal drives the stages exactly as it does for any other project — but
+    # it has to persist, or resuming an exploration reopens it as an interview.
+    try:
+        con.execute("ALTER TABLE projects ADD COLUMN mode TEXT DEFAULT 'problem'")
+    except sqlite3.OperationalError:
+        pass  # column already exists from a prior run
 
     # Collaborators surfaced for a project, kept so "people you matched with"
     # survives the chat session that produced them.
@@ -1621,9 +1631,11 @@ async def api_projects_create(req: Request):
         return JSONResponse({"error": "Answer at least one question to start a project."},
                             status_code=400)
 
+    mode = "explore" if body.get("mode") == "explore" else "problem"
+
     title = (body.get("title") or "").strip() or _project_title_from(answers.get("background", ""))
     if start_blank and not (body.get("title") or "").strip():
-        title = "Untitled project"
+        title = "Exploring new directions" if mode == "explore" else "Untitled project"
 
     con = sqlite3.connect(DB_PATH)
     pid = _profile_id_for(con, user)
@@ -1632,8 +1644,8 @@ async def api_projects_create(req: Request):
         return JSONResponse({"error": "Set up your profile first."}, status_code=404)
 
     cur = con.execute(
-        "INSERT INTO projects (profile_id, title, intake) VALUES (?, ?, ?)",
-        (pid, title, json.dumps(answers))
+        "INSERT INTO projects (profile_id, title, intake, mode) VALUES (?, ?, ?, ?)",
+        (pid, title, json.dumps(answers), mode)
     )
     project_id = cur.lastrowid
 
@@ -1647,7 +1659,7 @@ async def api_projects_create(req: Request):
                     tuple(seeded.values()) + (project_id,))
     con.commit()
     con.close()
-    return JSONResponse({"project_id": project_id, "title": title})
+    return JSONResponse({"project_id": project_id, "title": title, "mode": mode})
 
 
 @app.get("/api/projects/{project_id}")
@@ -1662,7 +1674,7 @@ async def api_project_get(project_id: int, req: Request):
         return JSONResponse({"error": "No such project"}, status_code=404)
 
     row = con.execute(
-        "SELECT id, title, intake, session_id, status, created_at, chat_history FROM projects WHERE id = ?",
+        "SELECT id, title, intake, session_id, status, created_at, chat_history, mode FROM projects WHERE id = ?",
         (project_id,)
     ).fetchone()
     try:
@@ -1680,6 +1692,7 @@ async def api_project_get(project_id: int, req: Request):
     return JSONResponse({
         "id": row[0], "title": row[1] or "Untitled project", "intake": intake,
         "session_id": row[3], "status": row[4], "created_at": row[5],
+        "mode": row[7] or "problem",
         "proposal": proposal, "matches": matches, "chat_history": chat_history,
     })
 
@@ -1940,6 +1953,26 @@ def _advisor_system_prompt(profile: dict) -> tuple[str, str]:
     ) or "  (none)"
 
     project_title = profile.get("project_title") or "this project"
+    exploring = profile.get("project_mode") == "explore"
+
+    # Explore is a different door into the same building. Bamshad asked for a
+    # mode that proposes directions FROM someone's own background, for the
+    # faculty member who wants to expand their work rather than one who already
+    # knows their problem. It governs the opening only: the moment a direction
+    # is chosen, it is an ordinary Stage 1 problem and the stages take over.
+    explore_block = f"""
+━━━ THIS PROJECT STARTED IN EXPLORE MODE ━━━
+{name} did not arrive with a problem. They asked to be shown directions their existing work could grow into, so for the FIRST message only, the usual "do not propose research directions" rule is suspended: proposing is the entire point here.
+
+YOUR FIRST MESSAGE:
+• One short line naming what you read their work as being about, from the summary of research activities, their publications, and their interests above.
+• Then 4-6 CONCRETE directions. For each: a specific researchable question in one sentence, one clause on how it follows from work they have already done, and one clause on what would be new about it. Name their actual papers, methods, or populations — "you could extend the caseworker-discretion work to the appeals process, where nobody has looked" is a direction; "explore AI ethics" is not. Vary them: some a short step from current work, some a genuine reach, at least one that crosses into a field they have not published in.
+• Ground every one in something visible above. If their profile is thin, say so plainly and ask what they have been thinking about instead of inventing directions from nothing.
+• End with the option block so each is pickable, and make the last option "Something else I have in mind".
+• No literature searching yet. These are conversation starters, not novelty claims, and saying "nobody has studied this" before you have searched is a promise you cannot keep.
+
+WHEN THEY PICK ONE, OR REACT TO ONE: explore mode is over. That direction is now their research problem, and you are in Stage 1 — start specifying it by asking, exactly as Stage 1 describes, and stop offering menus. If they dislike all of them, ask which came CLOSEST and what is wrong with it, then offer a second, narrower set. Do not cycle a third time: after two rounds, ask them directly what they would rather work on.
+""" if exploring else ""
     proposal      = profile.get("proposal") or {}
     locked        = set(proposal.get("edited_sections") or [])
 
@@ -2003,9 +2036,9 @@ SAY WHEN YOU DO NOT KNOW. Manufactured certainty is worse than an honest gap. "I
 The conversation moves through four stages, strictly in order. Where you are is determined by the saved proposal, not by memory of the conversation:
 
 {stage_line}
-
+{explore_block}
 FIRST MESSAGE:
-The conversation may open with a short scripted message the app sends on {name}'s behalf when they click into a project — "Let's start a new project.", "I'm back — where were we?", or simply "Hello.". {name} did not type it and never sees it. Treat it purely as the signal to deliver your first message per the rules below: never quote it, never respond to its wording, never say things like "good to hear you have something in mind" — it carries no information about them.
+The conversation may open with a short scripted message the app sends on {name}'s behalf when they click into a project — "Let's start a new project.", "Let's explore some directions.", "I'm back — where were we?", or simply "Hello.". {name} did not type it and never sees it. Treat it purely as the signal to deliver your first message per the rules below: never quote it, never respond to its wording, never say things like "good to hear you have something in mind" — it carries no information about them.
 
 NEVER narrate the app's internal state to {name}. No "the proposal panel is empty", no "nothing is saved yet", no describing what is or isn't filled in — that is your bookkeeping, and announcing it is how the first real user opened their first conversation with a status report instead of an advisor. The bullets below tell YOU which situation you're in; none of them are things to say. (Pointing at the panel later, when there's something in it worth pointing at, is fine.)
 • If the proposal above is EMPTY, open the conversation. Two short beats, then ONE question:
@@ -3436,7 +3469,7 @@ async def api_advisor_chat(req: Request):
     # server restart, which is why the history is read from the database rather
     # than from process memory.
     prow = con.execute(
-        "SELECT session_id, title, intake, chat_history FROM projects WHERE id = ?",
+        "SELECT session_id, title, intake, chat_history, mode FROM projects WHERE id = ?",
         (project_id,)).fetchone()
     session_id = prow[0]
     if not session_id:
@@ -3444,6 +3477,7 @@ async def api_advisor_chat(req: Request):
         con.execute("UPDATE projects SET session_id = ? WHERE id = ?", (session_id, project_id))
         con.commit()
     project_title = prow[1] or "this project"
+    project_mode = prow[4] or "problem"
     try:
         intake = json.loads(prow[2] or "{}")
     except ValueError:
@@ -3503,6 +3537,7 @@ async def api_advisor_chat(req: Request):
     con.close()
 
     profile["project_title"] = project_title
+    profile["project_mode"] = project_mode
     profile["intake"]        = intake
     profile["proposal"]      = current_proposal
 

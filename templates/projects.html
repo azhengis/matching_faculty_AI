@@ -67,6 +67,7 @@
           <p class="lede">Each project has its own proposal, its own conversation, and its own collaborators.</p>
         </div>
         <button class="btn btn-accent" id="btn-new" onclick="startProject(this)">New project</button>
+        <button class="btn" id="btn-explore" onclick="startProject(this, 'explore')">Explore directions</button>
       </div>
       <!-- Pick up where you left off: the reason most visits happen. -->
       <div id="resume-slot"></div>
@@ -236,19 +237,26 @@ function sectionChips(written) {
 // straight into proposal sections, bypassing the Stage-1 specificity gates the
 // advisor enforces one question at a time. Anyone with existing notes can
 // paste them as their first chat message — Stage 1 interviews from there.
-async function startProject(btn) {
-  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+// mode 'explore' opens with directions read from their own publications,
+// for the researcher who wants to expand rather than one arriving with a
+// problem already in mind.
+async function startProject(btn, mode) {
+  const label = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = mode === 'explore' ? 'Reading your work…' : 'Starting…';
+  }
   try {
     const res  = await fetch('/api/projects', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ start_blank: true })
+      body: JSON.stringify({ start_blank: true, mode: mode || 'problem' })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not start the project');
     window.location.href = `/advisor?project=${data.project_id}`;
   } catch (e) {
     alert(e.message);
-    if (btn) { btn.disabled = false; btn.textContent = 'New project'; }
+    if (btn) { btn.disabled = false; btn.textContent = label; }
   }
 }
 

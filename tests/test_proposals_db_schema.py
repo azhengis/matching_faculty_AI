@@ -33,9 +33,16 @@ def test_init_profiles_db_creates_projects_and_matches(tmp_path, monkeypatch):
     web_app._init_profiles_db()
 
     con = sqlite3.connect(db_path)
+    # Every column, including the four added by ALTER. Those migrations used to
+    # run ABOVE the CREATE TABLE, so on a fresh database they hit a table that
+    # did not exist yet, failed into their own except branch, and left the new
+    # install missing chat_history, gap_map, lit_references, and mode. Existing
+    # databases were fine, which is exactly why it went unnoticed — the bug only
+    # ever bit a first deploy. This assertion is what catches a repeat.
     assert _columns(con, "projects") == [
         "id", "profile_id", "title", "intake", "session_id", "status",
-        "created_at", "updated_at",
+        "created_at", "updated_at", "chat_history", "gap_map", "lit_references",
+        "mode",
     ]
     assert _columns(con, "project_matches") == [
         "id", "project_id", "faculty_id", "name", "title", "department",
