@@ -247,6 +247,23 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
         </div>
       </div>
 
+      <div class="pv-block">
+        <div class="pv-block-head">
+          <div class="pv-block-label">Bio</div>
+          <button class="pv-edit-btn" onclick="toggleFieldEditor('bio')">Edit</button>
+        </div>
+        <div class="pv-prose" id="pv-bio"></div>
+        <div class="pv-editor" id="pv-bio-editor" style="display:none">
+          <div class="pv-editor-hint">Your own words. This is what other researchers read when they match against you.</div>
+          <textarea id="pv-bio-input" rows="8"></textarea>
+          <div class="pv-editor-actions">
+            <button class="btn-primary" onclick="saveField('bio')">Save</button>
+            <button class="btn-outline" onclick="toggleFieldEditor('bio')">Cancel</button>
+            <span class="search-status" id="pv-bio-status"></span>
+          </div>
+        </div>
+      </div>
+
       <div class="pv-block" id="pv-interests-block">
         <div class="pv-block-head">
           <div class="pv-block-label">Research interests</div>
@@ -280,23 +297,6 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
             <button class="btn-primary" onclick="saveField('activities')">Save</button>
             <button class="btn-outline" onclick="toggleFieldEditor('activities')">Cancel</button>
             <span class="search-status" id="pv-activities-status"></span>
-          </div>
-        </div>
-      </div>
-
-      <div class="pv-block">
-        <div class="pv-block-head">
-          <div class="pv-block-label">Bio</div>
-          <button class="pv-edit-btn" onclick="toggleFieldEditor('bio')">Edit</button>
-        </div>
-        <div class="pv-prose" id="pv-bio"></div>
-        <div class="pv-editor" id="pv-bio-editor" style="display:none">
-          <div class="pv-editor-hint">Your own words. This is what other researchers read when they match against you.</div>
-          <textarea id="pv-bio-input" rows="8"></textarea>
-          <div class="pv-editor-actions">
-            <button class="btn-primary" onclick="saveField('bio')">Save</button>
-            <button class="btn-outline" onclick="toggleFieldEditor('bio')">Cancel</button>
-            <span class="search-status" id="pv-bio-status"></span>
           </div>
         </div>
       </div>
