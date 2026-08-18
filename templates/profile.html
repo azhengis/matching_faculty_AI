@@ -116,6 +116,17 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 .pv-editor textarea:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
 .pv-editor-hint{font-size:12px;color:var(--ink-3);line-height:1.55;margin-bottom:9px}
 .pv-editor-actions{display:flex;align-items:center;gap:10px;margin-top:10px}
+.pv-guide{font-size:12.5px;color:var(--ink-2);line-height:1.6;background:var(--canvas);border:1px solid var(--border);border-radius:var(--r-sm);padding:11px 13px;margin-bottom:12px}
+.pv-guide b{color:var(--ink);font-weight:650}
+.pv-guide ul{margin:7px 0 0 16px;padding:0}
+.pv-guide li{margin-bottom:3px}
+.pv-source{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}
+.pv-source:last-child{border-bottom:none}
+.pv-source a{color:var(--navy-lift);text-decoration:none}
+.pv-source a:hover{text-decoration:underline}
+.pv-source-meta{font-size:11.5px;color:var(--ink-3)}
+.pv-source-del{background:none;border:none;color:var(--ink-3);cursor:pointer;font-size:12px;font-family:inherit;padding:0 2px}
+.pv-source-del:hover{color:var(--scarlet)}
 .pv-count{color:var(--ink-3);font-weight:600}
 .pv-chips{display:flex;flex-wrap:wrap;gap:7px}
 .pv-chip{font-size:12.5px;color:var(--teal);background:var(--teal-bg);border:1px solid #BEE0E2;border-radius:999px;padding:5px 13px}
@@ -305,6 +316,31 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
         <div class="pv-block-label">Publications <span class="pv-count" id="pv-papers-count"></span></div>
         <div class="pv-papers" id="pv-papers"></div>
       </div>
+
+      <!-- What else can go in. Publications are only the published part of
+           someone's work; the proposals and drafts say where it is going, and
+           nothing on the page told anyone those were welcome. -->
+      <div class="pv-block">
+        <div class="pv-block-head">
+          <div class="pv-block-label">Sources <span class="pv-count" id="pv-sources-count"></span></div>
+          <button class="pv-edit-btn" onclick="document.getElementById('pv-source-file').click()">Add a file</button>
+        </div>
+        <div class="pv-guide">
+          <b>Your publications are only the published part.</b> Anything you add here is read into your
+          research summary and by the advisor when you start a project:
+          <ul>
+            <li>Your CV — usually the best description of your work anywhere</li>
+            <li>Grant proposals, funded or not</li>
+            <li>Unpublished manuscripts and working drafts</li>
+            <li>A research statement or teaching statement</li>
+            <li>A link to your Google Scholar, lab site, or personal page</li>
+          </ul>
+          PDF or DOCX. Paste a link straight into the conversation and it gets read too.
+        </div>
+        <input type="file" id="pv-source-file" accept=".pdf,.docx" style="display:none" onchange="addSourceFile(event)">
+        <div class="search-status" id="pv-source-status"></div>
+        <div id="pv-sources"></div>
+      </div>
     </div>
 
    </div>
@@ -458,6 +494,7 @@ function renderProfilePanel(profile) {
 
   _profile = profile;
   document.getElementById('profile-view').style.display = 'block';
+  loadSources();
 }
 
 function showProfileView(profile) {
@@ -560,6 +597,59 @@ async function generateActivities() {
     btn.textContent = was;
   }
   btn.disabled = false;
+}
+
+// ── Sources: what someone attached, and what else they could ────────────────
+async function loadSources() {
+  try {
+    const res = await fetch('/api/profile/documents');
+    if (!res.ok) return;
+    const docs = (await res.json()).documents || [];
+    document.getElementById('pv-sources-count').textContent = docs.length ? `(${docs.length})` : '';
+    document.getElementById('pv-sources').innerHTML = docs.length
+      ? docs.map(d => {
+          const name = d.kind === 'link'
+            ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.label || d.url)}</a>`
+            : `<a href="/api/profile/documents/${d.id}/file" target="_blank">${esc(d.label || d.filename)}</a>`;
+          // has_text is what matters: a file we could not read contributes
+          // nothing to the summary or the advisor, and saying so beats
+          // letting someone believe a scanned PDF was understood.
+          const meta = d.has_text ? 'read' : 'could not be read';
+          return `<div class="pv-source"><div>${name}
+                    <span class="pv-source-meta">&middot; ${meta}</span></div>
+                  <button class="pv-source-del" onclick="removeSource(${d.id})">Remove</button></div>`;
+        }).join('')
+      : '<div class="pv-prose empty">Nothing attached yet.</div>';
+  } catch (e) {}
+}
+
+async function addSourceFile(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  const status = document.getElementById('pv-source-status');
+  status.className = 'search-status';
+  status.textContent = 'Reading ' + file.name + '...';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('label', file.name);
+    const res = await fetch('/api/profile/documents', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Upload failed');
+    status.textContent = 'Added. Regenerate your research summary to fold it in.';
+    await loadSources();
+  } catch (e) {
+    status.className = 'search-status err';
+    status.textContent = e.message;
+  }
+}
+
+async function removeSource(id) {
+  try {
+    await fetch('/api/profile/documents/' + id, { method: 'DELETE' });
+    await loadSources();
+  } catch (e) {}
 }
 
 // ── Identity: name, contact email, photo ─────────────────────────────────────
@@ -683,6 +773,7 @@ async function pchatAttach(ev) {
     if (!res.ok || data.error) {
       pchatBubble('bot', '<span style="color:#9B2020">' + esc(data.error || 'Upload failed') + '</span>');
     } else {
+      loadSources();
       await pchatCall('[The researcher attached a document: ' + file.name + '. Its text is in the documents section above. Read it and say what you can use from it.]', true);
     }
   } catch (e) {
@@ -741,6 +832,7 @@ async function pchatSend() {
       });
     } catch (e) {}
     pchatTyping(false);
+    loadSources();
     await pchatCall('[The researcher added a link: ' + found[0] + '. Its page text is in the links section above. Read it and say what you can use.]', true);
     return;
   }
