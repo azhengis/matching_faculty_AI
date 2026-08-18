@@ -266,6 +266,26 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
 
       <div class="pv-block">
         <div class="pv-block-head">
+          <div class="pv-block-label">Summary of research activities</div>
+          <div style="display:flex;gap:6px">
+            <button class="pv-edit-btn" id="pv-act-gen" onclick="generateActivities()">Generate</button>
+            <button class="pv-edit-btn" onclick="toggleFieldEditor('activities')">Edit</button>
+          </div>
+        </div>
+        <div class="pv-prose" id="pv-activities"></div>
+        <div class="pv-editor" id="pv-activities-editor" style="display:none">
+          <div class="pv-editor-hint">Drafted from everything on file. Change anything that misreads your work &mdash; your edit is what stays.</div>
+          <textarea id="pv-activities-input" rows="9"></textarea>
+          <div class="pv-editor-actions">
+            <button class="btn-primary" onclick="saveField('activities')">Save</button>
+            <button class="btn-outline" onclick="toggleFieldEditor('activities')">Cancel</button>
+            <span class="search-status" id="pv-activities-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="pv-block">
+        <div class="pv-block-head">
           <div class="pv-block-label">Bio</div>
           <button class="pv-edit-btn" onclick="toggleFieldEditor('bio')">Edit</button>
         </div>
@@ -423,6 +443,10 @@ function renderProfilePanel(profile) {
     : '<div class="pv-prose empty">None yet — add a few so collaborators can find you.</div>';
 
   setProse('pv-bio', profile.bio, 'No bio yet — add one so collaborators know your work.');
+  setProse('pv-activities', profile.research_activities,
+           'Not generated yet. Generate reads your publications, attached documents, and links, and says what you have been working on.');
+  document.getElementById('pv-act-gen').textContent =
+    (profile.research_activities || '').trim() ? 'Regenerate' : 'Generate';
 
   const papers = profile.papers || [];
   document.getElementById('pv-papers-count').textContent = papers.length ? `(${papers.length})` : '';
@@ -454,6 +478,13 @@ const FIELD_EDITORS = {
     status:'pv-bio-status',
     read:  p => p.bio || '',
     body:  v => ({bio_text: v}),
+  },
+  activities: {
+    box:   'pv-activities-editor',
+    input: 'pv-activities-input',
+    status:'pv-activities-status',
+    read:  p => p.research_activities || '',
+    body:  v => ({research_activities: v}),
   },
   interests: {
     box:   'pv-interests-editor',
@@ -507,6 +538,28 @@ async function saveField(field) {
     status.className = 'search-status err';
     status.textContent = e.message;
   }
+}
+
+// Drafting costs a model call and only changes when the underlying material
+// does, so it runs on request rather than on every save.
+async function generateActivities() {
+  const btn = document.getElementById('pv-act-gen');
+  const prose = document.getElementById('pv-activities');
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Reading your work...';
+  try {
+    const res = await fetch('/api/profile/activities', {method: 'POST'});
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not generate a summary');
+    const me = await fetch('/api/profile/me');
+    if (me.ok) renderProfilePanel(await me.json());
+  } catch (e) {
+    prose.textContent = e.message;
+    prose.classList.add('empty');
+    btn.textContent = was;
+  }
+  btn.disabled = false;
 }
 
 // ── Identity: name, contact email, photo ─────────────────────────────────────
