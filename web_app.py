@@ -3160,7 +3160,8 @@ async def api_profile_fields(req: Request):
     con.commit()
     _sync_faculty_overlay(con, user.get("email"), fid, bio, interests_json)
     con.close()
-    return JSONResponse({"changed": changed, "bio": bio, "research_activities": activities,
+    return JSONResponse({"changed": changed, "bio": bio or "",
+                         "research_activities": activities or "",
                          "research_interests": json.loads(interests_json or "[]")})
 
 
