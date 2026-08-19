@@ -10,14 +10,15 @@
 .main{max-width:1100px;margin:0 auto;padding:30px 40px 60px}
 @media(max-width:860px){.main{padding:22px 18px 50px}}
 
-.xhead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
-.xhead h1{font-family:var(--serif);font-size:29px;font-weight:normal;letter-spacing:-.01em;margin-bottom:5px}
-.xhead .lede{font-size:14.5px;color:var(--ink-2);line-height:1.6;max-width:62ch}
+.xhead{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.xhead h1{font-family:var(--serif);font-size:29px;font-weight:normal;letter-spacing:-.01em}
 .xreset{background:none;border:1px solid var(--border-2);border-radius:999px;font-size:12px;color:var(--ink-2);cursor:pointer;font-family:inherit;padding:6px 14px;white-space:nowrap;transition:background .15s,color .15s}
 .xreset:hover{background:var(--canvas);color:var(--navy)}
 
 /* ── Conversation ── */
-.xchat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);display:flex;flex-direction:column;height:calc(100vh - 190px);min-height:480px}
+/* Height tracks the header above it: one line of title plus its margin and the
+   page padding. Was 190px when a three-line lede sat under the title. */
+.xchat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);display:flex;flex-direction:column;height:calc(100vh - 122px);min-height:480px}
 .xmessages{padding:20px 24px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
 .xmsg{display:flex;gap:10px;align-items:flex-start}
 .xmsg.user{flex-direction:row-reverse}
@@ -47,6 +48,11 @@
 .xinputrow{display:flex;gap:9px;padding:13px 22px 17px;border-top:1px solid var(--border)}
 .xinput{flex:1;padding:11px 14px;font-size:14.5px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;resize:none;line-height:1.55}
 .xinput:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
+.xsend{width:40px;height:40px;flex-shrink:0;align-self:flex-end;display:flex;align-items:center;justify-content:center;padding:0;background:var(--navy);color:#fff;border:none;border-radius:var(--r-sm);cursor:pointer;font-family:inherit;box-shadow:var(--sh-sm);transition:background .15s,transform .1s}
+.xsend:hover{background:var(--navy-lift)}
+.xsend:active{transform:translateY(1px)}
+.xsend:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.xsend svg{width:18px;height:18px}
 
 .xgate{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:30px}
 .xgate h2{font-family:var(--serif);font-size:22px;font-weight:normal;margin-bottom:8px}
@@ -61,12 +67,7 @@
 <div class="main">
 
   <div class="xhead">
-    <div>
-      <h1>Explore directions</h1>
-      <p class="lede">For when you don't have a project yet. This reads your publications and
-      whatever you've attached, then puts research directions on the table to argue about.
-      Pick one and it hands you to the advisor.</p>
-    </div>
+    <h1>Explore directions</h1>
     <button class="xreset" id="btn-reset" onclick="resetExplore()">Start over</button>
   </div>
 
@@ -86,7 +87,9 @@
     <div class="xinputrow">
       <textarea class="xinput" id="input" rows="1"
         placeholder="React to a direction, or tell me what you've been curious about"></textarea>
-      <button class="btn-primary" id="btn-send" onclick="send()">Send</button>
+      <button class="xsend" id="btn-send" onclick="send()" title="Send" aria-label="Send">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10h11"/><path d="M10 5.5 14.5 10 10 14.5"/></svg>
+      </button>
     </div>
   </div>
 
