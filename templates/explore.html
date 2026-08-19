@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explore — DePaul Faculty Matcher</title>
+<style>
+{{SHELL_CSS}}
+
+.main{max-width:1100px;margin:0 auto;padding:30px 40px 60px}
+@media(max-width:860px){.main{padding:22px 18px 50px}}
+
+.xhead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.xhead h1{font-family:var(--serif);font-size:29px;font-weight:normal;letter-spacing:-.01em;margin-bottom:5px}
+.xhead .lede{font-size:14.5px;color:var(--ink-2);line-height:1.6;max-width:62ch}
+.xreset{background:none;border:1px solid var(--border-2);border-radius:999px;font-size:12px;color:var(--ink-2);cursor:pointer;font-family:inherit;padding:6px 14px;white-space:nowrap;transition:background .15s,color .15s}
+.xreset:hover{background:var(--canvas);color:var(--navy)}
+
+/* ── Conversation ── */
+.xchat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);display:flex;flex-direction:column;height:calc(100vh - 190px);min-height:480px}
+.xmessages{padding:20px 24px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.xmsg{display:flex;gap:10px;align-items:flex-start}
+.xmsg.user{flex-direction:row-reverse}
+.xavatar{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;background:var(--navy)}
+.xmsg.user .xavatar{background:var(--teal)}
+.xbubble{padding:13px 17px;max-width:84%;line-height:1.68;font-size:14.5px;border-radius:var(--r-md);background:var(--canvas);border:1px solid var(--border)}
+.xmsg.user .xbubble{background:var(--navy);color:#fff;border:none;border-bottom-right-radius:4px}
+.xbubble p{margin-bottom:8px}.xbubble p:last-child{margin-bottom:0}
+.xbubble ul,.xbubble ol{padding-left:19px;margin-bottom:8px}.xbubble li{margin-bottom:3px}
+.xbubble strong{font-weight:600}
+.xtyping{font-size:13px;color:var(--ink-3);padding:2px 0}
+
+/* ── Pickable directions ── */
+.xopts{display:flex;flex-direction:column;gap:7px;margin-top:11px}
+.xopt{display:flex;gap:10px;align-items:flex-start;text-align:left;width:100%;background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r-md);padding:12px 15px;font-size:14px;line-height:1.55;color:var(--ink);cursor:pointer;font-family:inherit;transition:border-color .15s,box-shadow .15s,transform .1s}
+.xopt:hover{border-color:var(--navy-lift);box-shadow:var(--sh-sm);transform:translateY(-1px)}
+.xopt:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.xopt-num{font-size:11.5px;font-weight:700;color:var(--navy);flex-shrink:0;padding-top:2px}
+.xopt-own{color:var(--ink-2);font-style:italic}
+
+/* ── Handoff card ── */
+.xhandoff{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:16px 18px;margin-top:11px}
+.xhandoff-label{font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--green);margin-bottom:6px}
+.xhandoff-title{font-family:var(--serif);font-size:18px;line-height:1.4;margin-bottom:12px}
+
+/* ── Composer ── */
+.xinputrow{display:flex;gap:9px;padding:13px 22px 17px;border-top:1px solid var(--border)}
+.xinput{flex:1;padding:11px 14px;font-size:14.5px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;resize:none;line-height:1.55}
+.xinput:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
+
+.xgate{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-sm);padding:30px}
+.xgate h2{font-family:var(--serif);font-size:22px;font-weight:normal;margin-bottom:8px}
+.xgate p{font-size:14.5px;color:var(--ink-2);line-height:1.65;margin-bottom:16px;max-width:60ch}
+</style>
+</head>
+<body>
+
+<div class="app">
+{{SIDEBAR}}
+<div class="content">
+<div class="main">
+
+  <div class="xhead">
+    <div>
+      <h1>Explore directions</h1>
+      <p class="lede">For when you don't have a project yet. This reads your publications and
+      whatever you've attached, then puts research directions on the table to argue about.
+      Pick one and it hands you to the advisor.</p>
+    </div>
+    <button class="xreset" id="btn-reset" onclick="resetExplore()">Start over</button>
+  </div>
+
+  <!-- Shown when there is no profile to read: exploring from nothing would
+       just be the model inventing a career. -->
+  <div class="xgate" id="gate" style="display:none">
+    <h2>Set up your profile first</h2>
+    <p>Explore works from your publications, bio, and anything you've attached. Without
+    those it has nothing to build on and would only be guessing.</p>
+    <a class="btn btn-accent" href="/profile">Go to your profile &rarr;</a>
+  </div>
+
+  <div class="xchat" id="chat" style="display:none">
+    <div class="xmessages" id="messages">
+      <div class="xtyping" id="typing" style="display:none">Reading your work…</div>
+    </div>
+    <div class="xinputrow">
+      <textarea class="xinput" id="input" rows="1"
+        placeholder="React to a direction, or tell me what you've been curious about"></textarea>
+      <button class="btn-primary" id="btn-send" onclick="send()">Send</button>
+    </div>
+  </div>
+
+</div>
+</div>
+</div>
+
+<script>
+// The scripted opener. Sent on the researcher's behalf so the bot has a turn to
+// answer, never shown and never replayed — an unlisted kickoff would render as
+// a message they did not type.
+const KICKOFF = "Show me some directions.";
+let _busy = false;
+
+(async function init() {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) throw new Error('not logged in');
+    document.getElementById('sidebar-email').textContent = (await res.json()).email || '';
+  } catch (e) { window.location.href = '/login'; return; }
+
+  let profile = null;
+  try {
+    const res = await fetch('/api/profile/me');
+    if (res.ok) profile = await res.json();
+  } catch (e) {}
+  if (!profile) {
+    document.getElementById('gate').style.display = 'block';
+    document.getElementById('btn-reset').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('chat').style.display = 'flex';
+
+  let history = [];
+  try {
+    const res = await fetch('/api/explore/history');
+    if (res.ok) history = (await res.json()).history || [];
+  } catch (e) {}
+
+  render(history);
+  // Nothing said yet: open with the directions rather than an empty box.
+  if (!history.some(m => m.role === 'assistant' && m.content)) call(KICKOFF, true);
+})();
+
+function render(history) {
+  for (const m of history) {
+    if (m.role === 'user' && m.content && m.content !== KICKOFF) bubble('user', esc(m.content));
+    else if (m.role === 'assistant' && m.content) botReply(m.content, {replay: true});
+    // tool messages are internal
+  }
+}
+
+// ── Sending ──────────────────────────────────────────────────────────────────
+async function send() {
+  const input = document.getElementById('input');
+  const msg = input.value.trim();
+  if (!msg || _busy) return;
+  input.value = '';
+  call(msg, false);
+}
+
+async function call(message, hidden) {
+  if (!hidden) bubble('user', esc(message));
+  _busy = true;
+  setBusy(true);
+  try {
+    const res = await fetch('/api/explore/chat', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ message })
+    });
+    const data = await res.json();
+    setBusy(false);
+    if (data.error) bubble('bot', '<span style="color:#9B2020">' + esc(data.error) + '</span>');
+    else botReply(data.reply || '', {started: data.started});
+  } catch (e) {
+    setBusy(false);
+    bubble('bot', '<span style="color:#9B2020">Network error: ' + esc(e.message) + '</span>');
+  }
+  _busy = false;
+}
+
+// ── Rendering a reply ────────────────────────────────────────────────────────
+// Directions come back as "[1] ..." lines, same convention the advisor uses, so
+// each becomes a button instead of something to retype.
+function botReply(text, opts = {}) {
+  const { main, options } = parseReply(text);
+  let extra = '';
+
+  if (options.length) {
+    extra = '<div class="xopts">' + options.map(o =>
+      `<button class="xopt" onclick="pick(this, ${JSON.stringify(o.text).replace(/"/g, '&quot;')})">` +
+      `<span class="xopt-num">[${o.num}]</span><span>${esc(o.text)}</span></button>`).join('') +
+      `<button class="xopt xopt-own" onclick="focusComposer()">` +
+      `<span class="xopt-num">[${options.length + 1}]</span><span>None of these — I'll describe my own</span></button>` +
+      '</div>';
+  }
+
+  // A project was created: the exploration is done and the next move is the
+  // advisor, so say so with a link rather than leaving them to find it.
+  if (opts.started && opts.started.project_id) {
+    extra += `<div class="xhandoff">
+        <div class="xhandoff-label">Project created</div>
+        <div class="xhandoff-title">${esc(opts.started.title || 'Untitled project')}</div>
+        <a class="btn btn-accent" href="/advisor?project=${opts.started.project_id}">Talk it through with the advisor &rarr;</a>
+      </div>`;
+  }
+
+  botRaw(`<div class="xbubble">${markdownToHtml(main)}</div>${extra}`);
+}
+
+function parseReply(text) {
+  const options = [], mainLines = [];
+  let inOpts = false;
+  for (const line of String(text || '').split('\n')) {
+    const m = line.match(/^\s*\[(\d+)\]\s*(.+)$/);
+    if (m) { inOpts = true; options.push({ num: m[1], text: m[2].trim() }); continue; }
+    if (!inOpts) mainLines.push(line);
+  }
+  return { main: mainLines.join('\n').trimEnd(), options };
+}
+
+// Picking sends the direction's text back as the answer, and retires the menu
+// so a stale option can't be clicked two turns later.
+function pick(btn, text) {
+  if (_busy) return;
+  clearOptions();
+  call(text, false);
+}
+
+function clearOptions() {
+  document.querySelectorAll('.xopts').forEach(el => el.remove());
+}
+
+function focusComposer() {
+  clearOptions();
+  const input = document.getElementById('input');
+  input.focus();
+  input.scrollIntoView({ block: 'nearest' });
+}
+
+async function resetExplore() {
+  if (_busy) return;
+  if (!confirm('Clear this exploration and start over? Projects you already created are kept.')) return;
+  try {
+    await fetch('/api/explore/history', { method: 'DELETE' });
+  } catch (e) {}
+  document.getElementById('messages').querySelectorAll('.xmsg').forEach(el => el.remove());
+  clearOptions();
+  call(KICKOFF, true);
+}
+
+// ── DOM helpers ──────────────────────────────────────────────────────────────
+function bubble(role, html) {
+  botRaw(`<div class="xbubble">${html}</div>`, role);
+}
+
+function botRaw(html, role) {
+  const messages = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'xmsg ' + (role || 'bot');
+  const who = role === 'user' ? 'You' : 'AI';
+  div.innerHTML = `<div class="xavatar">${who}</div><div>${html}</div>`;
+  messages.insertBefore(div, document.getElementById('typing'));
+  scrollBottom();
+}
+
+function setBusy(on) {
+  document.getElementById('typing').style.display = on ? 'block' : 'none';
+  document.getElementById('btn-send').disabled = on;
+  if (on) scrollBottom();
+}
+
+function scrollBottom() {
+  const box = document.getElementById('messages');
+  box.scrollTop = box.scrollHeight;
+}
+
+function markdownToHtml(text) {
+  let h = esc(text);
+  h = h.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>').replace(/^##\s+(.+)$/gm, '<h3>$1</h3>');
+  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>');
+  h = h.replace(/^[-•]\s+(.+)$/gm, '<li>$1</li>');
+  h = h.replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>' + m + '</ul>');
+  h = h.replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>');
+  return '<p>' + h + '</p>';
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.getElementById('input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+</script>
+</body>
+</html>

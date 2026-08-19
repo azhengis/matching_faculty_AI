@@ -301,33 +301,30 @@ async function showStartMenu() {
         <div class="start-btn-title">I have a research problem in mind</div>
         <div class="start-btn-desc">I'll ask about it, one question at a time, and we'll sharpen it together</div>
       </button>
-      <button class="start-btn" onclick="startNewProject(this, 'explore')">
-        <div class="start-btn-title">Show me directions I could explore</div>
-        <div class="start-btn-desc">I'll read your publications and suggest where your work could go next</div>
+      <button class="start-btn" onclick="location.href='/explore'">
+        <div class="start-btn-title">I'm not sure what to work on yet</div>
+        <div class="start-btn-desc">Explore reads your work and suggests directions, then sends you back here</div>
       </button>
       ${resume}
     </div>`);
 }
 
-// mode 'explore' opens with suggested directions read from their own work,
-// for the researcher who wants to expand rather than one who arrives with a
-// problem. It changes the first message only; after that both are the same
-// conversation, driven by the saved proposal.
-async function startNewProject(btn, mode) {
+// Exploring lives on its own page now, with its own bot. This starts a project
+// for someone who already has a problem to talk through.
+async function startNewProject(btn) {
   if (_busy) return;
   if (btn) {
     btn.disabled = true;
-    btn.querySelector('.start-btn-title').textContent =
-      mode === 'explore' ? 'Reading your work…' : 'Starting…';
+    btn.querySelector('.start-btn-title').textContent = 'Starting…';
   }
   try {
     const res  = await fetch('/api/projects', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ start_blank: true, mode: mode || 'problem' })
+      body: JSON.stringify({ start_blank: true })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not start a project');
-    await openProject(data.project_id, { fresh: true, mode: data.mode });
+    await openProject(data.project_id, { fresh: true });
   } catch (e) {
     addBotRaw('<div class="bubble" style="color:#9B2020">' + esc(e.message) + '</div>');
   }
@@ -375,7 +372,7 @@ async function openProject(projectId, opts = {}) {
       'Hello — this project already has some sections written.',
       'Hello — this project already has some sections written',
       'Hello.',
-      "Let's explore some directions.",
+      "Let's explore some directions.",   // retired with in-advisor Explore, still in old threads
     ];
 
     // Render each stored message (except tool messages)
@@ -409,9 +406,7 @@ async function openProject(projectId, opts = {}) {
   // dispatches the first message on the ACTUAL saved proposal, so the kickoff
   // only needs to open the conversation, never to describe it.
   await callAdvisorAPI(
-    opts.fresh && (opts.mode || project.mode) === 'explore'
-                         ? "Let's explore some directions."
-    : opts.fresh         ? "Let's start a new project."
+    opts.fresh           ? "Let's start a new project."
     : project.session_id ? 'I’m back — where were we?'
                          : 'Hello.');
 }

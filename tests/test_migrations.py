@@ -104,7 +104,7 @@ def test_a_malformed_column_declaration_raises():
 EXPECTED = {
     "projects": ["chat_history", "gap_map", "lit_references", "mode"],
     "profiles": ["research_interests", "user_id", "photo_file", "chat_history",
-                 "research_activities"],
+                 "research_activities", "explore_history"],
     "proposals": ["edited_sections", "problem_statement", "novelty", "abstract",
                   "ethical_considerations", "ai_role"],
     "project_matches": ["relevant_work"],
