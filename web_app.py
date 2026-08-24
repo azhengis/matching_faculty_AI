@@ -47,6 +47,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, File
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import search as sm
+from text_clean import split_interests
 import doc_extract
 import auth
 
@@ -998,9 +999,19 @@ async def api_profile_automatch(req: Request):
 
     faculty_id, name, scraped_bio = frow
 
+    # Many DePaul pages carry the research areas as their own short list, which
+    # the scrape flattens into the bio. Lift it into the field it belongs in so
+    # the interests box is not empty while the topics sit buried in prose.
+    interests, bio = split_interests((scraped_bio or "").strip())
+    # The scrape sometimes loses the subject of the opening sentence, leaving a
+    # bio that starts "sit at the intersections of culture...". fix_summary
+    # repairs that for the search index; do it here too so the person is not
+    # shown a fragment of their own biography.
+    bio = sm.fix_summary(bio)
+
     # A previous self-edit is the person's own words — it outranks the scrape.
-    bio = (scraped_bio or "").strip()
-    interests = []
+    # Each field independently: an override that set only a bio must not blank
+    # the interests we just parsed out of the page.
     orow = con.execute(
         "SELECT self_bio, self_research_interests FROM faculty_overrides WHERE email = ?",
         (email,)).fetchone()
@@ -1008,9 +1019,11 @@ async def api_profile_automatch(req: Request):
         if (orow[0] or "").strip():
             bio = orow[0].strip()
         try:
-            interests = json.loads(orow[1] or "[]")
+            saved = json.loads(orow[1] or "[]")
         except ValueError:
-            interests = []
+            saved = []
+        if saved:
+            interests = saved
 
     paper_ids = [r[0] for r in con.execute(
         "SELECT id FROM papers WHERE faculty_id = ? "

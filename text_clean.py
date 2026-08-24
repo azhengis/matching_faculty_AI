@@ -103,6 +103,118 @@ def is_junk_summary(text):
     return len(stripped) < 25 and stripped[0].islower()
 
 
+# A heading a DePaul page uses to introduce a list of topics. The scrape keeps
+# it inline, so the list below it reads as part of the bio prose.
+_INTERESTS_HEADING = re.compile(
+    r"^[ \t\xa0]*(?:Research(?:\s+and)?\s+Interests?|Research\s+Areas?|Areas?\s+of\s+"
+    r"(?:Research|Expertise|Interest)|Specialt(?:y|ies)|Expertise)[ \t\xa0]*:?[ \t\xa0]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Headings that introduce something that is NOT a research topic. A list under
+# one of these is degrees or course titles, and must not become interests.
+_OTHER_HEADING = re.compile(
+    r"^[ \t\xa0]*(?:Education|Degrees?|Courses?(?:\s+(?:Taught|Offered))?|Teaching|"
+    r"Publications?|Awards?|Professional\s+Organizations?|Contact|"
+    r"Representative\s+Sample\s+of.*)[ \t\xa0]*:?[ \t\xa0]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+_MAX_INTEREST_LEN = 70
+_MAX_INTEREST_WORDS = 8
+# Verbs and determiners a sentence needs but a topic label does not.
+_PROSE_WORDS = re.compile(r"\b(?:is|are|was|were|has|have|had|the|his|her|their|its|he|she|they)\b",
+                          re.IGNORECASE)
+
+
+def _is_topic_line(line):
+    """True when a line reads as a topic label rather than a sentence."""
+    line = line.strip()
+    if not line or len(line) > _MAX_INTEREST_LEN or len(line.split()) > _MAX_INTEREST_WORDS:
+        return False
+    if line.rstrip().endswith((".", "!", "?", ";", ":")):
+        return False
+    if _PROSE_WORDS.search(line):
+        return False
+    if _OTHER_HEADING.match(line):
+        return False
+    # A URL, handle, or bare year is a stray page artefact, not an interest.
+    if re.match(r"^(?:https?://|www\.|@)", line, re.IGNORECASE) or re.fullmatch(r"[\d\s\-—]+", line):
+        return False
+    return True
+
+
+def split_interests(summary):
+    """Pull a structured topic list out of a scraped summary.
+
+    DePaul bio pages often carry the research areas as their own short list:
+
+        Lee earned a Ph.D. in Sociology from UT Austin in 2023.
+        Research and Interests:
+        Culture
+        Politics
+        Race and Ethnicity
+
+    The scrape flattens that into one blob, so the topics end up buried in the
+    bio while the profile's research-interests field sits empty. This returns
+    ``(interests, remaining_prose)`` so the topics can go in the box they
+    belong in and the bio keeps only what is actually prose.
+
+    DELIBERATELY CONSERVATIVE. Two shapes are extracted and no others:
+
+      A list under an explicit interests heading.
+
+      A summary that is a topic list from top to bottom, which is what a page
+      with no prose bio produces ("Computing Accessibility / Human Computer
+      Interaction").
+
+    Prose with a few short lines scattered through it is NOT mined, because
+    that pattern produces junk: one such record yields "Giving Voice",
+    "Backstage", and "www.Adlerimprov.com" — a play, a magazine, and a website.
+    Returns ``([], summary)`` whenever nothing is confidently a list.
+    """
+    if not summary or not summary.strip():
+        return [], summary or ""
+
+    text = summary.replace("\r\n", "\n").replace("\xa0", " ")
+    lines = text.split("\n")
+
+    heading = _INTERESTS_HEADING.search(text)
+    if heading:
+        head_idx = text[:heading.start()].count("\n")
+        before = lines[:head_idx]
+        after = lines[head_idx + 1:]
+        items, tail = [], []
+        for i, raw in enumerate(after):
+            if not raw.strip():
+                continue
+            if _OTHER_HEADING.match(raw) or not _is_topic_line(raw):
+                tail = after[i:]
+                break
+            items.append(raw.strip())
+        if items:
+            prose = "\n".join(before + tail)
+            return _dedupe(items), re.sub(r"\n{3,}", "\n\n", prose).strip()
+        return [], summary
+
+    # No heading: only treat it as a list when EVERY line is a topic.
+    present = [ln.strip() for ln in lines if ln.strip()]
+    if len(present) >= 2 and all(_is_topic_line(ln) for ln in present):
+        return _dedupe(present), ""
+    return [], summary
+
+
+def _dedupe(items):
+    """Order-preserving dedupe, case-insensitive, capped."""
+    seen, out = set(), []
+    for item in items:
+        key = item.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out[:20]
+
+
 def has_site_chrome(text):
     """True when any known furniture is still present. Used by tests and by the
     repair script's reporting."""

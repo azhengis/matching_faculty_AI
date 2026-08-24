@@ -119,3 +119,62 @@ def test_a_long_lowercase_summary_is_kept():
     text = ("investigates how caseworkers contest algorithmic risk scores in "
             "child welfare settings")
     assert not is_junk_summary(text)
+
+
+# ── Lifting a research-interests list out of the bio ────────────────────────
+
+def test_a_list_under_an_interests_heading_moves_to_the_interests_field():
+    """The reported case. The topics were sitting in the bio while the
+    interests box read "None yet"."""
+    summary = ("Lee earned a Ph.D. in Sociology from the University of Texas at Austin in 2023.\n\n"
+               "Research and Interests:\n\nCulture\n\nPolitics\n\nRace and Ethnicity\n\nSocial Inequality")
+    from text_clean import split_interests
+    interests, prose = split_interests(summary)
+    assert interests == ["Culture", "Politics", "Race and Ethnicity", "Social Inequality"]
+    assert prose.startswith("Lee earned a Ph.D.")
+    assert "Culture" not in prose
+
+
+def test_a_summary_that_is_nothing_but_topics_becomes_interests():
+    """A page with no prose bio produces only the list."""
+    from text_clean import split_interests
+    interests, prose = split_interests("Computing Accessibility\n\nHuman Computer Interaction")
+    assert interests == ["Computing Accessibility", "Human Computer Interaction"]
+    assert prose == ""
+
+
+def test_prose_is_never_mined_for_stray_short_lines():
+    """This is why the parser is conservative. Mining prose for short lines
+    yields a play, a magazine, and a website as somebody's research interests."""
+    from text_clean import split_interests
+    summary = ("He coached the August Wilson monologue competition\nGiving Voice\n, produced by "
+               "Denzel Washington. His advice columns for\nBackstage\nmagazine and his site\n"
+               "www.Adlerimprov.com\nreflect his commitment to emerging talent.")
+    interests, prose = split_interests(summary)
+    assert interests == []
+    assert prose == summary
+
+
+def test_a_degree_list_is_not_research_interests():
+    from text_clean import split_interests
+    interests, _ = split_interests(
+        "Education\nMFA, Screenwriting — DePaul University\nMA, Cinema Studies — DePaul University")
+    assert interests == []
+
+
+def test_ordinary_prose_is_left_alone():
+    from text_clean import split_interests
+    bio = "I study fairness in clinical risk models and how caseworkers contest them."
+    assert split_interests(bio) == ([], bio)
+
+
+def test_duplicates_are_collapsed_case_insensitively():
+    from text_clean import split_interests
+    interests, _ = split_interests("Research Interests:\n\nEcology\n\nZoology\n\necology")
+    assert interests == ["Ecology", "Zoology"]
+
+
+def test_empty_input_is_safe():
+    from text_clean import split_interests
+    assert split_interests("") == ([], "")
+    assert split_interests(None) == ([], "")
