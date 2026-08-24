@@ -25,6 +25,8 @@ RUN:
 import os, sys, sqlite3, pickle, re, json, hashlib
 import numpy as np
 
+from text_clean import strip_site_chrome
+
 # Same DATA_DIR contract as web_app.py. These were bare relative paths, which
 # resolve against the CURRENT WORKING DIRECTORY — fine when you always launch
 # from the repo root, silently wrong under a process manager or a container
@@ -225,7 +227,10 @@ FRAGMENT_STARTERS = re.compile(
 )
 
 def fix_summary(text):
-    text = text.strip()
+    # Belt and braces: 5_fix_data.py cleans the database, but an index built
+    # from a DB that predates that run would otherwise embed DePaul's street
+    # address as though it were 729 people's research.
+    text = strip_site_chrome(text)
     if not text:
         return text
     if text[0].islower() or FRAGMENT_STARTERS.match(text):

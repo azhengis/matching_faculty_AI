@@ -15,6 +15,9 @@ import json, csv, os, re, time, sys
 import requests
 from bs4 import BeautifulSoup
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from text_clean import strip_site_chrome   # noqa: E402
+
 ROSTER_IN  = "depaul_roster_clean.json"
 JSON_OUT   = "depaul_faculty_enriched.json"
 CSV_OUT    = "depaul_faculty_enriched.csv"
@@ -154,7 +157,11 @@ def main():
             continue
 
         soup = BeautifulSoup(html, "html.parser")
-        sections = parse_sections(soup.get_text("\n"))
+        # soup.get_text() takes the whole page, footer included, and the section
+        # parser has no way to know the address block below the last heading is
+        # not part of it. Cutting the furniture here keeps it out of every
+        # section at once, and out of the database in the first place.
+        sections = parse_sections(strip_site_chrome(soup.get_text("\n")))
 
         p["college"]    = meta(soup, "College") or p.get("college", "")
         p["department"] = meta(soup, "Department") or p.get("department", "")
