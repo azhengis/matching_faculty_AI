@@ -76,8 +76,20 @@ def fetch(url):
 
 
 def meta(soup, name):
-    tag = soup.find("meta", attrs={"name": f"meta-{name}"})
-    return (tag.get("content") or "").strip() if tag else ""
+    """Read a bio page's metadata, tolerating both template generations.
+
+    DePaul rebuilt the bio template after the June scrape. The tags carry the
+    same names and the same values, but the "meta-" prefix is gone:
+    <meta name="meta-College"> became <meta name="College">. Looking only for
+    the prefixed form returns "" for every field on a current page, so a
+    re-scrape today would produce records with no college, department, or
+    title and nothing would report an error.
+    """
+    for attr in (f"meta-{name}", name):
+        tag = soup.find("meta", attrs={"name": attr})
+        if tag and (tag.get("content") or "").strip():
+            return tag["content"].strip()
+    return ""
 
 
 def parse_sections(text):

@@ -84,7 +84,7 @@ The pipeline is a numbered sequence — each step reads what the previous one wr
 
 ```bash
 cd pipeline
-python3 1_extract_faculty.py       # scrape the DePaul faculty directory
+python3 1_extract_faculty.py       # scrape the faculty directory (via sitemap.xml)
 python3 2_enrich_bios.py           # research summaries + courses from bio pages
 python3 3_enrich_openalex.py       # OpenAlex research topics for thin bios
 python3 4_db_setup.py              # JSON → faculty.db
@@ -94,8 +94,18 @@ python3 7_fetch_papers_s2.py       # publications via Semantic Scholar + CrossRe
 python3 8_clean_papers.py          # drop misattributed papers
 ```
 
-Steps 6–7 are resumable (Ctrl-C is safe; progress saves per faculty member) and
-take roughly an hour against rate-limited public APIs.
+Steps 1–2 and 6–7 are resumable (Ctrl-C is safe: pages are cached under
+`bio_cache/` and paper progress saves per faculty member). A full run is a few
+hours, most of it steps 6–7 against rate-limited public APIs.
+
+Step 1 enumerates people from `depaul.edu/sitemap.xml`, which DePaul publishes
+and `robots.txt` allows, so the list stays complete without guessing how their
+directory paginates. Bio pages carry their structured fields as `<meta>` tags;
+both the current names (`<meta name="College">`) and the older prefixed ones
+(`meta-College`) are read, because DePaul changed the template in 2026 and a
+scraper that knows only one form returns empty fields without erroring. Step 1
+prints per-field fill rates for exactly that reason — if `college` or
+`department` comes back under 50%, the template moved again.
 
 Optional, for the fine-tuned model:
 
@@ -104,8 +114,36 @@ python3 9_generate_training_data.py   # LLM writes 5 plausible search queries pe
 python3 10_finetune_specter2.py       # trains 3 configs, evaluates, keeps the best
 ```
 
-`11_merge_scholar_csv.py` and `12_recover_missed_faculty.py` are repair tools for
-specific data problems, not part of a normal build.
+Repair tools, not part of a normal build:
+
+| | |
+|---|---|
+| `11_merge_scholar_csv.py` | merge a Google Scholar export into `papers` |
+| `12_recover_missed_faculty.py` | promote staged Scholar publications the name match missed |
+| `13_add_faculty.py` | add ONE faculty member from their bio page |
+
+### Adding somebody the roster missed
+
+The roster is a snapshot. Anyone hired after it was taken is absent, and
+returns nothing when they sign in — they get an empty profile and have to give
+the assistant their background by hand. Rebuilding the whole roster to recover
+one person is an hour of crawling; `13_add_faculty.py` is the ten-second
+version. It takes a bio URL or the email address they gave you:
+
+```bash
+python3 pipeline/13_add_faculty.py mbachma3@depaul.edu            # dry run
+python3 pipeline/13_add_faculty.py <url-or-email> --apply
+rm -f faculty_index.pkl paper_index.pkl && python3 search.py      # or they stay unfindable
+```
+
+Publications need an OpenAlex author with a DePaul affiliation, which a recent
+hire will not have — their published work still carries the institution they
+came from. The script prints the candidates so you can confirm one yourself and
+re-run with `--openalex-id A5012345678`, rather than guessing and attaching
+somebody else's papers.
+
+For the deployed site, also regenerate the seed the image is built from:
+`python3 pipeline/make_seed_db.py --gzip-to data/seed_faculty.db.gz`.
 
 Embedding indexes rebuild automatically when the underlying text changes — the
 cache is keyed on a fingerprint of the input.
@@ -121,6 +159,7 @@ chatbot.py          LiteLLM wrapper
 auth.py             Password hashing and session handling
 doc_extract.py      PDF/DOCX text extraction for uploaded documents
 templates/          Server-rendered pages (_shell.html holds shared CSS + nav)
+text_clean.py       Shared scraped-text cleanup (site chrome, interest lists)
 pipeline/           Numbered data-collection scripts, run in order
 tests/              pytest suite
 docs/superpowers/   Design specs and implementation plans, by date
