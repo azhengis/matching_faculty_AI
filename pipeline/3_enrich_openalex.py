@@ -37,6 +37,25 @@ class Unreachable(Exception):
     """
 
 
+def _quota_message(response):
+    """The human-readable reason for a 429, when it is a spent budget.
+
+    Distinguishes "you are going too fast, slow down" — worth retrying — from
+    "you have no budget until midnight", which no amount of backoff fixes.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    if "budget" not in (body.get("message") or "").lower():
+        return ""
+    seconds = int(response.headers.get("retry-after") or body.get("retryAfter") or 0)
+    hours = seconds / 3600
+    return (f"OpenAlex budget exhausted: {body.get('message')} "
+            f"Resets in about {hours:.1f}h. Re-run this stage after that; it skips "
+            f"anyone already enriched.")
+
+
 def get(url, params):
     params = dict(params)
     params["mailto"] = YOUR_EMAIL
@@ -46,6 +65,14 @@ def get(url, params):
             if r.status_code == 200:
                 return r.json()
             if r.status_code == 429:
+                # OpenAlex moved to a metered model: a free key gets $0.10 of
+                # budget a day (1,000 credits) and each request costs 10, so
+                # roughly 100 calls. Backing off does not help once the budget
+                # is spent — it resets at midnight UTC — so report the real
+                # reason instead of retrying into a wall.
+                detail = _quota_message(r)
+                if detail:
+                    raise Unreachable(detail)
                 wait = 2 ** attempt
                 print(f"    rate limited, waiting {wait}s...")
                 time.sleep(wait)
