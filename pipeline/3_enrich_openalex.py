@@ -12,7 +12,7 @@ Run once (takes ~5-10 min depending on how many faculty are missing):
 Then re-run db_setup.py and delete faculty_index.pkl so search.py rebuilds
 the embeddings with the new data.
 """
-import json, time, re, sqlite3, os
+import json, time, re, sqlite3, os, sys
 import requests
 
 YOUR_EMAIL   = "aruzhanzhengis19@gmail.com"
@@ -24,6 +24,17 @@ PAUSE        = 0.2   # seconds between requests (polite pool)
 MAX_PAPERS   = 15    # paper titles to use per person
 
 session = requests.Session()
+
+
+class Unreachable(Exception):
+    """OpenAlex could not be asked, which is not the same as a "no".
+
+    Exhausting the retries used to return None, exactly like a genuine miss, so
+    a throttled run printed "not found in OpenAlex" for every single person and
+    finished reporting success while enriching nobody. Worse, that outcome is
+    indistinguishable afterwards from a real absence. Raising instead stops the
+    run at the first sign the service is not answering.
+    """
 
 
 def get(url, params):
@@ -39,12 +50,14 @@ def get(url, params):
                 print(f"    rate limited, waiting {wait}s...")
                 time.sleep(wait)
                 continue
-            return None
+            return None                      # a real answer: no such author
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
             wait = 2 ** attempt
             print(f"    network error, retrying in {wait}s...")
             time.sleep(wait)
-    return None
+    raise Unreachable(
+        f"OpenAlex did not answer after 6 attempts ({url}). It is rate limiting or "
+        f"down; re-run this stage later. Nothing has been written.")
 
 
 def find_author(name):
@@ -140,18 +153,29 @@ def main():
     print("Querying OpenAlex...\n")
 
     enriched = 0
+    stopped_early = None
     for idx, p in enumerate(missing, 1):
         name = p.get("name", "")
         print(f"[{idx}/{len(missing)}] {name}", end=" ... ", flush=True)
 
-        author = find_author(name)
+        try:
+            author = find_author(name)
+        except Unreachable as e:
+            print("\n")
+            stopped_early = e
+            break
         time.sleep(PAUSE)
 
         if not author:
             print("not found in OpenAlex")
             continue
 
-        summary = build_summary(author)
+        try:
+            summary = build_summary(author)
+        except Unreachable as e:
+            print("\n")
+            stopped_early = e
+            break
         if not summary.strip():
             print("found but no usable data")
             continue
@@ -167,18 +191,23 @@ def main():
 
     print(f"\nEnriched {enriched} / {len(missing)} previously-missing faculty.")
 
-    # Save back to JSON
+    # Whatever was learned before the service stopped answering is still worth
+    # keeping: the remaining people are simply still missing a summary, and a
+    # re-run picks up exactly where this left off.
     with open(JSON_FILE, "w", encoding="utf-8") as f:
         json.dump(people, f, indent=2, ensure_ascii=False)
     print(f"Updated {JSON_FILE}")
 
-    # Rebuild SQLite DB
-    print("Rebuilding faculty.db ...")
-    os.system("python3 db_setup.py")
+    if stopped_early:
+        print(f"\nSTOPPED EARLY: {stopped_early}")
+        print("Re-run this stage when OpenAlex is answering again; it skips anyone")
+        print("already enriched, so nothing is repeated.")
+        sys.exit(1)
 
-    # Prompt to rebuild embedding index
-    print("\nDone. Now delete faculty_index.pkl and re-run search.py to rebuild the index:")
-    print("  rm faculty_index.pkl && python3 search.py")
+    print("\nNow load the JSON into the database and rebuild the index:")
+    print("  python3 pipeline/4_db_setup.py")
+    print("  python3 pipeline/5_fix_data.py")
+    print("  rm -f faculty_index.pkl paper_index.pkl && python3 search.py")
 
 
 if __name__ == "__main__":

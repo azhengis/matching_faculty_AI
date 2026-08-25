@@ -18,10 +18,16 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from text_clean import strip_site_chrome   # noqa: E402
 
-ROSTER_IN  = "depaul_roster_clean.json"
-JSON_OUT   = "depaul_faculty_enriched.json"
-CSV_OUT    = "depaul_faculty_enriched.csv"
-CACHE_DIR  = "bio_cache"
+# Anchored on the repo root like every other stage. These were bare relative
+# names, so the script only worked from whatever directory happened to hold the
+# data — and since the files live in data/, that was no directory at all: it
+# raised FileNotFoundError whether you ran it from the root or from pipeline/,
+# exactly as the README tells you to.
+_ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROSTER_IN  = os.path.join(_ROOT, "data", "depaul_roster_clean.json")
+JSON_OUT   = os.path.join(_ROOT, "data", "depaul_faculty_enriched.json")
+CSV_OUT    = os.path.join(_ROOT, "data", "depaul_faculty_enriched.csv")
+CACHE_DIR  = os.path.join(_ROOT, "bio_cache")
 PAUSE_SECS = 1.0
 USER_AGENT = "DePaul-Faculty-Matching-Project (academic; contact: you@depaul.edu)"
 
@@ -144,16 +150,67 @@ def ollama_topics(text):
         return []
 
 
-def main():
-    # Prefer the already-enriched file as the base so a re-run only fills
-    # gaps / picks up live page changes instead of clobbering research
-    # summaries that came from a later stage (e.g. the OpenAlex fallback).
-    src = JSON_OUT if os.path.exists(JSON_OUT) else ROSTER_IN
-    if not os.path.exists(src):
-        sys.exit(f"Put {ROSTER_IN} next to this script first.")
-    with open(src, encoding="utf-8") as f:
-        people = json.load(f)
+def _identity(person):
+    """Match a person across files: email when there is one, else folded name."""
+    email = (person.get("email") or "").strip().lower()
+    return ("email", email) if email else ("name", " ".join((person.get("name") or "").lower().split()))
 
+
+def load_people():
+    """The roster, merged over whatever enrichment previous runs produced.
+
+    This used to read the enriched file INSTEAD of the roster whenever it
+    existed, to avoid clobbering research summaries that later stages filled
+    in. That protected the summaries and quietly defeated the entire point of
+    re-running stage 1: a fresh roster with new hires in it was never read, so
+    nobody new could ever enter the pipeline.
+
+    Merging keeps both. Enrichment is carried over per person, the directory
+    fields are refreshed from the new roster, and anyone the roster has and the
+    enriched file does not is added. People in the enriched file but no longer
+    in the roster are KEPT — a page can vanish because someone left, but also
+    because the crawl hiccuped, and this file is not the place to delete
+    somebody from.
+    """
+    if not os.path.exists(ROSTER_IN):
+        sys.exit(f"No roster at {ROSTER_IN}. Run 1_extract_faculty.py first.")
+    with open(ROSTER_IN, encoding="utf-8") as f:
+        roster = json.load(f)
+
+    enriched = []
+    if os.path.exists(JSON_OUT):
+        with open(JSON_OUT, encoding="utf-8") as f:
+            enriched = json.load(f)
+    by_id = {_identity(p): p for p in enriched}
+
+    people, added = [], 0
+    seen = set()
+    for fresh in roster:
+        key = _identity(fresh)
+        seen.add(key)
+        prior = by_id.get(key)
+        if prior is None:
+            people.append(dict(fresh))
+            added += 1
+        else:
+            # Directory fields come from the roster; everything a later stage
+            # produced stays unless the roster has something non-empty.
+            merged = dict(prior)
+            for field, value in fresh.items():
+                if value not in (None, "", [], {}):
+                    merged[field] = value
+            people.append(merged)
+
+    departed = [p for p in enriched if _identity(p) not in seen]
+    people.extend(departed)
+
+    print(f"Roster {len(roster)}, previously enriched {len(enriched)}: "
+          f"{added} new, {len(departed)} no longer listed (kept).")
+    return people
+
+
+def main():
+    people = load_people()
     todo = [p for p in people if p.get("bio_url")]
     print(f"{len(people)} people, {len(todo)} bio pages (reading from cache).\n")
 
@@ -176,7 +233,13 @@ def main():
         sections = parse_sections(strip_site_chrome(soup.get_text("\n")))
 
         p["college"]    = meta(soup, "College") or p.get("college", "")
-        p["department"] = meta(soup, "Department") or p.get("department", "")
+        # Joint appointments arrive semicolon-separated ("Neuroscience;Psychology").
+        # Stage 1 normalises them to commas, matching how colleges are listed;
+        # re-reading the raw tag here used to undo that, and the semicolons then
+        # showed on the profile page exactly as the page emitted them.
+        dept = meta(soup, "Department")
+        if dept:
+            p["department"] = ", ".join(x.strip() for x in dept.split(";") if x.strip())
         p["title"]      = meta(soup, "PersonnelTitle") or p.get("title", "")
 
         # Combine every research-type section that exists on the page.

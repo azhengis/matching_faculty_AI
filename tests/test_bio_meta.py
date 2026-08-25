@@ -94,3 +94,91 @@ def test_the_name_falls_back_to_the_page_title():
 
 def test_a_page_with_no_name_at_all_is_skipped_rather_than_stored_blank():
     assert stage1.person_from_page("https://www.depaul.edu/faculty/x", "<html></html>") is None
+
+
+# ── Merging a fresh roster over previous enrichment ─────────────────────────
+
+def _write(tmp_path, monkeypatch, roster, enriched):
+    import json
+    r = tmp_path / "roster.json"
+    e = tmp_path / "enriched.json"
+    r.write_text(json.dumps(roster))
+    if enriched is not None:
+        e.write_text(json.dumps(enriched))
+    monkeypatch.setattr(stage2, "ROSTER_IN", str(r))
+    monkeypatch.setattr(stage2, "JSON_OUT", str(e))
+
+
+def test_a_new_hire_in_the_roster_enters_the_pipeline(tmp_path, monkeypatch):
+    """The bug this replaced: stage 2 read the enriched file INSTEAD of the
+    roster whenever it existed, so re-running the crawl could never introduce
+    anybody. That defeated the entire point of refreshing the roster."""
+    _write(tmp_path, monkeypatch,
+           roster=[{"name": "Old Hand", "email": "a@depaul.edu", "title": "Professor"},
+                   {"name": "New Hire", "email": "b@depaul.edu", "title": "Assistant Professor"}],
+           enriched=[{"name": "Old Hand", "email": "a@depaul.edu", "title": "Professor",
+                      "research_summary": "Years of work."}])
+
+    people = stage2.load_people()
+    by_email = {p["email"]: p for p in people}
+    assert "b@depaul.edu" in by_email
+    assert by_email["b@depaul.edu"]["title"] == "Assistant Professor"
+
+
+def test_enrichment_from_earlier_stages_is_not_clobbered(tmp_path, monkeypatch):
+    """The reason the old behaviour existed. Research summaries come from later
+    stages and the roster has none, so a naive overwrite would erase them."""
+    _write(tmp_path, monkeypatch,
+           roster=[{"name": "Old Hand", "email": "a@depaul.edu", "title": "Professor",
+                    "research_summary": ""}],
+           enriched=[{"name": "Old Hand", "email": "a@depaul.edu", "title": "Professor",
+                      "research_summary": "Years of work.", "classes_taught": "CS 101"}])
+
+    person = stage2.load_people()[0]
+    assert person["research_summary"] == "Years of work."
+    assert person["classes_taught"] == "CS 101"
+
+
+def test_a_changed_title_is_picked_up_from_the_roster(tmp_path, monkeypatch):
+    """Promotions and department moves are exactly what a refresh is for."""
+    _write(tmp_path, monkeypatch,
+           roster=[{"name": "Old Hand", "email": "a@depaul.edu", "title": "Full Professor",
+                    "department": "Neuroscience"}],
+           enriched=[{"name": "Old Hand", "email": "a@depaul.edu", "title": "Associate Professor",
+                      "department": "Psychology", "research_summary": "Years of work."}])
+
+    person = stage2.load_people()[0]
+    assert person["title"] == "Full Professor"
+    assert person["department"] == "Neuroscience"
+    assert person["research_summary"] == "Years of work."
+
+
+def test_somebody_no_longer_listed_is_kept_not_deleted(tmp_path, monkeypatch):
+    """A page can vanish because they left, or because the crawl hiccuped.
+    This file is not the place to decide which."""
+    _write(tmp_path, monkeypatch,
+           roster=[{"name": "Still Here", "email": "a@depaul.edu"}],
+           enriched=[{"name": "Still Here", "email": "a@depaul.edu"},
+                     {"name": "Departed", "email": "z@depaul.edu",
+                      "research_summary": "Their work."}])
+
+    names = {p["name"] for p in stage2.load_people()}
+    assert names == {"Still Here", "Departed"}
+
+
+def test_people_are_matched_on_email_not_name_spelling(tmp_path, monkeypatch):
+    """The directory renders names inconsistently; the address is stable."""
+    _write(tmp_path, monkeypatch,
+           roster=[{"name": "Karen H Lee", "email": "k.lee@depaul.edu", "title": "Professor"}],
+           enriched=[{"name": "Karen Lee", "email": "K.Lee@depaul.edu",
+                      "research_summary": "Culture and politics."}])
+
+    people = stage2.load_people()
+    assert len(people) == 1
+    assert people[0]["research_summary"] == "Culture and politics."
+
+
+def test_a_first_run_with_no_enriched_file_just_uses_the_roster(tmp_path, monkeypatch):
+    _write(tmp_path, monkeypatch,
+           roster=[{"name": "Someone", "email": "a@depaul.edu"}], enriched=None)
+    assert [p["name"] for p in stage2.load_people()] == ["Someone"]
