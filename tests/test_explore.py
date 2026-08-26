@@ -266,3 +266,60 @@ def test_the_advisor_acknowledges_a_direction_handed_over_rather_than_re_asking(
         "bio": "", "papers": [], "proposal": {}})
     assert "handed over from Explore" in prompt
     assert "Never make them restate it" in prompt
+
+
+# ── Tone: honest, not supportive ────────────────────────────────────────────
+
+def _advisor(**over):
+    base = {"name": "Vincent", "project_title": "t", "project_mode": "problem",
+            "bio": "", "papers": [], "proposal": {}}
+    base.update(over)
+    return web_app._advisor_system_prompt(base)[0]
+
+
+def _explore():
+    return web_app._explore_agent_system_prompt(
+        {"name": "Vincent", "papers": [], "documents": [], "interests": [],
+         "bio": "", "activities": ""})
+
+
+@pytest.mark.parametrize("prompt_name,prompt", [("advisor", None), ("explore", None)])
+def test_both_bots_are_told_not_to_capitulate(prompt_name, prompt):
+    """A model that agrees with whatever was said last is useless to somebody
+    stress-testing their own proposal against it."""
+    text = _advisor() if prompt_name == "advisor" else _explore()
+    assert "You're right" in text
+    assert "good point" in text
+    assert "fair enough" in text
+
+
+def test_the_advisor_must_go_at_the_weakest_part():
+    """The value of the exchange is finding the flaw a reviewer would find in
+    six months, while it is still cheap to fix."""
+    text = _advisor()
+    assert "GO AT THE WEAKEST PART" in text
+    assert "without cushioning it" in text
+
+
+def test_the_advisor_separates_courtesy_to_the_person_from_rigour_on_the_work():
+    """Unsparing about the proposal is not the same as rude to the professor,
+    and the prompt has to say which one it means."""
+    text = _advisor()
+    assert "THE PROPOSAL IS THE CLIENT, NOT THE PERSON" in text
+    assert "never manufacture one to seem rigorous" in text
+
+
+def test_explore_does_not_sell_its_own_suggestions():
+    """It proposes the directions, so it is the most likely place to slip into
+    marketing them."""
+    text = _explore()
+    assert "OBJECTIVE, NOT SUPPORTIVE" in text
+    for word in ("exciting", "promising", "rich", "timely"):
+        assert word in text, f"{word!r} should be named as a banned descriptor"
+
+
+def test_praise_adjectives_stay_banned_in_the_advisor():
+    """The pre-existing rule must survive the new ones."""
+    text = _advisor()
+    assert "not a cheerleader" in text
+    assert "that's a good anchor" in text
