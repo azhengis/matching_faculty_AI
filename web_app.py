@@ -803,20 +803,37 @@ async def api_faculty_profile(faculty_id: int, req: Request):
         return JSONResponse({"error": "Not logged in"}, status_code=401)
 
     con = sqlite3.connect(DB_PATH)
-    row = con.execute(
-        "SELECT id, name, title, department, college, email, bio_url, "
-        "research_summary, publications_text, classes_taught "
-        "FROM faculty WHERE id = ?", (faculty_id,)
-    ).fetchone()
+    # research_topics is written by the pipeline, not by this app's migrations,
+    # so a database built by an older pipeline may not have the column. Degrade
+    # to no stated areas rather than failing the whole record.
+    try:
+        row = con.execute(
+            "SELECT id, name, title, department, college, email, bio_url, "
+            "research_summary, publications_text, classes_taught, research_topics "
+            "FROM faculty WHERE id = ?", (faculty_id,)
+        ).fetchone()
+    except sqlite3.OperationalError:
+        row = con.execute(
+            "SELECT id, name, title, department, college, email, bio_url, "
+            "research_summary, publications_text, classes_taught, NULL "
+            "FROM faculty WHERE id = ?", (faculty_id,)
+        ).fetchone()
     if not row:
         con.close()
         return JSONResponse({"error": "No such faculty member"}, status_code=404)
 
     (fid, name, title, department, college, email, bio_url,
-     summary, pubs_text, courses) = row
+     summary, pubs_text, courses, topics_json) = row
+
+    # The areas the page itself states, under its "Research Area" heading. A
+    # self-written list replaces these below; until then they are the best
+    # answer available and beat showing nothing.
+    try:
+        interests = [t for t in json.loads(topics_json or "[]") if str(t).strip()]
+    except (ValueError, TypeError):
+        interests = []
 
     # A self-written bio beats the scraped page.
-    interests = []
     if email:
         ov = con.execute(
             "SELECT self_bio, self_research_interests FROM faculty_overrides WHERE email = ?",
@@ -825,10 +842,14 @@ async def api_faculty_profile(faculty_id: int, req: Request):
         if ov:
             if (ov[0] or "").strip():
                 summary = ov[0]
+            # Each field independently: somebody who edited only their bio must
+            # not lose the areas their page states.
             try:
-                interests = json.loads(ov[1] or "[]")
+                saved = json.loads(ov[1] or "[]")
             except ValueError:
-                interests = []
+                saved = []
+            if saved:
+                interests = saved
 
     # Newest first. Someone deciding whether to approach this person as a
     # collaborator needs to know what they work on NOW; sorting by citations
@@ -1072,10 +1093,24 @@ async def api_profile_automatch(req: Request):
 
     faculty_id, name, scraped_bio = frow
 
+    # The areas the page states under its own "Research Area" heading, which the
+    # scrape now keeps separate from the biography prose.
+    page_topics = []
+    try:
+        trow = con.execute("SELECT research_topics FROM faculty WHERE id = ?",
+                           (faculty_id,)).fetchone()
+        page_topics = [t for t in json.loads((trow[0] if trow else None) or "[]")
+                       if str(t).strip()]
+    except (sqlite3.OperationalError, ValueError, TypeError):
+        page_topics = []
+
     # Many DePaul pages carry the research areas as their own short list, which
     # the scrape flattens into the bio. Lift it into the field it belongs in so
     # the interests box is not empty while the topics sit buried in prose.
     interests, bio = split_interests((scraped_bio or "").strip())
+    # A stated list beats one inferred from prose shape.
+    if page_topics:
+        interests = page_topics
     # The scrape sometimes loses the subject of the opening sentence, leaving a
     # bio that starts "sit at the intersections of culture...". fix_summary
     # repairs that for the search index; do it here too so the person is not

@@ -103,11 +103,18 @@ def parse_sections(text):
     low = text.lower()
     hits = []
     for h in ALL_HEADINGS:
-        # Match whole words only. A plain substring search is fine for long
-        # headings but catastrophic for short ones: "BIO" would fire inside
-        # "biology", "biomedical", or "Biography" and split the page at the
-        # wrong offset.
-        m = re.search(r"(?<!\w)" + re.escape(h.lower()) + r"(?!\w)", low)
+        # A heading OWNS ITS LINE. The page text comes from get_text("\n"), so a
+        # real heading always starts one; a phrase that merely contains the same
+        # words does not.
+        #
+        # Without the line anchor, "Information for" — a footer marker — fired
+        # inside "increase access to digital information for people with
+        # disabilities", cutting that biography mid-sentence and filing its tail
+        # under a footer heading. 282 of 400 sampled pages had at least one
+        # heading matching mid-line. The word-boundary guard is still needed on
+        # top: "BIO" would otherwise fire inside a line beginning "Biomedical".
+        m = re.search(r"^[ \t\xa0]*" + re.escape(h.lower()) + r"(?!\w)",
+                      low, re.MULTILINE)
         if m:
             hits.append((m.start(), m.end(), h))
     # Drop any hit fully contained inside another (e.g. "Research Area" inside
@@ -242,14 +249,35 @@ def main():
             p["department"] = ", ".join(x.strip() for x in dept.split(";") if x.strip())
         p["title"]      = meta(soup, "PersonnelTitle") or p.get("title", "")
 
-        # Combine every research-type section that exists on the page.
-        research_bits = [sections[h] for h in RESEARCH_HEADINGS if sections.get(h)]
-        research = "\n\n".join(research_bits)
-        if not research and not (p.get("research_summary") or "").strip():
-            # Biography prose is the last resort — weaker signal than a research
-            # section, so it only ever fills a genuine gap. Never let it replace
-            # a summary an earlier run or a later stage already established.
-            research = first_of(sections, BIO_HEADINGS)
+        # A page carries two different things and they belong in two fields.
+        #
+        # "Research Area" sections hold SHORT TOPIC LABELS ("Human Computer
+        # Interaction"). The BIO section holds PROSE. They used to compete for
+        # one field, with the labels winning and the prose only used when no
+        # research section existed at all. Oliver Alonzo's page has both, so his
+        # three-paragraph biography was discarded in favour of two words, and
+        # the labels then sat in the bio slot where they read as a broken bio.
+        #
+        # Now the labels become research_topics, which feed the interests chips
+        # and the matching text, and the prose becomes the summary.
+        topics = []
+        for heading in RESEARCH_HEADINGS:
+            body = sections.get(heading)
+            if not body:
+                continue
+            for line in body.split("\n"):
+                line = line.strip()
+                if line and line not in topics:
+                    topics.append(line)
+
+        bio_prose = first_of(sections, BIO_HEADINGS)
+        # The summary is the prose when there is any. Where a page offers only
+        # labels, they still have to serve as the summary or the person becomes
+        # unsearchable.
+        research = bio_prose or "\n\n".join(t for t in topics)
+
+        if topics:
+            p["research_topics"] = topics
 
         # Fall back to whatever was already there if this scrape found
         # nothing new -- an empty page section shouldn't erase good data.

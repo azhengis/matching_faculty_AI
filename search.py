@@ -423,6 +423,18 @@ def build_text(p):
     if p.get("department"):
         parts.append(p["department"])
     parts.append(p["research_summary"])
+    # The page's own "Research Area" labels. These used to live inside
+    # research_summary and so reached the embedding for free; they are their
+    # own field now, and leaving them out would quietly weaken every match for
+    # somebody whose page states their areas plainly.
+    topics = p.get("research_topics") or []
+    if isinstance(topics, str):
+        try:
+            topics = json.loads(topics or "[]")
+        except ValueError:
+            topics = []
+    if topics:
+        parts.append(", ".join(str(t) for t in topics if str(t).strip()))
     pubs = (p.get("publications_text") or "").strip()
     if pubs:
         parts.append(pubs[:600])

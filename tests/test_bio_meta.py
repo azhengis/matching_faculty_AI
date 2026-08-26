@@ -182,3 +182,68 @@ def test_a_first_run_with_no_enriched_file_just_uses_the_roster(tmp_path, monkey
     _write(tmp_path, monkeypatch,
            roster=[{"name": "Someone", "email": "a@depaul.edu"}], enriched=None)
     assert [p["name"] for p in stage2.load_people()] == ["Someone"]
+
+
+# ── Headings own their line ─────────────────────────────────────────────────
+
+def test_a_heading_phrase_inside_prose_does_not_split_the_bio():
+    """The bug that truncated a biography mid-sentence.
+
+    "Information for" is a footer marker. It fired inside "increase access to
+    digital information for people with disabilities", cutting the bio there and
+    filing its tail under a footer heading. 282 of 400 sampled pages had at
+    least one heading matching mid-line."""
+    text = ("BIO\n"
+            "He studies how to increase access to digital information for people "
+            "with disabilities.\n"
+            "Research Area\n"
+            "Human Computer Interaction\n")
+    sections = stage2.parse_sections(text)
+    assert "people with disabilities" in sections["BIO"]
+    assert "Information for" not in sections
+
+
+def test_a_real_heading_on_its_own_line_still_splits():
+    text = "BIO\nSome prose.\nInformation for\nCurrent Students\n"
+    sections = stage2.parse_sections(text)
+    assert sections["BIO"] == "Some prose."
+
+
+def test_a_short_heading_does_not_fire_inside_a_longer_word():
+    """"BIO" must not match a line starting "Biomedical"."""
+    text = "Biomedical engineering of prosthetics.\nResearch Area\nRobotics\n"
+    sections = stage2.parse_sections(text)
+    assert "BIO" not in sections
+    assert sections["Research Area"] == "Robotics"
+
+
+# ── Topic labels and biography prose are different things ───────────────────
+
+def test_stated_research_areas_are_kept_apart_from_the_biography():
+    """A page carrying both used to let two words beat three paragraphs: the
+    research labels won the single field, and the biography was discarded."""
+    text = ("BIO\n"
+            "Alonzo obtained his Ph.D. in Computing and Information Sciences. "
+            "He was previously a post-doctoral assistant professor.\n"
+            "Research Area\nHuman Computer Interaction\n"
+            "Specific Research Area\nComputing Accessibility\n")
+    sections = stage2.parse_sections(text)
+
+    topics = []
+    for heading in stage2.RESEARCH_HEADINGS:
+        for line in (sections.get(heading) or "").split("\n"):
+            if line.strip() and line.strip() not in topics:
+                topics.append(line.strip())
+
+    # Priority order, not page order: RESEARCH_HEADINGS lists the more specific
+    # heading first, so "Specific Research Area" leads.
+    assert topics == ["Computing Accessibility", "Human Computer Interaction"]
+    assert stage2.first_of(sections, stage2.BIO_HEADINGS).startswith("Alonzo obtained")
+
+
+def test_a_page_with_only_labels_still_yields_a_summary():
+    """Otherwise somebody whose page states areas and nothing else becomes
+    unsearchable."""
+    sections = stage2.parse_sections("Research Area\nRobotics\nControl Theory\n")
+    assert stage2.first_of(sections, stage2.BIO_HEADINGS) == ""
+    assert sections["Research Area"] == "Robotics\nControl Theory"
