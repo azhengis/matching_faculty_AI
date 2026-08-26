@@ -73,6 +73,17 @@ def strip_site_chrome(text):
 _INVISIBLE = re.compile(r"[​‌‍⁠﻿\xa0\s]+")
 
 
+def is_blank(text):
+    """True when text has no visible characters.
+
+    A plain .strip() is not enough: zero-width spaces, the BOM, and
+    non-breaking spaces all survive it, and 27 scraped BIO sections are made of
+    nothing else. Such a section is a truthy string, so it wins any `a or b`
+    fallback and then gets cleaned away later, leaving the person with nothing.
+    """
+    return not _INVISIBLE.sub(" ", text or "").strip()
+
+
 def is_junk_summary(text):
     """True when a research summary carries no research content at all.
 
@@ -97,9 +108,9 @@ def is_junk_summary(text):
     """
     if not text:
         return False                      # empty already; nothing to clear
-    stripped = _INVISIBLE.sub(" ", text).strip()
-    if not stripped:
+    if is_blank(text):
         return True
+    stripped = _INVISIBLE.sub(" ", text).strip()
     return len(stripped) < 25 and stripped[0].islower()
 
 

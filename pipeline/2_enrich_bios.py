@@ -16,7 +16,7 @@ import requests
 from bs4 import BeautifulSoup
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from text_clean import strip_site_chrome   # noqa: E402
+from text_clean import strip_site_chrome, is_blank   # noqa: E402
 
 # Anchored on the repo root like every other stage. These were bare relative
 # names, so the script only worked from whatever directory happened to hold the
@@ -271,6 +271,12 @@ def main():
                     topics.append(line)
 
         bio_prose = first_of(sections, BIO_HEADINGS)
+        # A BIO section that is only zero-width spaces is still a truthy string,
+        # so it would beat the research areas below and then be cleaned away to
+        # nothing, leaving the person with no summary at all. 27 pages have such
+        # a section. Treat it as absent.
+        if is_blank(bio_prose):
+            bio_prose = ""
         # The summary is the prose when there is any. Where a page offers only
         # labels, they still have to serve as the summary or the person becomes
         # unsearchable.
