@@ -111,36 +111,69 @@ def test_a_record_with_neither_name_nor_usable_email_is_dropped():
 s3 = _stage("3_enrich_openalex.py")
 
 
+class _Response:
+    """Shaped like requests' Response, for the fields get() actually touches."""
+    def __init__(self, status_code, body=None, headers=None):
+        self.status_code = status_code
+        self._body = body if body is not None else {}
+        self.headers = headers or {}
+
+    def json(self):
+        if self._body is None:
+            raise ValueError("no json")
+        return self._body
+
+
+def _stub_session(monkeypatch, response):
+    monkeypatch.setattr(s3, "session", type("S", (), {"get": lambda *a, **k: response})())
+    monkeypatch.setattr(s3.time, "sleep", lambda *_: None)
+
+
 def test_exhausted_retries_raise_rather_than_look_like_a_miss(monkeypatch):
     """A throttled run printed "not found in OpenAlex" for every person and
     reported success while enriching nobody. Worse, the result is afterwards
     indistinguishable from a genuine absence."""
-    class _Throttled:
-        status_code = 429
-
-    monkeypatch.setattr(s3, "session", type("S", (), {"get": lambda *a, **k: _Throttled()})())
-    monkeypatch.setattr(s3.time, "sleep", lambda *_: None)
+    _stub_session(monkeypatch, _Response(429, {"error": "Rate limit exceeded"}))
 
     with pytest.raises(s3.Unreachable):
         s3.get("https://api.openalex.org/authors", {})
 
 
+def test_a_spent_budget_says_so_and_does_not_burn_six_retries(monkeypatch):
+    """OpenAlex is metered now. A budget 429 carries a retry-after measured in
+    hours, so backing off is pointless — the run should stop and say why."""
+    body = {"error": "Rate limit exceeded",
+            "message": "Insufficient budget. This request costs $0.001 but you only "
+                       "have $0.0003 remaining. Resets at midnight UTC."}
+    calls = []
+    monkeypatch.setattr(s3, "session", type("S", (), {
+        "get": lambda *a, **k: (calls.append(1), _Response(429, body, {"retry-after": "15585"}))[1]})())
+    monkeypatch.setattr(s3.time, "sleep", lambda *_: None)
+
+    with pytest.raises(s3.Unreachable, match="budget"):
+        s3.get("https://api.openalex.org/authors", {})
+    assert len(calls) == 1, "a spent budget should abort on the first response"
+
+
+def test_an_ordinary_rate_limit_still_backs_off(monkeypatch):
+    """"You are going too fast" is worth waiting out; only a spent budget is not."""
+    calls = []
+    monkeypatch.setattr(s3, "session", type("S", (), {
+        "get": lambda *a, **k: (calls.append(1), _Response(429, {"error": "slow down"}))[1]})())
+    monkeypatch.setattr(s3.time, "sleep", lambda *_: None)
+
+    with pytest.raises(s3.Unreachable):
+        s3.get("https://api.openalex.org/authors", {})
+    assert len(calls) > 1, "a plain rate limit should be retried before giving up"
+
+
 def test_a_real_negative_answer_still_returns_none(monkeypatch):
     """A 404 means OpenAlex answered and has nobody. That must not raise, or a
     single unknown name would abort the whole stage."""
-    class _NotFound:
-        status_code = 404
-
-    monkeypatch.setattr(s3, "session", type("S", (), {"get": lambda *a, **k: _NotFound()})())
+    _stub_session(monkeypatch, _Response(404))
     assert s3.get("https://api.openalex.org/authors", {}) is None
 
 
 def test_a_success_returns_the_payload(monkeypatch):
-    class _OK:
-        status_code = 200
-        @staticmethod
-        def json():
-            return {"results": [{"id": "A1"}]}
-
-    monkeypatch.setattr(s3, "session", type("S", (), {"get": lambda *a, **k: _OK()})())
+    _stub_session(monkeypatch, _Response(200, {"results": [{"id": "A1"}]}))
     assert s3.get("https://api.openalex.org/authors", {}) == {"results": [{"id": "A1"}]}

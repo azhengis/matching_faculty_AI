@@ -593,6 +593,11 @@ async def page_profile():
 async def page_login():
     return HTMLResponse((TEMPLATES / "login.html").read_text())
 
+@app.get("/directory", response_class=HTMLResponse)
+async def page_directory():
+    return _render_page("directory.html", "directory")
+
+
 @app.get("/explore", response_class=HTMLResponse)
 async def page_explore():
     return _render_page("explore.html", "explore")
@@ -724,6 +729,67 @@ async def api_profile_search(req: Request):
     return JSONResponse({"results": results})
 
 
+@app.get("/api/directory/search")
+async def api_directory_search(req: Request, q: str = "", limit: int = 40, offset: int = 0):
+    """Look anybody up by name, department, or college.
+
+    Distinct from /api/profile/search, which exists to help somebody claim
+    their OWN record and so caps at six results. A directory is for browsing,
+    so it pages and it searches the unit fields too — "School of Music" is a
+    reasonable thing to type into a people search.
+
+    Read-only by construction: this returns the same public data the matcher
+    already shows, and never any user's profile, project, or proposal.
+    """
+    if not _current_user(req):
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    q = (q or "").strip()
+    limit = max(1, min(int(limit or 40), 100))
+    offset = max(0, int(offset or 0))
+
+    con = sqlite3.connect(DB_PATH)
+    where, params = "", []
+    if q:
+        # Rank a name hit above a department hit: someone searching "Bachman"
+        # wants the person, and someone searching "Music" wants the unit, but
+        # a name match is the more specific signal either way.
+        where = ("WHERE LOWER(name) LIKE ? OR LOWER(COALESCE(department,'')) LIKE ? "
+                 "OR LOWER(COALESCE(college,'')) LIKE ?")
+        params = [f"%{q.lower()}%"] * 3
+
+    total = con.execute(f"SELECT COUNT(*) FROM faculty {where}", params).fetchone()[0]
+    order = ""
+    if q:
+        order = "CASE WHEN LOWER(name) LIKE ? THEN 0 ELSE 1 END, "
+        params = params + [f"%{q.lower()}%"]
+    rows = con.execute(
+        f"SELECT id, name, title, department, college, email, research_summary "
+        f"FROM faculty {where} ORDER BY {order}name LIMIT ? OFFSET ?",
+        params + [limit, offset]
+    ).fetchall()
+
+    ids = [r[0] for r in rows]
+    counts = {}
+    if ids:
+        ph = ",".join("?" * len(ids))
+        counts = dict(con.execute(
+            f"SELECT faculty_id, COUNT(*) FROM papers WHERE faculty_id IN ({ph}) "
+            f"GROUP BY faculty_id", ids).fetchall())
+    con.close()
+
+    people = [{
+        "id": r[0], "name": r[1], "title": r[2] or "",
+        "department": r[3] or "", "college": r[4] or "", "email": r[5] or "",
+        # One line of what they work on, for scanning a result list.
+        "blurb": " ".join((r[6] or "").split())[:190],
+        "papers": counts.get(r[0], 0),
+    } for r in rows]
+
+    return JSONResponse({"people": people, "total": total,
+                         "offset": offset, "limit": limit, "query": q})
+
+
 @app.get("/api/faculty/{faculty_id}")
 async def api_faculty_profile(faculty_id: int, req: Request):
     """Everything on file about one faculty member, for the profile view.
@@ -732,7 +798,8 @@ async def api_faculty_profile(faculty_id: int, req: Request):
     surfaces links they added to their own profile — that is the only place a
     Google Scholar or personal-site URL exists; none is scraped.
     """
-    if not _current_user(req):
+    user = _current_user(req)
+    if not user:
         return JSONResponse({"error": "Not logged in"}, status_code=401)
 
     con = sqlite3.connect(DB_PATH)
@@ -797,6 +864,12 @@ async def api_faculty_profile(faculty_id: int, req: Request):
         "publications_text": (pubs_text or "").strip(),
         "classes_taught": (courses or "").strip(),
         "papers": papers, "paper_total": paper_total, "links": links,
+        # Whether this record belongs to the person looking at it. The directory
+        # is read-only for everyone else; only the owner is offered a way in,
+        # and the same email test governs the matching overlay, so this cannot
+        # hand anyone an edit path they do not already have.
+        "is_you": bool(email and user.get("email")
+                       and email.strip().lower() == user["email"].strip().lower()),
     })
 
 

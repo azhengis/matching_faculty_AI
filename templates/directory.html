@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Directory — DePaul Faculty Matcher</title>
+<style>
+{{SHELL_CSS}}
+
+.main{max-width:1180px;margin:0 auto;padding:30px 40px 60px}
+@media(max-width:860px){.main{padding:22px 18px 50px}}
+
+.dhead{margin-bottom:20px}
+.dhead h1{font-family:var(--serif);font-size:29px;font-weight:normal;letter-spacing:-.01em;margin-bottom:5px}
+.dhead .lede{font-size:14.5px;color:var(--ink-2);line-height:1.6;max-width:62ch}
+
+/* ── Search ── */
+.searchrow{display:flex;gap:9px;margin:18px 0 10px}
+.searchrow input{flex:1;padding:12px 15px;font-size:15.5px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);outline:none;font-family:inherit;transition:border-color .15s,box-shadow .15s}
+.searchrow input:focus{border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
+.searchrow input::placeholder{color:var(--ink-3)}
+.count{font-size:13px;color:var(--ink-3);min-height:20px;margin-bottom:14px}
+
+/* ── Result list ── */
+.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
+.person{text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:16px 18px;cursor:pointer;font-family:inherit;color:inherit;transition:border-color .15s,box-shadow .15s,transform .1s;display:flex;flex-direction:column;gap:5px}
+.person:hover{border-color:var(--navy-lift);box-shadow:var(--sh-md);transform:translateY(-1px)}
+.person-name{font-size:15.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.you-tag{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--green);background:var(--green-bg);border:1px solid #BFE3CD;border-radius:999px;padding:2px 8px}
+.person-role{font-size:12.5px;color:var(--teal)}
+.person-blurb{font-size:12.5px;color:var(--ink-3);line-height:1.5}
+.person-meta{font-size:11.5px;color:var(--ink-3);margin-top:2px}
+
+.more{display:flex;justify-content:center;margin-top:20px}
+.empty{color:var(--ink-3);font-size:14.5px;padding:26px 0;line-height:1.6}
+
+/* ── Detail overlay ── */
+.dv-backdrop{position:fixed;inset:0;background:rgba(17,28,46,.42);display:none;align-items:flex-start;justify-content:center;padding:40px 20px;z-index:60;overflow-y:auto}
+.dv-backdrop.open{display:flex}
+.dv{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--sh-lg);max-width:720px;width:100%;padding:30px 34px 34px;position:relative}
+.dv-close{position:absolute;top:14px;right:16px;background:none;border:none;font-size:22px;line-height:1;color:var(--ink-3);cursor:pointer;padding:4px 8px;font-family:inherit}
+.dv-close:hover{color:var(--scarlet)}
+.dv-name{font-family:var(--serif);font-size:26px;line-height:1.25;margin-bottom:5px;padding-right:34px}
+.dv-role{font-size:14px;color:var(--teal);margin-bottom:3px}
+.dv-contact{font-size:13.5px;margin-bottom:18px}
+.dv-contact a{color:var(--navy-lift);text-decoration:none}
+.dv-contact a:hover{text-decoration:underline}
+.dv-block{margin-bottom:20px}
+.dv-block:last-child{margin-bottom:0}
+.dv-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);margin-bottom:9px}
+.dv-prose{font-size:14.5px;color:var(--ink-2);line-height:1.7;white-space:pre-wrap}
+.dv-prose.empty{color:var(--ink-3);font-style:italic}
+.dv-chips{display:flex;flex-wrap:wrap;gap:7px}
+.dv-chip{font-size:12.5px;color:var(--teal);background:var(--teal-bg);border:1px solid #BEE0E2;border-radius:999px;padding:5px 13px}
+.dv-paper{padding:8px 0;border-bottom:1px solid var(--border);font-size:13.5px;line-height:1.45}
+.dv-paper:last-child{border-bottom:none}
+.dv-paper-meta{font-size:11.5px;color:var(--ink-3);margin-top:2px}
+.dv-own{background:var(--green-bg);border:1px solid #BFE3CD;border-radius:var(--r-md);padding:14px 16px;margin-bottom:18px;font-size:13.5px;color:var(--ink-2);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.dv-note{font-size:12.5px;color:var(--ink-3);line-height:1.55;border-top:1px solid var(--border);margin-top:20px;padding-top:14px}
+</style>
+</head>
+<body>
+
+<div class="app">
+{{SIDEBAR}}
+<div class="content">
+<div class="main">
+
+  <div class="dhead">
+    <h1>Directory</h1>
+    <p class="lede">Every DePaul faculty member on file. Search by name, department, or college.</p>
+  </div>
+
+  <div class="searchrow">
+    <input type="text" id="q" placeholder="Search a name, department, or college" autocomplete="off">
+  </div>
+  <div class="count" id="count"></div>
+
+  <div class="people" id="people"></div>
+  <div class="more" id="more"></div>
+
+</div>
+</div>
+</div>
+
+<!-- Full record, opened from a result -->
+<div class="dv-backdrop" id="dv-backdrop" onclick="if(event.target===this) closeDetail()">
+  <div class="dv" role="dialog" aria-modal="true" aria-labelledby="dv-name">
+    <button class="dv-close" onclick="closeDetail()" aria-label="Close">&times;</button>
+    <div id="dv-body"></div>
+  </div>
+</div>
+
+<script>
+let _offset = 0, _query = '', _total = 0, _busy = false;
+
+(async function init() {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) throw new Error('not logged in');
+    document.getElementById('sidebar-email').textContent = (await res.json()).email || '';
+  } catch (e) { window.location.href = '/login'; return; }
+  search('');
+})();
+
+// ── Search ───────────────────────────────────────────────────────────────────
+// Debounced so typing a name does not fire a request per keystroke.
+let _timer = null;
+document.getElementById('q').addEventListener('input', e => {
+  clearTimeout(_timer);
+  const v = e.target.value;
+  _timer = setTimeout(() => search(v), 220);
+});
+
+async function search(q) {
+  _query = q; _offset = 0;
+  document.getElementById('people').innerHTML = '';
+  document.getElementById('more').innerHTML = '';
+  await loadPage();
+}
+
+async function loadPage() {
+  if (_busy) return;
+  _busy = true;
+  try {
+    const res = await fetch(`/api/directory/search?q=${encodeURIComponent(_query)}&offset=${_offset}`);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Search failed');
+
+    _total = data.total;
+    renderCount();
+    appendPeople(data.people);
+    _offset += data.people.length;
+    renderMore();
+  } catch (e) {
+    document.getElementById('count').textContent = e.message;
+  }
+  _busy = false;
+}
+
+function renderCount() {
+  const el = document.getElementById('count');
+  if (!_total) { el.textContent = ''; return; }
+  el.textContent = _query
+    ? `${_total} ${_total === 1 ? 'person' : 'people'} matching “${_query}”`
+    : `${_total} faculty on file`;
+}
+
+function appendPeople(people) {
+  const box = document.getElementById('people');
+  if (!people.length && !_offset) {
+    box.innerHTML = `<div class="empty">Nobody matches “${esc(_query)}”.<br>
+      Try a surname, or a unit like “School of Music”. Somebody hired very recently
+      may not be on file yet.</div>`;
+    return;
+  }
+  box.insertAdjacentHTML('beforeend', people.map(p => `
+    <button class="person" onclick="openDetail(${p.id})">
+      <div class="person-name">${esc(p.name)}</div>
+      <div class="person-role">${esc([p.title, p.department].filter(Boolean).join(' · '))}</div>
+      ${p.blurb ? `<div class="person-blurb">${esc(p.blurb)}…</div>` : ''}
+      <div class="person-meta">${p.papers ? p.papers + (p.papers === 1 ? ' publication' : ' publications') : 'No publications on file'}</div>
+    </button>`).join(''));
+}
+
+function renderMore() {
+  const el = document.getElementById('more');
+  el.innerHTML = _offset < _total
+    ? `<button class="btn btn-quiet" onclick="loadPage()">Show more (${_total - _offset} left)</button>`
+    : '';
+}
+
+// ── One person's full record ─────────────────────────────────────────────────
+async function openDetail(id) {
+  const back = document.getElementById('dv-backdrop');
+  document.getElementById('dv-body').innerHTML = '<div class="dv-prose">Loading…</div>';
+  back.classList.add('open');
+  try {
+    const res = await fetch('/api/faculty/' + id);
+    const d = await res.json();
+    if (!res.ok || d.error) throw new Error(d.error || 'Could not load');
+    renderDetail(d);
+  } catch (e) {
+    document.getElementById('dv-body').innerHTML =
+      `<div class="dv-prose" style="color:#9B2020">${esc(e.message)}</div>`;
+  }
+}
+
+function renderDetail(d) {
+  const role = [d.title, d.department, d.college].filter(Boolean).join(' · ');
+  const papers = d.papers || [];
+  const interests = d.research_interests || [];
+
+  // The one editable path, and only on your own record. Everyone else's is
+  // read-only: a directory that let colleagues rewrite each other's listings
+  // would feed those edits straight into matching.
+  const own = d.is_you ? `
+    <div class="dv-own">
+      <span><strong>This is you.</strong> Your bio, interests, and publications are yours to correct.</span>
+      <a class="btn btn-accent btn-sm" href="/profile">Edit your profile &rarr;</a>
+    </div>` : '';
+
+  document.getElementById('dv-body').innerHTML = `
+    ${own}
+    <div class="dv-name" id="dv-name">${esc(d.name)}</div>
+    ${role ? `<div class="dv-role">${esc(role)}</div>` : ''}
+    <div class="dv-contact">
+      ${d.email ? `<a href="mailto:${esc(d.email)}">${esc(d.email)}</a>` : ''}
+      ${d.bio_url ? `${d.email ? ' &middot; ' : ''}<a href="${esc(d.bio_url)}" target="_blank" rel="noopener">DePaul page</a>` : ''}
+    </div>
+
+    ${interests.length ? `
+      <div class="dv-block">
+        <div class="dv-label">Research interests</div>
+        <div class="dv-chips">${interests.map(i => `<span class="dv-chip">${esc(i)}</span>`).join('')}</div>
+      </div>` : ''}
+
+    <div class="dv-block">
+      <div class="dv-label">Research</div>
+      <div class="dv-prose${d.research_summary ? '' : ' empty'}">${
+        d.research_summary ? esc(d.research_summary) : 'Nothing on file from their DePaul page.'}</div>
+    </div>
+
+    ${d.classes_taught ? `
+      <div class="dv-block">
+        <div class="dv-label">Courses taught</div>
+        <div class="dv-prose">${esc(d.classes_taught)}</div>
+      </div>` : ''}
+
+    <div class="dv-block">
+      <div class="dv-label">Publications${d.paper_total ? ` (${d.paper_total})` : ''}</div>
+      ${papers.length ? papers.map(p => `
+        <div class="dv-paper">${esc(p.title)}
+          <div class="dv-paper-meta">${p.year || 'year unknown'}${
+            p.cited_by ? ' &middot; ' + p.cited_by + ' citations' : ''}</div>
+        </div>`).join('')
+        : '<div class="dv-prose empty">None on file.</div>'}
+      ${d.paper_total > papers.length
+        ? `<div class="person-meta" style="margin-top:8px">Showing the ${papers.length} most recent of ${d.paper_total}.</div>` : ''}
+    </div>
+
+    ${(d.links || []).length ? `
+      <div class="dv-block">
+        <div class="dv-label">Links they added</div>
+        <div class="dv-prose">${d.links.map(l =>
+          `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label || l.url)}</a>`).join('<br>')}</div>
+      </div>` : ''}
+
+    <div class="dv-note">
+      Assembled from their DePaul faculty page and OpenAlex, plus anything they
+      corrected themselves. ${d.is_you ? '' : 'Only they can edit it.'}
+    </div>`;
+}
+
+function closeDetail() {
+  document.getElementById('dv-backdrop').classList.remove('open');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDetail();
+});
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+</script>
+</body>
+</html>
