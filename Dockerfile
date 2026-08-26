@@ -56,11 +56,15 @@ RUN python pipeline/13_export_onnx.py --out /build/onnx_model
 # Measured: serving int8 queries against an fp32-built index gives 92% top-5
 # overlap and 10/10 top-1 agreement against the fp32 reference, versus 88%
 # when the index is rebuilt in int8 — quantizing one side beats quantizing
-# both. Needs only search.py and the seed: search.py's onnx_encoder import is
-# lazy inside load_model(), which this step never calls (verified by running
-# exactly this in a directory containing only these two files). Reruns only
-# when search.py or the seed data changes — which is when it SHOULD.
-COPY search.py ./
+# both. Needs search.py, the module it imports, and the seed: search.py's
+# onnx_encoder import is lazy inside load_model(), which this step never
+# calls. Reruns only when one of these changes — which is when it SHOULD.
+#
+# text_clean is NOT optional. search.py imports it at module scope, so
+# omitting it fails this stage with ModuleNotFoundError and every deploy
+# after that stops. Anything search.py imports from the repo root belongs on
+# the next line.
+COPY search.py text_clean.py ./
 COPY data/seed_faculty.db.gz data/
 RUN gunzip -c data/seed_faculty.db.gz > /build/faculty.db \
     && python -c "\

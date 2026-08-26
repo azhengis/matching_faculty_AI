@@ -120,19 +120,19 @@ Repair tools, not part of a normal build:
 |---|---|
 | `11_merge_scholar_csv.py` | merge a Google Scholar export into `papers` |
 | `12_recover_missed_faculty.py` | promote staged Scholar publications the name match missed |
-| `13_add_faculty.py` | add ONE faculty member from their bio page |
+| `14_add_faculty.py` | add ONE faculty member from their bio page |
 
 ### Adding somebody the roster missed
 
 The roster is a snapshot. Anyone hired after it was taken is absent, and
 returns nothing when they sign in — they get an empty profile and have to give
 the assistant their background by hand. Rebuilding the whole roster to recover
-one person is an hour of crawling; `13_add_faculty.py` is the ten-second
+one person is an hour of crawling; `14_add_faculty.py` is the ten-second
 version. It takes a bio URL or the email address they gave you:
 
 ```bash
-python3 pipeline/13_add_faculty.py mbachma3@depaul.edu            # dry run
-python3 pipeline/13_add_faculty.py <url-or-email> --apply
+python3 pipeline/14_add_faculty.py mbachma3@depaul.edu            # dry run
+python3 pipeline/14_add_faculty.py <url-or-email> --apply
 rm -f faculty_index.pkl paper_index.pkl && python3 search.py      # or they stay unfindable
 ```
 

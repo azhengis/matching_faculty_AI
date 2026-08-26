@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-13_add_faculty.py
+14_add_faculty.py
 -----------------
 Add ONE faculty member to faculty.db from their DePaul bio page.
 
@@ -17,9 +17,9 @@ Accepts a bio URL or an email address. An email is resolved against the
 sitemap, so you can paste exactly what the person gave you.
 
 USAGE:
-    python3 pipeline/13_add_faculty.py mbachma3@depaul.edu
-    python3 pipeline/13_add_faculty.py https://www.depaul.edu/faculty/matthew-bachman --apply
-    python3 pipeline/13_add_faculty.py <target> --apply --no-papers
+    python3 pipeline/14_add_faculty.py mbachma3@depaul.edu
+    python3 pipeline/14_add_faculty.py https://www.depaul.edu/faculty/matthew-bachman --apply
+    python3 pipeline/14_add_faculty.py <target> --apply --no-papers
 
 Dry run by default; --apply writes. AFTER APPLYING, the search index must be
 rebuilt or the new person is in the database but unfindable:
