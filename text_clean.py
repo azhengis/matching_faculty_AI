@@ -138,7 +138,7 @@ _PROSE_WORDS = re.compile(r"\b(?:is|are|was|were|has|have|had|the|his|her|their|
                           re.IGNORECASE)
 
 
-def _is_topic_line(line):
+def is_topic_line(line):
     """True when a line reads as a topic label rather than a sentence."""
     line = line.strip()
     if not line or len(line) > _MAX_INTEREST_LEN or len(line.split()) > _MAX_INTEREST_WORDS:
@@ -199,7 +199,7 @@ def split_interests(summary):
         for i, raw in enumerate(after):
             if not raw.strip():
                 continue
-            if _OTHER_HEADING.match(raw) or not _is_topic_line(raw):
+            if _OTHER_HEADING.match(raw) or not is_topic_line(raw):
                 tail = after[i:]
                 break
             items.append(raw.strip())
@@ -210,7 +210,7 @@ def split_interests(summary):
 
     # No heading: only treat it as a list when EVERY line is a topic.
     present = [ln.strip() for ln in lines if ln.strip()]
-    if len(present) >= 2 and all(_is_topic_line(ln) for ln in present):
+    if len(present) >= 2 and all(is_topic_line(ln) for ln in present):
         return _dedupe(present), ""
     return [], summary
 

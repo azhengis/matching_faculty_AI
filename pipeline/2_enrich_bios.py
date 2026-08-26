@@ -16,7 +16,7 @@ import requests
 from bs4 import BeautifulSoup
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from text_clean import strip_site_chrome, is_blank   # noqa: E402
+from text_clean import strip_site_chrome, is_blank, is_topic_line   # noqa: E402
 
 # Anchored on the repo root like every other stage. These were bare relative
 # names, so the script only worked from whatever directory happened to hold the
@@ -260,15 +260,21 @@ def main():
         #
         # Now the labels become research_topics, which feed the interests chips
         # and the matching text, and the prose becomes the summary.
-        topics = []
+        # A research section is only a TOPIC LIST when every line reads as a
+        # label. Plenty of pages put whole paragraphs under "Research
+        # Interests" instead, and taking those line-by-line turned 224 of 341
+        # records into interest chips containing entire paragraphs — one was
+        # 557 characters. Such a section is prose, and belongs in the summary.
+        topics, research_prose = [], []
         for heading in RESEARCH_HEADINGS:
             body = sections.get(heading)
             if not body:
                 continue
-            for line in body.split("\n"):
-                line = line.strip()
-                if line and line not in topics:
-                    topics.append(line)
+            lines = [ln.strip() for ln in body.split("\n") if ln.strip()]
+            if lines and all(is_topic_line(ln) for ln in lines):
+                topics.extend(ln for ln in lines if ln not in topics)
+            else:
+                research_prose.append(body)
 
         bio_prose = first_of(sections, BIO_HEADINGS)
         # A BIO section that is only zero-width spaces is still a truthy string,
@@ -280,10 +286,22 @@ def main():
         # The summary is the prose when there is any. Where a page offers only
         # labels, they still have to serve as the summary or the person becomes
         # unsearchable.
-        research = bio_prose or "\n\n".join(t for t in topics)
+        research = "\n\n".join(x for x in ([bio_prose] + research_prose) if x)
+        # A page offering only labels still needs them as the summary, or that
+        # person has no searchable text at all.
+        research = research or "\n\n".join(topics)
 
         if topics:
             p["research_topics"] = topics
+        else:
+            # No topic list on the page. Clear anything a PREVIOUS run of this
+            # stage wrongly stored as one — an earlier version took every line
+            # under a research heading, so 167 records held whole paragraphs as
+            # interest chips. Valid short labels are left alone, which is what
+            # keeps stage 3's OpenAlex topics from being wiped here.
+            existing = p.get("research_topics") or []
+            if existing and any(not is_topic_line(str(t)) for t in existing):
+                p["research_topics"] = []
 
         # Fall back to whatever was already there if this scrape found
         # nothing new -- an empty page section shouldn't erase good data.
