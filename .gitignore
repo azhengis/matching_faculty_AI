@@ -34,3 +34,6 @@ onnx_model/
 
 # Conversation eval transcripts (generated per run; send, don't commit)
 evals/transcripts/
+
+# refresh.sh's pre-run snapshot of the database and data JSONs
+.refresh_backup/
