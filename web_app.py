@@ -742,8 +742,31 @@ def _summary_is_just(interests, summary):
     return bool(body) and body == chips
 
 
+@app.get("/api/directory/filters")
+async def api_directory_filters(req: Request):
+    """The colleges and departments that actually have people in them.
+
+    Built from the data rather than hardcoded, so a reorganisation at DePaul
+    shows up here without a code change. Counts are included because a filter
+    listing an empty option wastes a click.
+    """
+    if not _current_user(req):
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+    con = sqlite3.connect(DB_PATH)
+    colleges = [{"name": r[0], "count": r[1]} for r in con.execute(
+        "SELECT college, COUNT(*) FROM faculty WHERE TRIM(COALESCE(college,'')) != '' "
+        "GROUP BY college ORDER BY COUNT(*) DESC")]
+    departments = [{"name": r[0], "count": r[1]} for r in con.execute(
+        "SELECT department, COUNT(*) FROM faculty WHERE TRIM(COALESCE(department,'')) != '' "
+        "GROUP BY department ORDER BY department")]
+    con.close()
+    return JSONResponse({"colleges": colleges, "departments": departments})
+
+
 @app.get("/api/directory/search")
-async def api_directory_search(req: Request, q: str = "", limit: int = 40, offset: int = 0):
+async def api_directory_search(req: Request, q: str = "", limit: int = 40, offset: int = 0,
+                               college: str = "", department: str = "",
+                               has_papers: str = ""):
     """Look anybody up by name, department, or college.
 
     Distinct from /api/profile/search, which exists to help somebody claim
@@ -762,15 +785,26 @@ async def api_directory_search(req: Request, q: str = "", limit: int = 40, offse
     offset = max(0, int(offset or 0))
 
     con = sqlite3.connect(DB_PATH)
-    where, params = "", []
+    clauses, params = [], []
     if q:
         # Rank a name hit above a department hit: someone searching "Bachman"
         # wants the person, and someone searching "Music" wants the unit, but
         # a name match is the more specific signal either way.
-        where = ("WHERE LOWER(name) LIKE ? OR LOWER(COALESCE(department,'')) LIKE ? "
-                 "OR LOWER(COALESCE(college,'')) LIKE ?")
-        params = [f"%{q.lower()}%"] * 3
+        clauses.append("(LOWER(name) LIKE ? OR LOWER(COALESCE(department,'')) LIKE ? "
+                       "OR LOWER(COALESCE(college,'')) LIKE ?)")
+        params += [f"%{q.lower()}%"] * 3
+    if college:
+        clauses.append("college = ?")
+        params.append(college)
+    if department:
+        clauses.append("department = ?")
+        params.append(department)
+    if has_papers == "1":
+        # Somebody looking for a collaborator usually wants a publication
+        # record to read, and 961 of 1,440 have none on file.
+        clauses.append("EXISTS (SELECT 1 FROM papers p WHERE p.faculty_id = faculty.id)")
 
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     total = con.execute(f"SELECT COUNT(*) FROM faculty {where}", params).fetchone()[0]
     order = ""
     if q:
@@ -800,7 +834,9 @@ async def api_directory_search(req: Request, q: str = "", limit: int = 40, offse
     } for r in rows]
 
     return JSONResponse({"people": people, "total": total,
-                         "offset": offset, "limit": limit, "query": q})
+                         "offset": offset, "limit": limit, "query": q,
+                         "filters": {"college": college, "department": department,
+                                     "has_papers": has_papers == "1"}})
 
 
 @app.get("/api/faculty/{faculty_id}")

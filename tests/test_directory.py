@@ -184,3 +184,78 @@ def test_a_quote_in_the_query_is_not_sql(db):
     cookies = _signin("someone@depaul.edu")
     found = _search(cookies, q="' OR 1=1 --")
     assert found["people"] == []
+
+
+# ── Filters ─────────────────────────────────────────────────────────────────
+
+def _filters(cookies):
+    return json.loads(_run(web_app.api_directory_filters(_FakeRequest(cookies=cookies))).body)
+
+
+def test_filter_options_come_from_the_data(db):
+    """Built from what is actually in the table, so a reorganisation at DePaul
+    shows up without a code change."""
+    cookies = _signin("someone@depaul.edu")
+    opts = _filters(cookies)
+    assert {c["name"] for c in opts["colleges"]} == {"Science and Health", "School of Music"}
+    assert {d["name"] for d in opts["departments"]} == {"Neuroscience", "Music Performance"}
+
+
+def test_filter_options_carry_counts(db):
+    """A filter listing an option that returns nothing wastes a click."""
+    cookies = _signin("someone@depaul.edu")
+    music = next(c for c in _filters(cookies)["colleges"] if c["name"] == "School of Music")
+    assert music["count"] == 2
+
+
+def test_filtering_by_college(db):
+    cookies = _signin("someone@depaul.edu")
+    found = _search(cookies, q="", college="School of Music")
+    assert {p["name"] for p in found["people"]} == {"Dana Hall", "Ann Marie Brink"}
+
+
+def test_filtering_by_department(db):
+    cookies = _signin("someone@depaul.edu")
+    assert [p["name"] for p in _search(cookies, q="", department="Neuroscience")["people"]] \
+        == ["Matthew Bachman"]
+
+
+def test_only_people_with_publications(db):
+    """961 of 1,440 have none on file, and somebody looking for a collaborator
+    usually wants a record to read."""
+    cookies = _signin("someone@depaul.edu")
+    found = _search(cookies, q="", has_papers="1")
+    assert [p["name"] for p in found["people"]] == ["Matthew Bachman"]
+    assert found["total"] == 1
+
+
+def test_a_query_and_a_filter_combine(db):
+    """Both narrow; they must not replace each other."""
+    cookies = _signin("someone@depaul.edu")
+    assert _search(cookies, q="hall", college="School of Music")["total"] == 1
+    assert _search(cookies, q="hall", college="Science and Health")["total"] == 0
+
+
+def test_filters_narrow_the_total_not_just_the_page(db):
+    """The total drives paging, so filtering the rows but not the count would
+    offer a "Show more" that returns nothing."""
+    cookies = _signin("someone@depaul.edu")
+    assert _search(cookies, q="")["total"] == 3
+    assert _search(cookies, q="", college="School of Music")["total"] == 2
+
+
+def test_an_unknown_filter_value_returns_nothing_rather_than_everything(db):
+    """Failing open would quietly show the whole directory as though filtered."""
+    cookies = _signin("someone@depaul.edu")
+    assert _search(cookies, q="", college="No Such College")["total"] == 0
+
+
+def test_the_response_reports_the_filters_applied(db):
+    cookies = _signin("someone@depaul.edu")
+    got = _search(cookies, q="", college="School of Music", has_papers="1")
+    assert got["filters"] == {"college": "School of Music", "department": "",
+                              "has_papers": True}
+
+
+def test_filter_options_require_a_login(db):
+    assert _run(web_app.api_directory_filters(_FakeRequest())).status_code == 401

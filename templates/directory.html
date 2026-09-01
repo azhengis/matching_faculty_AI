@@ -21,6 +21,16 @@
 .searchrow input::placeholder{color:var(--ink-3)}
 .count{font-size:13px;color:var(--ink-3);min-height:20px;margin-bottom:14px}
 
+/* ── Filters ── */
+.filters{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:14px 16px;margin-bottom:14px}
+.filters label{display:flex;flex-direction:column;gap:5px;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2)}
+.filters select{padding:8px 10px;font-size:14px;font-weight:400;text-transform:none;letter-spacing:0;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);font-family:inherit;max-width:290px}
+.filters select:focus{outline:none;border-color:var(--navy-lift);box-shadow:0 0 0 3px rgba(11,78,146,.12)}
+.filters .f-check{flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-weight:400;font-size:13.5px;color:var(--ink-2);padding-bottom:9px}
+.filters .f-check input{width:15px;height:15px;accent-color:var(--navy);cursor:pointer}
+.filters .btn-tiny{padding-bottom:11px}
+.btn-quiet.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+
 /* ── Result list ── */
 .people{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
 .person{text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);padding:16px 18px;cursor:pointer;font-family:inherit;color:inherit;transition:border-color .15s,box-shadow .15s,transform .1s;display:flex;flex-direction:column;gap:5px}
@@ -73,7 +83,23 @@
 
   <div class="searchrow">
     <input type="text" id="q" placeholder="Search a name, department, or college" autocomplete="off">
+    <button class="btn btn-quiet" id="btn-filters" onclick="toggleFilters()">Filters</button>
   </div>
+
+  <div class="filters" id="filters" style="display:none">
+    <label>College
+      <select id="f-college" onchange="applyFilters()"><option value="">All colleges</option></select>
+    </label>
+    <label>Department
+      <select id="f-dept" onchange="applyFilters()"><option value="">All departments</option></select>
+    </label>
+    <label class="f-check">
+      <input type="checkbox" id="f-papers" onchange="applyFilters()">
+      Only people with publications
+    </label>
+    <button class="btn-tiny" onclick="clearFilters()">Clear</button>
+  </div>
+
   <div class="count" id="count"></div>
 
   <div class="people" id="people"></div>
@@ -92,7 +118,13 @@
 </div>
 
 <script>
-let _offset = 0, _query = '', _total = 0, _busy = false;
+let _offset = 0, _query = '', _total = 0;
+// A monotonically increasing request id. The previous version used a _busy
+// flag and RETURNED EARLY while a request was in flight — so typing a name
+// during the initial load of all 1,440 records cleared the list and then
+// never searched. Superseding by id keeps every search running and simply
+// ignores answers that arrive out of order.
+let _seq = 0;
 
 (async function init() {
   try {
@@ -100,31 +132,52 @@ let _offset = 0, _query = '', _total = 0, _busy = false;
     if (!res.ok) throw new Error('not logged in');
     document.getElementById('sidebar-email').textContent = (await res.json()).email || '';
   } catch (e) { window.location.href = '/login'; return; }
+  loadFilterOptions();
   search('');
 })();
 
 // ── Search ───────────────────────────────────────────────────────────────────
-// Debounced so typing a name does not fire a request per keystroke.
+// Debounced so typing a name does not fire a request per keystroke. Enter
+// searches immediately, for anyone who expects a search box to need it.
 let _timer = null;
-document.getElementById('q').addEventListener('input', e => {
+const box = document.getElementById('q');
+box.addEventListener('input', e => {
   clearTimeout(_timer);
   const v = e.target.value;
   _timer = setTimeout(() => search(v), 220);
 });
+box.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); clearTimeout(_timer); search(box.value); }
+});
+
+function currentFilters() {
+  return {
+    college: document.getElementById('f-college').value,
+    department: document.getElementById('f-dept').value,
+    has_papers: document.getElementById('f-papers').checked ? '1' : '',
+  };
+}
 
 async function search(q) {
   _query = q; _offset = 0;
   document.getElementById('people').innerHTML = '';
   document.getElementById('more').innerHTML = '';
+  document.getElementById('count').textContent = 'Searching…';
   await loadPage();
 }
 
 async function loadPage() {
-  if (_busy) return;
-  _busy = true;
+  const mine = ++_seq;
+  const f = currentFilters();
+  const params = new URLSearchParams({q: _query, offset: _offset});
+  if (f.college) params.set('college', f.college);
+  if (f.department) params.set('department', f.department);
+  if (f.has_papers) params.set('has_papers', '1');
+
   try {
-    const res = await fetch(`/api/directory/search?q=${encodeURIComponent(_query)}&offset=${_offset}`);
+    const res = await fetch('/api/directory/search?' + params.toString());
     const data = await res.json();
+    if (mine !== _seq) return;          // a newer search already went out
     if (!res.ok || data.error) throw new Error(data.error || 'Search failed');
 
     _total = data.total;
@@ -133,9 +186,50 @@ async function loadPage() {
     _offset += data.people.length;
     renderMore();
   } catch (e) {
-    document.getElementById('count').textContent = e.message;
+    if (mine === _seq) document.getElementById('count').textContent = e.message;
   }
-  _busy = false;
+}
+
+// ── Filters ──────────────────────────────────────────────────────────────────
+function toggleFilters() {
+  const box = document.getElementById('filters');
+  const open = box.style.display === 'none';
+  box.style.display = open ? 'flex' : 'none';
+  document.getElementById('btn-filters').classList.toggle('on', open);
+}
+
+async function loadFilterOptions() {
+  try {
+    const res = await fetch('/api/directory/filters');
+    if (!res.ok) return;
+    const data = await res.json();
+    const col = document.getElementById('f-college');
+    const dep = document.getElementById('f-dept');
+    // Counts on each option so nobody picks a filter that returns nothing.
+    (data.colleges || []).forEach(c => col.insertAdjacentHTML('beforeend',
+      `<option value="${esc(c.name)}">${esc(c.name)} (${c.count})</option>`));
+    (data.departments || []).forEach(d => dep.insertAdjacentHTML('beforeend',
+      `<option value="${esc(d.name)}">${esc(d.name)} (${d.count})</option>`));
+  } catch (e) {}
+}
+
+function applyFilters() {
+  markFilterButton();
+  search(document.getElementById('q').value);
+}
+
+function clearFilters() {
+  document.getElementById('f-college').value = '';
+  document.getElementById('f-dept').value = '';
+  document.getElementById('f-papers').checked = false;
+  applyFilters();
+}
+
+function markFilterButton() {
+  const f = currentFilters();
+  const n = [f.college, f.department, f.has_papers].filter(Boolean).length;
+  const btn = document.getElementById('btn-filters');
+  btn.textContent = n ? `Filters (${n})` : 'Filters';
 }
 
 function renderCount() {
