@@ -278,7 +278,10 @@ h2{font-family:var(--serif);font-size:27px;font-weight:normal;color:var(--ink);m
       <div class="pv-block" id="pv-interests-block">
         <div class="pv-block-head">
           <div class="pv-block-label">Research interests</div>
-          <button class="pv-edit-btn" onclick="toggleFieldEditor('interests')">Edit</button>
+          <div style="display:flex;gap:6px">
+            <button class="pv-edit-btn" id="pv-int-suggest" onclick="suggestInterests()">Read from bio</button>
+            <button class="pv-edit-btn" onclick="toggleFieldEditor('interests')">Edit</button>
+          </div>
         </div>
         <div class="pv-chips" id="pv-interests"></div>
         <div class="pv-editor" id="pv-interests-editor" style="display:none">
@@ -597,6 +600,40 @@ async function generateActivities() {
     btn.textContent = was;
   }
   btn.disabled = false;
+}
+
+// Pulls the topics out of the bio prose. Opens the editor with them filled in
+// rather than saving straight away: it is a reading of their words, and they
+// should see it before it becomes their public listing.
+async function suggestInterests() {
+  const btn = document.getElementById('pv-int-suggest');
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Reading…';
+  try {
+    const res = await fetch('/api/profile/interests/suggest', {method: 'POST'});
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not read the bio');
+
+    const found = data.research_interests || [];
+    const existing = (_profile && _profile.research_interests) || [];
+    // Merge, keeping what they already have — this suggests, it does not replace.
+    const merged = existing.slice();
+    const seen = new Set(existing.map(x => x.toLowerCase()));
+    found.forEach(x => { if (!seen.has(x.toLowerCase())) { merged.push(x); seen.add(x.toLowerCase()); } });
+
+    document.getElementById('pv-interests-editor').style.display = 'block';
+    document.getElementById('pv-interests-input').value = merged.join('\n');
+    document.getElementById('pv-interests-status').textContent =
+      found.length ? `Found ${found.length}. Edit anything wrong, then Save.` : 'Nothing found in the bio.';
+    document.getElementById('pv-interests-status').className = 'search-status';
+  } catch (e) {
+    document.getElementById('pv-interests-status').textContent = e.message;
+    document.getElementById('pv-interests-status').className = 'search-status err';
+    document.getElementById('pv-interests-editor').style.display = 'block';
+  }
+  btn.disabled = false;
+  btn.textContent = was;
 }
 
 // ── Sources: what someone attached, and what else they could ────────────────

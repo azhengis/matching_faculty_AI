@@ -47,7 +47,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, File
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import search as sm
-from text_clean import split_interests
+from text_clean import split_interests, is_topic_line
 import doc_extract
 import auth
 
@@ -1111,6 +1111,11 @@ async def api_profile_automatch(req: Request):
     # A stated list beats one inferred from prose shape.
     if page_topics:
         interests = page_topics
+    # Neither path found a list, so the topics are buried in prose. Read them
+    # out with the model. Best effort: a failure here leaves the chips empty,
+    # which is where they were anyway.
+    if not interests and bio.strip():
+        interests = _extract_interests(bio, name)
     # The scrape sometimes loses the subject of the opening sentence, leaving a
     # bio that starts "sit at the intersections of culture...". fix_summary
     # repairs that for the search index; do it here too so the person is not
@@ -3308,6 +3313,132 @@ Links they added:
 <<<BEGIN DATA>>>
 {links}
 <<<END DATA>>>"""
+
+
+_INTERESTS_PROMPT = """Read a DePaul faculty member's biography and list the research topics they actually study.
+
+Return ONLY a JSON array of strings. No prose, no keys, no markdown fence. Example: ["combinatorics of posets", "lattice theory"]
+
+WHAT COUNTS: the subject matter of their research. A topic somebody could search for and expect to find this person.
+
+WHAT DOES NOT, however prominently it appears:
+- Journals, conferences, and book series. "her work has appeared in the Journal of Algebraic Combinatorics" names a VENUE, not an interest. The interest in that sentence is the combinatorics, not the journal.
+- Universities, departments, labs, and centres.
+- Degrees, job titles, fellowships, awards, and grants.
+- Co-authors, advisors, and collaborators.
+- Courses taught, unless the bio states they research that subject too.
+
+RULES:
+- 2 to 6 topics. Fewer is better than padded.
+- Each is a noun phrase of 1 to 6 words, lowercase unless it is a proper noun. "combinatorics of posets", "traumatic brain injury", "second language acquisition".
+- Use the bio's own vocabulary. Do not translate a topic into a broader field it belongs to, and do not invent specificity the bio does not state.
+- Return [] when the biography describes a career without ever saying what they study. That is a real answer and better than guessing."""
+
+
+def _extract_interests(bio_text, name=""):
+    """Pull research topics out of biography PROSE, using the model.
+
+    split_interests handles pages that state their areas as a list. This
+    handles the ones that bury them in a sentence, which regex cannot do
+    safely: the pattern that finds "combinatorics of posets" in Emily
+    Barnard's bio also finds the three journal titles in the same sentence,
+    and an earlier regex attempt returned a play, a magazine, and a website
+    as one person's research interests.
+
+    Best effort. Returns [] when no model is configured, the call fails, or
+    the reply does not parse, because nothing here is worth failing a
+    profile over.
+    """
+    text = (bio_text or "").strip()
+    if not text or not CHATBOT_MODEL or not _litellm:
+        return []
+    try:
+        resp = _litellm.completion(
+            model=CHATBOT_MODEL, max_tokens=220,
+            messages=[{"role": "system", "content": _INTERESTS_PROMPT},
+                      {"role": "user", "content": f"{name}\n\n{text[:6000]}"}])
+        raw = (resp.choices[0].message.content or "").strip()
+    except Exception:
+        return []
+
+    # Models sometimes wrap the array in a fence or a sentence; take the array.
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if not match:
+        return []
+    try:
+        items = json.loads(match.group(0))
+    except ValueError:
+        return []
+    if not isinstance(items, list):
+        return []
+
+    # Validate with the same test the structured path uses, so a rambling
+    # answer cannot put a paragraph in somebody's interest chips, AND require
+    # every topic to be grounded in the biography it came from.
+    #
+    # Grounding is not optional. A small local model returned "combinatorics
+    # of posets" and "second language acquisition" for a neuroscientist —
+    # both lifted verbatim from the examples in the prompt above. Checking the
+    # words actually occur in the source kills that whatever model is running,
+    # which is what makes a cheap local model usable here at all.
+    out = []
+    for item in items:
+        label = " ".join(str(item).split())
+        if not label or not is_topic_line(label):
+            continue
+        if not _grounded_in(label, text):
+            continue
+        if label.lower() in {o.lower() for o in out}:
+            continue
+        out.append(label)
+    return out[:6]
+
+
+# Words a topic can contain without being about anything.
+_TOPIC_STOPWORDS = {"of", "and", "the", "in", "for", "on", "to", "a", "an", "with"}
+
+
+def _grounded_in(label, source):
+    """True when a proposed topic's content words appear in the source text.
+
+    A topic the biography never mentions was invented, whatever produced it.
+    Matching on word stems rather than the whole phrase keeps honest
+    rewordings ("computing accessibility" for "accessibility of computing")
+    while rejecting anything the text does not support.
+    """
+    words = [w for w in re.findall(r"[a-z]+", label.lower())
+             if w not in _TOPIC_STOPWORDS and len(w) > 3]
+    if not words:
+        return False
+    haystack = source.lower()
+    # Stem crudely: match on the first 5 characters so plurals and -ing/-ion
+    # forms still count. Every content word has to be there.
+    return all(w[:5] in haystack for w in words)
+
+
+@app.post("/api/profile/interests/suggest")
+async def api_profile_interests_suggest(req: Request):
+    """Read the bio on file and propose research interests from it."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+    if not CHATBOT_MODEL or not _litellm:
+        return JSONResponse({"error": "Suggesting interests requires CHATBOT_MODEL."},
+                            status_code=503)
+
+    d = _profile_context(user)
+    if not d:
+        return JSONResponse({"error": "Set up your profile first."}, status_code=404)
+    if not (d["bio"] or "").strip():
+        return JSONResponse({"error": "There's no bio to read yet. Add one first, or "
+                                      "attach a CV and ask the assistant."}, status_code=400)
+
+    suggested = _extract_interests(d["bio"], d.get("name") or "")
+    if not suggested:
+        return JSONResponse({"error": "Couldn't find research topics stated in the bio. "
+                                      "Add them by hand, or tell the assistant."},
+                            status_code=422)
+    return JSONResponse({"research_interests": suggested})
 
 
 @app.post("/api/profile/activities")
