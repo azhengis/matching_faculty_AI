@@ -178,3 +178,71 @@ def test_empty_input_is_safe():
     from text_clean import split_interests
     assert split_interests("") == ([], "")
     assert split_interests(None) == ([], "")
+
+
+# ── Page text: break lines at blocks, not inside sentences ──────────────────
+
+def _soup(html):
+    from bs4 import BeautifulSoup
+    return BeautifulSoup(html, "html.parser")
+
+
+def test_inline_markup_does_not_split_a_sentence():
+    """soup.get_text("\\n") puts a newline between every pair of strings, so one
+    italicised title turned one sentence into three lines. 247 bios had it."""
+    from text_clean import page_text
+    html = "<p>His directing work in <em>Patriot Act</em>, devised with Smith, is acclaimed.</p>"
+    assert page_text(_soup(html)) == "His directing work in Patriot Act, devised with Smith, is acclaimed."
+
+
+def test_block_elements_still_start_new_lines():
+    """The section parser needs headings on their own line."""
+    from text_clean import page_text
+    html = "<div><h2>BIO</h2><p>Some prose.</p><h2>Research Area</h2><p>Robotics</p></div>"
+    lines = [l for l in page_text(_soup(html)).split("\n") if l.strip()]
+    assert lines == ["BIO", "Some prose.", "Research Area", "Robotics"]
+
+
+def test_a_br_inside_a_sentence_is_rejoined():
+    """Authors insert <br> for visual wrapping. A line ending without terminal
+    punctuation before one starting lowercase is one sentence."""
+    from text_clean import page_text
+    html = "<p>He was exposed to theater in third grade<br>through the public school system.</p>"
+    assert page_text(_soup(html)) == "He was exposed to theater in third grade through the public school system."
+
+
+def test_a_br_between_sentences_is_kept_as_a_break():
+    from text_clean import page_text
+    html = "<p>He directs plays.<br>She writes them.</p>"
+    assert page_text(_soup(html)) == "He directs plays.\nShe writes them."
+
+
+def test_a_list_is_not_collapsed_into_one_line():
+    """Topic lists must survive: each item on its own line."""
+    from text_clean import page_text
+    html = "<ul><li>Computing Accessibility</li><li>Human Computer Interaction</li></ul>"
+    lines = [l for l in page_text(_soup(html)).split("\n") if l.strip()]
+    assert lines == ["Computing Accessibility", "Human Computer Interaction"]
+
+
+def test_a_lowercase_list_is_not_rejoined_into_a_sentence():
+    """The reflow rule needs a SINGLE newline; blocks are separated by a blank
+    line, which is what keeps it away from list items that happen to start
+    lowercase."""
+    from text_clean import page_text
+    html = "<ul><li>computing accessibility</li><li>human computer interaction</li></ul>"
+    lines = [l for l in page_text(_soup(html)).split("\n") if l.strip()]
+    assert lines == ["computing accessibility", "human computer interaction"]
+
+
+def test_site_chrome_is_still_stripped_from_block_separated_text():
+    """page_text separates blocks with a BLANK line, and the footer patterns
+    were written for single newlines — they stopped matching and the address
+    came back."""
+    from text_clean import page_text, has_site_chrome, strip_site_chrome
+    html = ("<div><p>Robotics</p><div>DePaul University</div><div>1 E. Jackson Blvd.</div>"
+            "<div>Chicago, IL 60604</div><div>(312) 362-8000</div>"
+            "<div>-or- 1 (800) 4DE PAUL (outside Illinois)</div></div>")
+    text = page_text(_soup(html))
+    assert has_site_chrome(text)
+    assert strip_site_chrome(text) == "Robotics"

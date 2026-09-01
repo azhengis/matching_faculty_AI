@@ -44,7 +44,7 @@ from bs4 import BeautifulSoup
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-from text_clean import strip_site_chrome, is_junk_summary   # noqa: E402
+from text_clean import strip_site_chrome, is_junk_summary, page_text   # noqa: E402
 
 DB       = os.path.join(ROOT, "faculty.db")
 ENRICHED = os.path.join(ROOT, "data", "depaul_faculty_enriched.json")
@@ -107,7 +107,7 @@ def resolve_target(target):
 def scrape(url, stage2):
     html = requests.get(url, timeout=45).text
     soup = BeautifulSoup(html, "html.parser")
-    sections = stage2.parse_sections(strip_site_chrome(soup.get_text("\n")))
+    sections = stage2.parse_sections(strip_site_chrome(page_text(soup)))
 
     def m(name):
         return stage2.meta(soup, name)

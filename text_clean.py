@@ -27,21 +27,26 @@ import re
 # The address block that closes every depaul.edu page. Tolerant about spacing
 # and punctuation because the scrape preserved whatever the page had, including
 # \r\n line endings and non-breaking spaces (\s matches \xa0 on str patterns).
+# One line break, plus any blank lines around it. page_text separates blocks
+# with a blank line, so patterns written for single newlines stopped matching
+# and the footer came back — the address block is emitted one <div> per line.
+_NL = r"[ \t\xa0]*\r?\n[ \t\xa0\r\n]*"
+
 _FOOTER_ADDRESS = re.compile(
-    r"[ \t\xa0]*DePaul\s+University[ \t\xa0]*\r?\n"
-    r"[ \t\xa0]*1\s*E\.?\s*Jackson\s*Blvd\.?[ \t\xa0]*\r?\n"
-    r"[ \t\xa0]*Chicago,?\s*IL\s*60604[ \t\xa0]*\r?\n"
-    r"[ \t\xa0]*\(?312\)?\s*362[-.\s]?8000[ \t\xa0]*\r?\n"
-    r"[ \t\xa0]*-?\s*or\s*-?\s*1\s*\(?800\)?\s*4DE\s*PAUL\s*\(\s*outside\s+Illinois\s*\)",
+    r"[ \t\xa0]*DePaul\s+University" + _NL +
+    r"1\s*E\.?\s*Jackson\s*Blvd\.?" + _NL +
+    r"Chicago,?\s*IL\s*60604" + _NL +
+    r"\(?312\)?\s*362[-.\s]?8000" + _NL +
+    r"-?\s*or\s*-?\s*1\s*\(?800\)?\s*4DE\s*PAUL\s*\(\s*outside\s+Illinois\s*\)",
     re.IGNORECASE,
 )
 
 # The "Information for" audience menu that sits beside the address on some
 # templates. Each entry is optional so a partial capture is still removed.
 _FOOTER_NAV = re.compile(
-    r"[ \t\xa0]*Information\s+for[ \t\xa0]*\r?\n"
-    r"(?:[ \t\xa0]*(?:Current\s+Students|Visitors|Faculty\s+and\s+Staff|Alumni|"
-    r"Parents\s+and\s+Families)[ \t\xa0]*\r?\n?)+",
+    r"[ \t\xa0]*Information\s+for" + _NL +
+    r"(?:(?:Current\s+Students|Visitors|Faculty\s+and\s+Staff|Alumni|"
+    r"Parents\s+and\s+Families)(?:" + _NL + r")?)+",
     re.IGNORECASE,
 )
 
@@ -71,6 +76,51 @@ def strip_site_chrome(text):
 # Zero-width spaces, the BOM, and non-breaking spaces all survive a .strip().
 # Several scraped summaries are nothing but these.
 _INVISIBLE = re.compile(r"[​‌‍⁠﻿\xa0\s]+")
+
+
+# Elements that end a line of prose. Everything else — em, strong, a, span,
+# sup — sits INSIDE a sentence and must not break it.
+_BLOCK_TAGS = ("p", "div", "section", "article", "header", "footer", "main",
+               "h1", "h2", "h3", "h4", "h5", "h6", "li", "ul", "ol", "dt", "dd",
+               "tr", "table", "blockquote", "pre", "figure", "figcaption", "hr")
+
+
+def page_text(soup):
+    """Readable text from a page, breaking lines only at block boundaries.
+
+    soup.get_text("\n") puts a newline between EVERY pair of strings, so a
+    sentence containing any inline markup comes apart:
+
+        Adler's stage directing work in
+        Patriot Act
+        , devised with Roger Guenveur Smith
+
+    That is one italicised show title turning one sentence into three lines.
+    It affected 247 biographies, and it also fed the section parser lines that
+    were never lines on the page.
+
+    Blocks get an explicit newline and <br> becomes one; everything else joins
+    with nothing, which is what the surrounding HTML already spaced correctly.
+    """
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    for tag in soup.find_all(_BLOCK_TAGS):
+        tag.insert_before("\n")
+        tag.insert_after("\n")
+    text = soup.get_text("")
+    # Block tags nest, so the inserts above stack up.
+    text = re.sub(r"[ \t\xa0]*\n[ \t\xa0]*", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # A newline the markup created immediately before punctuation was never a
+    # line break in the reading; close it up.
+    text = re.sub(r"\n+(\s*[.,;:!?)\]])", r"\1", text)
+
+    # Rejoin a sentence a <br> split for visual wrapping. Page authors insert
+    # them mid-sentence, and the giveaway is a line ending WITHOUT terminal
+    # punctuation followed by one starting lowercase — no list or heading looks
+    # like that, so this only ever repairs prose.
+    text = re.sub(r"(?<=[a-z,;])\n(?=[a-z])", " ", text)
+    return text.strip()
 
 
 def is_blank(text):

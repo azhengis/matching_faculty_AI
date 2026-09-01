@@ -16,7 +16,7 @@ import requests
 from bs4 import BeautifulSoup
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from text_clean import strip_site_chrome, is_blank, is_topic_line   # noqa: E402
+from text_clean import strip_site_chrome, is_blank, is_topic_line, page_text   # noqa: E402
 
 # Anchored on the repo root like every other stage. These were bare relative
 # names, so the script only worked from whatever directory happened to hold the
@@ -237,7 +237,7 @@ def main():
         # parser has no way to know the address block below the last heading is
         # not part of it. Cutting the furniture here keeps it out of every
         # section at once, and out of the database in the first place.
-        sections = parse_sections(strip_site_chrome(soup.get_text("\n")))
+        sections = parse_sections(strip_site_chrome(page_text(soup)))
 
         p["college"]    = meta(soup, "College") or p.get("college", "")
         # Joint appointments arrive semicolon-separated ("Neuroscience;Psychology").

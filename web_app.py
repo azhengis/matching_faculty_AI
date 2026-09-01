@@ -729,6 +729,19 @@ async def api_profile_search(req: Request):
     return JSONResponse({"results": results})
 
 
+def _summary_is_just(interests, summary):
+    """True when a research summary carries nothing the chips do not.
+
+    A page listing only research areas produces a summary made of those areas,
+    so the profile shows the same four phrases as prose above the same four
+    phrases as chips. Compared on words rather than characters, because the
+    summary joins them with newlines and the chips are separate strings.
+    """
+    body = re.findall(r"[a-z0-9]+", (summary or "").lower())
+    chips = re.findall(r"[a-z0-9]+", " ".join(interests).lower())
+    return bool(body) and body == chips
+
+
 @app.get("/api/directory/search")
 async def api_directory_search(req: Request, q: str = "", limit: int = 40, offset: int = 0):
     """Look anybody up by name, department, or college.
@@ -832,6 +845,12 @@ async def api_faculty_profile(faculty_id: int, req: Request):
         interests = [t for t in json.loads(topics_json or "[]") if str(t).strip()]
     except (ValueError, TypeError):
         interests = []
+
+    # When the summary is nothing but the chips re-joined, it is not a bio and
+    # showing it twice just pads the record. It still has to EXIST for search,
+    # since it is the embedded text, so it is hidden here rather than deleted.
+    if interests and _summary_is_just(interests, summary):
+        summary = ""
 
     # A self-written bio beats the scraped page.
     if email:
@@ -1111,6 +1130,9 @@ async def api_profile_automatch(req: Request):
     # A stated list beats one inferred from prose shape.
     if page_topics:
         interests = page_topics
+        # ...and if the summary was only ever that list, it is not a bio.
+        if _summary_is_just(page_topics, bio):
+            bio = ""
     # Neither path found a list, so the topics are buried in prose. Read them
     # out with the model. Best effort: a failure here leaves the chips empty,
     # which is where they were anyway.
