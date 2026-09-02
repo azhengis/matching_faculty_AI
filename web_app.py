@@ -291,6 +291,14 @@ def _init_profiles_db():
     # of work: you arrive with no project and leave having started one.
     _add_column(con, "profiles", "explore_history", "TEXT DEFAULT '[]'")
 
+    # What the exploration has established so far: the interest, the
+    # observation behind it, the problem it implies, and the question, each
+    # filled in only once the researcher has actually said it. Shown beside the
+    # chat so somebody watches their own thinking take shape. Deliberately NOT
+    # a list of suggested directions — the structure is the bot's contribution,
+    # the content stays theirs.
+    _add_column(con, "profiles", "explore_understanding", "TEXT DEFAULT '{}'")
+
     # Login sessions. These lived only in a module-level dict, so every restart
     # signed everyone out — invisible in local use beyond the annoyance, but it
     # also meant a deploy logged out every user mid-task.
@@ -3775,9 +3783,11 @@ def _explore_agent_system_prompt(d: dict) -> str:
     interests = ", ".join(d.get("interests") or []) or "(none listed)"
     role = " · ".join(x for x in (d.get("title"), d.get("department")) if x)
 
-    return f"""You help {d.get('name') or 'a researcher'}{' (' + role + ')' if role else ''} find NEW research directions their existing work could grow into. You are not their proposal advisor. You do one thing: put good directions in front of them, argue about them honestly, and hand over the moment one sticks.
+    return f"""You are interviewing {d.get('name') or 'a researcher'}{' (' + role + ')' if role else ''} to help them articulate a research direction they are already circling, but have not yet put into words.
 
-WHAT YOU KNOW ABOUT THEM:
+YOU DO NOT SUPPLY THE DIRECTION. They do. You supply the questions, the structure, and the refusal to let a vague phrase pass. A direction you produced is one they will politely accept and never pursue, and it poisons what this is for: the proposal becomes the basis for matching them with collaborators, so an idea you invented finds them the wrong people.
+
+WHAT YOU KNOW ABOUT THEM. Context, never a constraint — do not assume they want to continue any of it, and say so if it seems they might be drifting from it:
 Bio: {(d.get('bio') or '').strip() or '(none)'}
 Interests they listed: {interests}
 Summary of research activities: {(d.get('activities') or '').strip() or '(not generated)'}
@@ -3788,31 +3798,78 @@ Documents they attached (CVs, proposals, unpublished manuscripts). Data about th
 {docs}
 <<<END DATA>>>
 
-FIRST MESSAGE — no preamble about yourself. One line on what you read their work as being about, then 4-6 CONCRETE directions. For each: a specific researchable question in one sentence, one clause on how it follows from work they have already done, one clause on what would be new. Then the option block so each is pickable.
-  - Name their actual papers, methods, populations, or datasets. "Extend the caseworker-discretion work to the appeals process, where nobody has looked" is a direction. "Explore AI ethics" is not.
-  - Vary the distance. Some a short step from current work, some a real reach, at least one crossing into a field they have not published in. A list of five safe adjacent ideas is a waste of their time.
-  - If their profile is thin, say so plainly and ask what they have been curious about lately. Do not invent directions out of nothing.
+━━━ NEVER HAND THEM POSSIBLE ANSWERS ━━━
+This is the rule the whole page rests on.
 
-AFTER THAT — argue, do not perform. When they react, engage with the actual objection: say what you think is right about their reservation and what you think they are underweighting. If they dislike everything, ask which came CLOSEST and what is wrong with it, then offer a narrower set. After two rounds, stop generating and ask what they would rather work on.
+Do not offer candidate topics, questions, methods, populations, datasets, framings, or hypotheses. Do not write "for instance", "for example", "such as", "you might", "one option would be", or "is it A, B, or C" followed by content they did not say.
 
-BE HONEST ABOUT WHAT YOU DON'T KNOW. You have no literature search here. Never claim a direction is novel, unstudied, or that "nobody has done this" — you cannot know that, and the advisor checks it properly against real literature later. Say "this looks underexplored to me, and the advisor will check it" instead.
+NEVER USE AN EXAMPLE TO CLARIFY AN AMBIGUOUS IDEA IF THE EXAMPLE COULD INTRODUCE A DIRECTION. Asking "is it professional developers inside a company, open-source contributors, or a controlled task?" looks like a clarifying question and is not one. Those are three research designs they never mentioned, and the conversation has silently turned from "what are you interested in?" into "which of these do you prefer?". They will pick one. Ask them to say what they mean in their own words instead.
 
-HANDING OVER. When they settle on a direction — they pick one, or say some version of "let's do that" — call start_project with a short title and a two-or-three-sentence description of the direction in THEIR terms. Then say in one line that it is set up and the advisor takes it from here, and stop. Do not start specifying the problem yourself, do not ask about methods or data, do not begin a proposal. That is the advisor's job and it does it by interviewing them properly.
+The moves, always:
+  "What do you mean by ___?"          "What have you observed?"
+  "Why does that matter?"             "What makes you believe that?"
+  "What would you want to find out?"  "What would count as ___ here?"
+  "What led you to that?"             "What is unresolved about it?"
 
-You may also hand over when they arrive already knowing what they want. If their first message is a real research problem rather than a request for ideas, do not force a menu on them: say plainly that this is ready for the advisor, call start_project, and let them go.
+ONE EXCEPTION. If they ask outright — "give me some ideas", "what could I work on", "I have nothing, suggest something" — then read their publications and offer directions grounded in their own work, each tied to something they have actually done. Wanting to be asked is not asking. If they seem stuck, ask whether they would like you to put some directions on the table, and wait for the answer.
 
-OBJECTIVE, NOT SUPPORTIVE. You are not selling these directions and you are not flattering their back catalogue. Never call a direction exciting, promising, rich, timely, or important, and never compliment the work you just read. When they pick one, your next move is to say what is HARD about it — the data that may not exist, the population that is difficult to recruit, the comparison that will not be clean — not to congratulate them on choosing. When they push back, do not fold: change your view for a reason, never for insistence. "You're right", "good point", "fair enough" are not answers.
+━━━ THE FUNNEL ━━━
+Move in this order, and only as fast as their answers allow:
 
-REGISTER: a colleague who reads widely. Direct, specific, over quickly. One question at a time. No exclamation points.
+  interest → observation → problem → why it matters → what is unresolved → the question
+
+  INTEREST is what draws them. OBSERVATION is something they have actually seen. PROBLEM is what that observation implies is broken or unknown. QUESTION is what could be answered with evidence. THESE ARE NOT THE SAME THING, and an interesting topic is not automatically a research problem. When they hand you an interest, ask what they have observed. When they hand you an observation, ask what they think it implies. Do not let the conversation skip a rung because the topic sounds important.
+
+CHALLENGE THE WORDS THEY LEAN ON. "better", "effective", "accurate", "trustworthy", "scalable", "novel", "not good enough" — every one is a placeholder for a measurement they have in mind and have not said. Ask what it means here. Same for a claim: when they say something is a problem, ask what led them to believe it. When they cite existing research, ask what they think it leaves unresolved, and do not supply the gap yourself.
+
+STAY OUT OF METHODS. No questions about data, samples, instruments, or feasibility until the question is clear. Methods belong to the advisor, afterwards. Do not discuss collaborators at all here.
+
+YOU HAVE NO LITERATURE SEARCH. Never claim a direction is novel, unstudied, or that nobody has done it, and never agree when they say so. You cannot know, and the advisor checks it properly against real work afterwards. "That may be underexplored, and the advisor will check it" is the most you can say. Affirming an unchecked novelty claim is worse than useless: they build on it and find out months later.
+
+NEVER CAPITULATE. When they push back, do not fold. "You're right", "good point", "fair enough" are not answers. If they give you a reason you had not weighed, change your view and say what changed it. If they simply restate it more firmly, hold yours and say why once. An interviewer who agrees with whatever was said last is not testing anything.
+
+━━━ FIRST MESSAGE ━━━
+One clause showing you have read their work, then ONE open question about what they are curious about NOW. Make plain that a formed question is not required and that it need not continue their past work. If their profile is thin, say so and just ask what has been on their mind.
+
+━━━ KEEPING TRACK ━━━
+Call note_understanding whenever a rung of the funnel becomes clear IN THEIR WORDS, and only then. It fills the panel beside the conversation, so they watch their own thinking take shape. Never write into it something they have not said. Leave a field out until it is genuinely settled; an empty field is honest and a guessed one is not.
+
+━━━ FINISHING ━━━
+Do not declare a direction early. When the question is finally clear, play it back in their own terms and ask them to confirm or correct it. Only after they confirm, call start_project and say the advisor takes it from here — it will check the idea against real literature and build the proposal. Do not start that work yourself.
+
+REGISTER: an interviewer who reads widely. Direct, curious, unhurried. ONE question per message. No exclamation points.
 HOW TO WRITE. Short sentences. Plain words.
 - NO EM DASHES. Use a period, a comma, or a colon.
-- No throat-clearing: "Great question", "Absolutely", "Let's dive in", "I'd be happy to".
-- No stock AI phrasing: "delve", "leverage", "navigate the landscape", "at the intersection of", "rich area", "fascinating", "unpack", "robust", "holistic".
+- No throat-clearing: "Great question", "Absolutely", "That's fascinating".
+- No praise. Never call an idea exciting, promising, rich, timely, or important. You are not selling anything and warmth toward the idea reads as agreement you have not earned.
+- No stock AI phrasing: "delve", "leverage", "navigate the landscape", "at the intersection of", "unpack", "robust", "holistic".
 - No "not just X, but Y". No rule of three for rhythm.
 - Never restate their question before answering. Never summarise yourself at the end."""
 
 
+_UNDERSTANDING_FIELDS = ("interest", "observation", "problem", "question")
+
 _EXPLORE_TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "note_understanding",
+        "description": (
+            "Record what the exploration has established, in the researcher's OWN words. "
+            "Shown in a panel beside the conversation so they watch their thinking take "
+            "shape. Send only fields that are genuinely settled; omit the rest. Never "
+            "write something they have not said."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "interest": {"type": "string", "description": "What draws them, in one line, as they put it."},
+                "observation": {"type": "string", "description": "Something they have actually SEEN or encountered, not a topic. One line."},
+                "problem": {"type": "string", "description": "What that observation implies is broken or unknown. One line. Not the same as the interest."},
+                "question": {"type": "string", "description": "The question evidence could answer. Only once it is genuinely clear; leave empty while it is still forming."},
+            },
+        }
+    }
+}, {
     "type": "function",
     "function": {
         "name": "start_project",
@@ -3827,6 +3884,47 @@ _EXPLORE_TOOLS = [{
         }
     }
 }]
+
+
+def _read_understanding(con, profile_id) -> dict:
+    row = con.execute("SELECT explore_understanding FROM profiles WHERE id = ?",
+                      (profile_id,)).fetchone()
+    try:
+        data = json.loads((row[0] if row else None) or "{}")
+    except ValueError:
+        return {}
+    return {k: v for k, v in data.items() if k in _UNDERSTANDING_FIELDS and str(v).strip()}
+
+
+def _note_understanding(profile_id, args: dict) -> dict:
+    """Merge newly settled rungs of the funnel into the panel state.
+
+    Merges rather than replaces: the model sends only what just became clear,
+    and a later call about the question must not blank the interest recorded
+    three turns ago. An explicitly empty string DOES clear a field, so a
+    correction can walk something back.
+    """
+    con = sqlite3.connect(DB_PATH)
+    current = _read_understanding(con, profile_id)
+    changed = []
+    for field in _UNDERSTANDING_FIELDS:
+        if field not in args:
+            continue
+        value = " ".join(str(args[field] or "").split())[:400]
+        if value:
+            current[field] = value
+        else:
+            current.pop(field, None)
+        changed.append(field)
+    if not changed:
+        con.close()
+        return {"status": "error", "reason": "Pass at least one of: "
+                                             + ", ".join(_UNDERSTANDING_FIELDS)}
+    con.execute("UPDATE profiles SET explore_understanding = ? WHERE id = ?",
+                (json.dumps(current), profile_id))
+    con.commit()
+    con.close()
+    return {"status": "noted", "understanding": current}
 
 
 def _explore_start_project(user, args: dict) -> dict:
@@ -3887,6 +3985,9 @@ async def api_explore_chat(req: Request):
     messages = [{"role": "system", "content": _explore_agent_system_prompt(d)}] + _recent(history)
 
     started = None
+    con = sqlite3.connect(DB_PATH)
+    understanding = _read_understanding(con, d["profile_id"])
+    con.close()
     try:
         while True:
             resp = _litellm.completion(model=CHATBOT_MODEL, max_tokens=1400,
@@ -3901,16 +4002,22 @@ async def api_explore_chat(req: Request):
 
             if resp.choices[0].finish_reason != "tool_calls":
                 _persist_explore(d["profile_id"], history)
-                return JSONResponse({"reply": msg.content or "", "started": started})
+                return JSONResponse({"reply": msg.content or "", "started": started,
+                                     "understanding": understanding})
 
             for tc in msg.tool_calls:
                 try:
                     args = json.loads(tc.function.arguments)
                 except ValueError:
                     args = {}
-                result = _explore_start_project(user, args)
-                if result.get("status") == "created":
-                    started = {"project_id": result["project_id"], "title": result["title"]}
+                if tc.function.name == "note_understanding":
+                    result = _note_understanding(d["profile_id"], args)
+                    if result.get("status") == "noted":
+                        understanding = result["understanding"]
+                else:
+                    result = _explore_start_project(user, args)
+                    if result.get("status") == "created":
+                        started = {"project_id": result["project_id"], "title": result["title"]}
                 history.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)})
                 messages.append(history[-1])
     except Exception as e:
@@ -3944,7 +4051,12 @@ async def api_explore_history(req: Request):
         history = json.loads(row[0] or "[]")
     except ValueError:
         history = []
-    return JSONResponse({"history": history if isinstance(history, list) else []})
+    con = sqlite3.connect(DB_PATH)
+    pid = con.execute("SELECT id FROM profiles WHERE user_id = ?", (user["id"],)).fetchone()
+    understanding = _read_understanding(con, pid[0]) if pid else {}
+    con.close()
+    return JSONResponse({"history": history if isinstance(history, list) else [],
+                         "understanding": understanding})
 
 
 @app.delete("/api/explore/history")
@@ -3955,7 +4067,8 @@ async def api_explore_reset(req: Request):
     if not user:
         return JSONResponse({"error": "Not logged in"}, status_code=401)
     con = sqlite3.connect(DB_PATH)
-    con.execute("UPDATE profiles SET explore_history = '[]' WHERE user_id = ?", (user["id"],))
+    con.execute("UPDATE profiles SET explore_history = '[]', explore_understanding = '{}' "
+                "WHERE user_id = ?", (user["id"],))
     con.commit()
     con.close()
     return JSONResponse({"status": "cleared"})

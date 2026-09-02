@@ -111,13 +111,15 @@ def test_the_prompt_carries_their_publications_and_attached_material(profile, mo
 
 def test_the_bot_is_told_not_to_claim_novelty_it_cannot_check(profile, monkeypatch):
     """It has no literature search. "Nobody has studied this" would be a
-    promise the advisor then has to walk back."""
-    captured = _stub(monkeypatch, _resp("Directions."))
+    promise the advisor then has to walk back — and agreeing when the
+    researcher says it is the same error."""
+    captured = _stub(monkeypatch, _resp("A question back."))
     _chat(profile[1])
 
     system = captured["calls"][0]["messages"][0]["content"]
-    assert "no literature search" in system.lower()
+    assert "YOU HAVE NO LITERATURE SEARCH" in system
     assert "Never claim a direction is novel" in system
+    assert "never agree when they say so" in system
 
 
 # ── The handoff ─────────────────────────────────────────────────────────────
@@ -309,13 +311,61 @@ def test_the_advisor_separates_courtesy_to_the_person_from_rigour_on_the_work():
     assert "never manufacture one to seem rigorous" in text
 
 
-def test_explore_does_not_sell_its_own_suggestions():
-    """It proposes the directions, so it is the most likely place to slip into
-    marketing them."""
+def test_explore_does_not_praise_the_idea():
+    """Warmth toward an idea reads as agreement the bot has not earned, and
+    this bot's whole job is to test the idea rather than endorse it."""
     text = _explore()
-    assert "OBJECTIVE, NOT SUPPORTIVE" in text
+    assert "No praise." in text
     for word in ("exciting", "promising", "rich", "timely"):
         assert word in text, f"{word!r} should be named as a banned descriptor"
+
+
+# ── The interview model ─────────────────────────────────────────────────────
+
+def test_explore_does_not_supply_the_direction():
+    """The inversion. It used to open with 4-6 directions of its own; a
+    direction the bot produced is one the researcher politely accepts and
+    never pursues, and it finds them the wrong collaborators."""
+    text = _explore()
+    assert "YOU DO NOT SUPPLY THE DIRECTION" in text
+    assert "4-6 CONCRETE directions" not in text
+
+
+def test_an_example_may_not_introduce_a_direction():
+    """The precise failure: "is it professional developers, open-source
+    contributors, or a controlled task?" reads as clarification and is three
+    research designs the researcher never mentioned."""
+    text = _explore()
+    assert "NEVER USE AN EXAMPLE TO CLARIFY AN AMBIGUOUS IDEA" in text
+    assert "professional developers inside a company" in text
+
+
+def test_suggestions_are_available_only_on_an_explicit_request():
+    """Bamshad asked for a suggestion capability; it survives as opt-in rather
+    than as the thing that happens to people who never asked."""
+    text = _explore()
+    assert "ONE EXCEPTION" in text
+    assert "Wanting to be asked is not asking" in text
+
+
+def test_the_funnel_distinguishes_an_interest_from_a_research_problem():
+    """An interesting topic is not automatically a research problem, and the
+    rungs are what stop the conversation skipping that."""
+    text = _explore()
+    assert "interest → observation → problem" in text
+    assert "THESE ARE NOT THE SAME THING" in text
+
+
+def test_vague_words_are_challenged():
+    text = _explore()
+    for word in ('"better"', '"effective"', '"accurate"', '"novel"'):
+        assert word in text, f"{word} should be named as a placeholder to challenge"
+
+
+def test_the_direction_is_confirmed_before_handoff():
+    text = _explore()
+    assert "Do not declare a direction early" in text
+    assert "ask them to confirm or correct it" in text
 
 
 def test_praise_adjectives_stay_banned_in_the_advisor():
@@ -420,3 +470,81 @@ def test_the_proposal_is_judged_as_a_whole_before_it_is_called_done():
     text = _advisor()
     assert "BEFORE YOU CALL THE PROPOSAL DONE" in text
     assert "judged TOGETHER" in text
+
+
+# ── "What we've uncovered" ──────────────────────────────────────────────────
+
+def _note(cookies, **fields):
+    return json.loads(_run(web_app.api_explore_chat(_FakeRequest({"message": "x"}, cookies))).body)
+
+
+def test_a_settled_rung_appears_in_the_panel(profile, monkeypatch):
+    _, cookies = profile
+    _stub(monkeypatch,
+          _resp(tool=("note_understanding", {"interest": "How developers use AI suggestions"})),
+          _resp("What have you seen?"))
+    assert _chat(cookies)["understanding"] == {"interest": "How developers use AI suggestions"}
+
+
+def test_a_later_rung_does_not_wipe_an_earlier_one(profile, monkeypatch):
+    """The model sends only what just became clear, so a note about the
+    observation must not blank the interest recorded three turns ago."""
+    _, cookies = profile
+    _stub(monkeypatch, _resp(tool=("note_understanding", {"interest": "AI suggestions"})),
+          _resp("And?"))
+    _chat(cookies)
+    _stub(monkeypatch, _resp(tool=("note_understanding", {"observation": "Good ones get ignored"})),
+          _resp("Why?"))
+    got = _chat(cookies)["understanding"]
+    assert got == {"interest": "AI suggestions", "observation": "Good ones get ignored"}
+
+
+def test_an_empty_value_clears_a_rung(profile, monkeypatch):
+    """A correction has to be able to walk something back."""
+    _, cookies = profile
+    _stub(monkeypatch, _resp(tool=("note_understanding", {"interest": "A", "problem": "B"})), _resp("ok"))
+    _chat(cookies)
+    _stub(monkeypatch, _resp(tool=("note_understanding", {"problem": ""})), _resp("ok"))
+    assert _chat(cookies)["understanding"] == {"interest": "A"}
+
+
+def test_the_panel_survives_a_reload(profile, monkeypatch):
+    _, cookies = profile
+    _stub(monkeypatch, _resp(tool=("note_understanding", {"question": "What drives acceptance?"})),
+          _resp("ok"))
+    _chat(cookies)
+    body = json.loads(_run(web_app.api_explore_history(_FakeRequest(cookies=cookies))).body)
+    assert body["understanding"] == {"question": "What drives acceptance?"}
+
+
+def test_starting_over_clears_the_panel_too(profile, monkeypatch):
+    """A fresh exploration must not open under the last one's conclusions."""
+    _, cookies = profile
+    _stub(monkeypatch, _resp(tool=("note_understanding", {"interest": "A"})), _resp("ok"))
+    _chat(cookies)
+    _run(web_app.api_explore_reset(_FakeRequest(cookies=cookies)))
+    body = json.loads(_run(web_app.api_explore_history(_FakeRequest(cookies=cookies))).body)
+    assert body["understanding"] == {}
+
+
+def test_an_unknown_field_is_ignored(profile, monkeypatch):
+    """The panel renders four rungs; anything else would never be shown."""
+    _, cookies = profile
+    _stub(monkeypatch,
+          _resp(tool=("note_understanding", {"interest": "A", "methodology": "regression"})),
+          _resp("ok"))
+    assert _chat(cookies)["understanding"] == {"interest": "A"}
+
+
+def test_noting_nothing_is_an_error_not_a_silent_success(profile, monkeypatch):
+    _, cookies = profile
+    _stub(monkeypatch, _resp(tool=("note_understanding", {})), _resp("ok"))
+    assert _chat(cookies)["understanding"] == {}
+
+
+def test_the_bot_is_told_to_note_only_their_own_words(profile, monkeypatch):
+    captured = _stub(monkeypatch, _resp("A question."))
+    _chat(profile[1])
+    system = captured["calls"][0]["messages"][0]["content"]
+    assert "Never write into it something they have not said" in system
+    assert "an empty field is honest and a guessed one is not" in system
