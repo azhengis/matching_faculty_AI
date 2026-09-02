@@ -323,3 +323,100 @@ def test_praise_adjectives_stay_banned_in_the_advisor():
     text = _advisor()
     assert "not a cheerleader" in text
     assert "that's a good anchor" in text
+
+
+# ── The Socratic interview rule ─────────────────────────────────────────────
+
+def test_the_advisor_must_not_hand_over_candidate_answers():
+    """Reviewed behaviour: the bot answered with "For instance..." and gave
+    conceptual options the professor had not considered. Three plausible
+    answers teach them what is expected, they pick one to be agreeable, and
+    the proposal is then partly the bot's — which also corrupts matching."""
+    text = _advisor()
+    assert "NEVER HAND THEM POSSIBLE ANSWERS" in text
+    for banned in ('"for instance"', '"for example"', '"such as"'):
+        assert banned in text, f"{banned} should be named"
+    assert 'is it A, B, or C' in text
+
+
+def test_the_advisor_is_given_the_socratic_moves_instead():
+    text = _advisor()
+    for move in ('"What do you mean by ___?"',
+                 '"Why is that important?"',
+                 '"What would you want to observe?"',
+                 '"What makes you believe that?"',
+                 '"What would allow you to answer that?"'):
+        assert move in text, f"missing {move}"
+
+
+def test_only_an_explicit_request_unlocks_options():
+    text = _advisor()
+    assert "Anything short of asking is not asking" in text
+
+
+def test_a_stalled_conversation_asks_permission_before_offering_options():
+    """The dead-end case. Never supplying options would stall forever;
+    supplying them unasked breaks the rule. Asking first does neither."""
+    text = _advisor()
+    assert "ASK WHETHER THEY WANT OPTIONS" in text
+    assert "A yes is the explicit request" in text
+
+
+def test_stage_one_stays_out_of_data_and_methods():
+    """Reviewed behaviour: it asked about data collection before the problem
+    was narrowed, which settles the problem to fit the available data."""
+    text = _advisor()
+    assert "STAY OUT OF METHODS AND DATA HERE" in text
+    assert "Methods are Stage 4" in text
+
+
+def test_option_blocks_are_confined_to_three_cases():
+    text = _advisor()
+    assert "THREE PLACES ONLY" in text
+    assert "in Stages 1 and 3 entirely, ask what they mean instead" in text
+
+
+# ── Gap reasoning before the search ─────────────────────────────────────────
+
+def test_the_researcher_states_the_gap_before_the_search_runs():
+    """The bot has a literature search and the professor does not, so
+    searching first hands them a gap they then agree with."""
+    text = _advisor()
+    assert "FIRST, MAKE THEM SAY WHAT THE GAP IS" in text
+    assert "Their reasoning comes first" in text
+
+
+def test_the_gap_kinds_are_not_listed_for_them():
+    """Asking "is it data, method, or population?" is the banned shape. The
+    prompt has to ask for the kind without enumerating it as a choice."""
+    text = _advisor()
+    assert 'Ask it as "what kind of gap is it?" and let them name it' in text
+
+
+def test_the_research_questions_still_come_before_the_gap():
+    """Confirmed decision: questions first, then the gap. A later spec
+    proposed the reverse and was not adopted."""
+    text = _advisor()
+    assert text.index("STAGE 1 — SPECIFY THE RESEARCH PROBLEM") < text.index("STAGE 2 — TEST WHETHER IT IS NOVEL")
+    assert "SPECIFIC RESEARCH QUESTIONS" in text.split("STAGE 2 — TEST WHETHER IT IS NOVEL")[0]
+
+
+# ── Legibility and the closing check ───────────────────────────────────────
+
+def test_the_advisor_explains_why_it_is_asking_when_it_changes_layer():
+    text = _advisor()
+    assert "SAY WHY YOU ARE ASKING" in text
+    assert "not narrating internals" in text
+
+
+def test_the_opening_removes_the_burden_of_organising_anything():
+    text = _advisor()
+    assert "not worry about organising it" in text
+
+
+def test_the_proposal_is_judged_as_a_whole_before_it_is_called_done():
+    """Incremental saving settles each section alone; nothing otherwise looks
+    at whether they contradict each other."""
+    text = _advisor()
+    assert "BEFORE YOU CALL THE PROPOSAL DONE" in text
+    assert "judged TOGETHER" in text
