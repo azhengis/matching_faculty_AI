@@ -209,3 +209,66 @@ def test_the_template_parser_scans_backward_from_the_end():
     with a latching flag; this fails if that shape comes back."""
     assert "for (let i = lines.length - 1; i >= 0; i--)" in TEMPLATE
     assert "let inOpts = false" not in TEMPLATE
+
+
+# ── 4. The turn always ends in JSON ────────────────────────────────────────
+
+def test_a_runaway_tool_loop_ends_instead_of_hanging(project, monkeypatch):
+    """The loop was `while True`. A model that keeps reaching for a tool would
+    never return, and the host's proxy would eventually answer the browser with
+    an HTML error page instead."""
+    calls = {"n": 0}
+
+    def completion(**kw):
+        calls["n"] += 1
+        return _resp("Looking again.", tool=("search_literature", {"query": "x"}))
+
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
+    monkeypatch.setattr(web_app, "_search_literature", lambda **kw: {"results": []})
+
+    body = _chat(project)
+    assert calls["n"] == web_app.MAX_TOOL_ROUNDS
+    assert body["reply"], "a capped turn must still say something"
+
+
+def test_every_model_call_in_the_turn_is_bounded(project, monkeypatch):
+    """A hung upstream call is what produces the proxy timeout in the first
+    place, so the timeout has to be on the call, not only on the loop."""
+    seen = []
+
+    def completion(**kw):
+        seen.append(kw.get("timeout"))
+        return _resp("Done.")
+
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
+    _chat(project)
+    assert seen == [web_app.LLM_CALL_TIMEOUT]
+
+
+def test_the_conversation_survives_a_failed_turn(project, monkeypatch):
+    """What the error message promises the reader: reload and it is still
+    there."""
+    def boom(**kw):
+        raise RuntimeError("upstream exploded")
+
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=boom))
+    _run(web_app.api_advisor_chat(_FakeRequest(
+        {"message": "My question.", "project_id": 1}, project)))
+
+    con = sqlite3.connect(web_app.DB_PATH)
+    hist = json.loads(con.execute(
+        "SELECT chat_history FROM projects WHERE id = 1").fetchone()[0])
+    con.close()
+    assert any(e["role"] == "user" and e["content"] == "My question." for e in hist)
+
+
+def test_the_client_reads_the_body_before_trusting_it_as_json():
+    """Structural guard on the fix. res.json() on an HTML error page throws a
+    parser error, which is what reached the researcher as "The string did not
+    match the expected pattern."."""
+    assert "const body = await res.text();" in TEMPLATE
+    assert "try { data = JSON.parse(body); } catch (_)" in TEMPLATE
+    assert "await res.json();\n    if (data.error)" not in TEMPLATE

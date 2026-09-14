@@ -468,8 +468,23 @@ async function callAdvisorAPI(message) {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ message, project_id: _projectId })
     });
-    const data = await res.json();
-    if (data.error) {
+
+    // Not every failure comes back as JSON. When the host's proxy times out or
+    // the instance is restarting it answers with an HTML error page, and
+    // calling res.json() on that throws a parser error — which is how someone
+    // got told "Network error: The string did not match the expected pattern."
+    // Read the body as text first and decide what it actually is.
+    const body = await res.text();
+    let data = null;
+    try { data = JSON.parse(body); } catch (_) { /* not JSON; handled below */ }
+
+    if (data === null) {
+      addBotRaw('<div class="bubble" style="color:#9B2020">' +
+        'The server answered with something unexpected (HTTP ' + res.status + '). ' +
+        'That usually means the request took too long or the app was restarting. ' +
+        '<strong>Your conversation is saved</strong> — reload the page to see whether ' +
+        'the reply arrived.</div>');
+    } else if (data.error) {
       addBotRaw('<div class="bubble" style="color:#9B2020">' + esc(data.error) + '</div>');
     } else {
       renderBotReply(data.reply || '', data.truncated);
@@ -479,7 +494,8 @@ async function callAdvisorAPI(message) {
       checkMatches();
     }
   } catch (e) {
-    addBotRaw('<div class="bubble" style="color:#9B2020">Network error: ' + esc(e.message) + '</div>');
+    addBotRaw('<div class="bubble" style="color:#9B2020">Could not reach the server: ' +
+      esc(e.message) + '. Your conversation is saved — reload to pick it up.</div>');
   } finally {
     _busy = false;
     document.getElementById('btn-send').disabled = false;

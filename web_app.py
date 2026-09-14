@@ -2129,6 +2129,21 @@ async def api_project_proposal_edit(project_id: int, req: Request):
 
 MAX_SENT_TURNS = 24   # transcript entries sent to the model; the proposal is the durable memory
 
+# One model call may not take longer than this. Without it a hung upstream call
+# hangs the request until the hosting proxy gives up, and a proxy timeout is an
+# HTML error page — which the browser then fails to parse as JSON and reports as
+# "Network error: The string did not match the expected pattern." The user has
+# no idea their advisor is still thinking. Failing here instead produces a real
+# JSON error the chat can show.
+LLM_CALL_TIMEOUT = 90
+
+# The advisor answers one message by looping: call the model, run any tool it
+# asks for, call again with the result. Nothing bounded that loop. A model that
+# keeps reaching for search_literature would never return, and the same proxy
+# timeout would swallow the request. Legitimate turns use two or three passes;
+# a literature search followed by several saves might reach six.
+MAX_TOOL_ROUNDS = 8
+
 
 def _cached_system(stable: str, volatile: str) -> list:
     """System prompt as two blocks, the stable one marked cacheable.
@@ -3925,8 +3940,9 @@ async def api_advisor_chat(req: Request):
     # and the search results arrived with no lead-in.
     said: list = []
     try:
-        while True:
+        for _round in range(MAX_TOOL_ROUNDS):
             resp   = _litellm.completion(model=CHATBOT_MODEL, max_tokens=1800,
+                                         timeout=LLM_CALL_TIMEOUT,
                                          tools=_ADVISOR_TOOLS, messages=messages)
             msg    = resp.choices[0].message
             reason = resp.choices[0].finish_reason
@@ -3965,6 +3981,16 @@ async def api_advisor_chat(req: Request):
                     _record_matches(project_id, result.get("results", []))
                 tool_entry = {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)}
                 history.append(tool_entry); messages.append(tool_entry)
+
+        # Fell out of the loop still wanting tools. Whatever it did along the
+        # way is saved, so return that rather than an error on a turn that
+        # mostly worked.
+        _persist_history(project_id, history)
+        return JSONResponse({
+            "reply": "\n\n".join(said) or
+                     "I got stuck working through that one. Ask me again, "
+                     "or tell me which part to focus on.",
+            "session_id": session_id, "truncated": False})
     except Exception as e:
         # Keep whatever was exchanged before the failure — losing the turn is
         # bad, losing the conversation is worse.
