@@ -243,12 +243,19 @@ let _busy      = false;
 let _projectId = null;
 let _proposal  = null;
 
+// Document order, matching the .docx export and Bamshad's suggested
+// organization for a finished proposal. Sections with no text are not rendered,
+// so the later ones stay out of the way until the conversation reaches them.
 const PROPOSAL_LABELS = {
-  abstract:'Abstract', problem_statement:'Problem Statement', novelty:'Novelty & Contribution',
-  background:'Background', objectives:'Objectives', research_questions:'Research Questions',
-  related_work:'Literature Review', methodology:'Methodology',
+  abstract:'Abstract', keywords:'Keywords',
+  problem_statement:'Problem Statement', novelty:'Novelty & Contribution',
+  background:'Background', objectives:'Objectives',
+  research_questions:'Research Questions', hypotheses:'Hypotheses',
+  assumptions_delimitations:'Assumptions & Delimitations',
+  related_work:'Literature Review', methodology:'Research Design & Methodology',
   ai_role:'Role of AI & Data Science', ethical_considerations:'Ethical Considerations',
-  expected_outcomes:'Expected Outcomes',
+  expected_outcomes:'Expected Outcomes', plan_of_work:'Plan of Work',
+  conclusions_future_work:'Conclusions & Future Work',
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────────

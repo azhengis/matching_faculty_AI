@@ -106,12 +106,17 @@
 </div>
 
 <script>
+// Document order, matching the advisor panel and the .docx export.
 const SECTION_LABELS = {
-  abstract:'Abstract', problem_statement:'Problem statement', novelty:'Novelty & contribution',
-  background:'Background', objectives:'Objectives', research_questions:'Research questions',
-  related_work:'Literature review', methodology:'Methodology',
+  abstract:'Abstract', keywords:'Keywords',
+  problem_statement:'Problem statement', novelty:'Novelty & contribution',
+  background:'Background', objectives:'Objectives',
+  research_questions:'Research questions', hypotheses:'Hypotheses',
+  assumptions_delimitations:'Assumptions & delimitations',
+  related_work:'Literature review', methodology:'Research design & methodology',
   ai_role:'Role of AI & data science', ethical_considerations:'Ethical considerations',
-  expected_outcomes:'Expected outcomes',
+  expected_outcomes:'Expected outcomes', plan_of_work:'Plan of work',
+  conclusions_future_work:'Conclusions & future work',
 };
 const SECTION_ORDER = Object.keys(SECTION_LABELS);
 

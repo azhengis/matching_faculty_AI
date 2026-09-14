@@ -275,12 +275,11 @@ def test_get_proposal_returns_empty_defaults_when_none_saved(tmp_path, monkeypat
 
     response = _run(api_project_proposal(1, _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
-    assert _body(response) == {
-        "abstract": "", "problem_statement": "", "novelty": "", "background": "", "objectives": "",
-        "research_questions": "", "related_work": "", "methodology": "", "ai_role": "",
-        "ethical_considerations": "", "expected_outcomes": "",
-        "edited_sections": [],
-    }
+    # Every declared section, blank, plus the edit lock. Derived rather than
+    # listed so adding a section does not need this test rewritten — what it
+    # guards is that the endpoint answers with the full shape instead of {}.
+    assert _body(response) == {**{f: "" for f in web_app._PROPOSAL_FIELDS},
+                               "edited_sections": []}
 
 
 def test_get_proposal_returns_saved_values(tmp_path, monkeypatch):

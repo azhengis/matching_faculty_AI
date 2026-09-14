@@ -17,13 +17,71 @@ def test_init_profiles_db_creates_proposals_table(tmp_path, monkeypatch):
 
     con = sqlite3.connect(db_path)
     cols = _columns(con, "proposals")
-    assert cols == [
-        "id", "project_id", "background", "objectives", "research_questions",
-        "related_work", "methodology", "expected_outcomes", "created_at",
-        "updated_at", "edited_sections", "problem_statement", "novelty",
-        "abstract", "ethical_considerations", "ai_role",
-    ]
+    assert cols[:2] == ["id", "project_id"]
+    for bookkeeping in ("created_at", "updated_at", "edited_sections"):
+        assert bookkeeping in cols
     con.close()
+
+
+def test_every_declared_proposal_section_has_a_column(tmp_path, monkeypatch):
+    """_PROPOSAL_FIELDS drives the generated SELECT and UPSERT. A section added
+    to that list without a matching migration would not fail at startup; it
+    would fail on the first read of any proposal, for everybody."""
+    db_path = tmp_path / "test_faculty.db"
+    monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
+    web_app._init_profiles_db()
+
+    con = sqlite3.connect(db_path)
+    cols = _columns(con, "proposals")
+    con.close()
+    missing = [f for f in web_app._PROPOSAL_FIELDS if f not in cols]
+    assert missing == [], f"declared but never migrated: {missing}"
+
+
+def test_the_generated_sql_round_trips_every_section(tmp_path, monkeypatch):
+    """Proves the derived statements agree with each other and with the table.
+    The hand-written versions kept four column lists in index order against a
+    dict(zip(...)); a section inserted anywhere but the end shifted every later
+    column's contents by one, silently."""
+    db_path = tmp_path / "test_faculty.db"
+    monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
+    web_app._init_profiles_db()
+
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO profiles (id, name) VALUES (1, 'Test Person')")
+    con.execute("INSERT INTO projects (id, profile_id, title) VALUES (1, 1, 'P')")
+    con.commit()
+
+    # A distinct value per section, so a one-column shift cannot pass.
+    values = {f: f"value for {f}" for f in web_app._PROPOSAL_FIELDS}
+    con.execute(web_app._PROPOSAL_UPSERT,
+                (1, *(values[f] for f in web_app._PROPOSAL_FIELDS)))
+    con.commit()
+
+    row = con.execute(web_app._PROPOSAL_SELECT, (1,)).fetchone()
+    con.close()
+    assert dict(zip(web_app._PROPOSAL_FIELDS, row)) == values
+
+
+def test_the_upsert_overwrites_rather_than_duplicating(tmp_path, monkeypatch):
+    """One proposal per project. The generated ON CONFLICT clause is what holds
+    that, and it names every section explicitly."""
+    db_path = tmp_path / "test_faculty.db"
+    monkeypatch.setattr(web_app, "DB_PATH", str(db_path))
+    web_app._init_profiles_db()
+
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO profiles (id, name) VALUES (1, 'Test Person')")
+    con.execute("INSERT INTO projects (id, profile_id, title) VALUES (1, 1, 'P')")
+    for marker in ("first", "second"):
+        con.execute(web_app._PROPOSAL_UPSERT,
+                    (1, *(f"{marker} {f}" for f in web_app._PROPOSAL_FIELDS)))
+    con.commit()
+
+    assert con.execute("SELECT COUNT(*) FROM proposals").fetchone()[0] == 1
+    row = con.execute(web_app._PROPOSAL_SELECT, (1,)).fetchone()
+    con.close()
+    assert all(v.startswith("second ") for v in row)
 
 
 def test_init_profiles_db_creates_projects_and_matches(tmp_path, monkeypatch):
