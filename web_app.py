@@ -3919,6 +3919,11 @@ async def api_advisor_chat(req: Request):
     messages = [{"role": "system",
                  "content": _cached_system(stable_prompt, volatile_prompt)}] + _recent(history)
 
+    # Everything the advisor says across one turn, including anything it wrote
+    # before reaching for a tool. Returning only the final message dropped
+    # those sentences: "Let me check what the literature says on that." vanished
+    # and the search results arrived with no lead-in.
+    said: list = []
     try:
         while True:
             resp   = _litellm.completion(model=CHATBOT_MODEL, max_tokens=1800,
@@ -3931,9 +3936,18 @@ async def api_advisor_chat(req: Request):
                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                     for tc in msg.tool_calls]
             history.append(entry); messages.append(entry)
+            if (msg.content or "").strip():
+                said.append(msg.content.strip())
             if reason != "tool_calls":
                 _persist_history(project_id, history)
-                return JSONResponse({"reply": msg.content or "", "session_id": session_id})
+                reply = "\n\n".join(said)
+                # finish_reason "length" means the model ran into max_tokens
+                # mid-sentence. This used to be treated exactly like "stop",
+                # so the researcher got a reply that simply stopped partway
+                # with nothing to say it had — and no way to tell a truncated
+                # answer from a badly-written one.
+                return JSONResponse({"reply": reply, "session_id": session_id,
+                                     "truncated": reason == "length"})
             for tc in msg.tool_calls:
                 args = json.loads(tc.function.arguments)
                 if tc.function.name == "save_proposal":

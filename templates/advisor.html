@@ -142,6 +142,9 @@
 .btn-send:hover{background:var(--navy-lift)}
 .btn-send:disabled{opacity:.45;cursor:not-allowed}
 
+/* Shown when finish_reason came back "length": the answer stops mid-sentence
+   and the reader deserves to know that was the limit, not the advisor. */
+.truncated-note{margin-top:10px;padding-top:9px;border-top:1px dashed var(--border-2);font-size:12.5px;color:var(--ink-3);font-style:italic}
 .options{display:flex;flex-direction:column;gap:7px;margin-top:11px}
 .opt-btn{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 15px;text-align:left;font-size:13.5px;color:var(--ink);cursor:pointer;font-family:inherit;display:flex;gap:11px;align-items:baseline;box-shadow:var(--sh-sm);transition:border-color .15s,background .15s}
 .opt-btn:hover{background:var(--canvas);border-color:var(--navy-lift)}
@@ -450,7 +453,7 @@ async function callAdvisorAPI(message) {
     if (data.error) {
       addBotRaw('<div class="bubble" style="color:#9B2020">' + esc(data.error) + '</div>');
     } else {
-      renderBotReply(data.reply || '');
+      renderBotReply(data.reply || '', data.truncated);
       checkProposal();
       checkGapMap();
       checkReferences();
@@ -466,7 +469,7 @@ async function callAdvisorAPI(message) {
 }
 
 // ── Rendering the reply ───────────────────────────────────────────────────────
-function renderBotReply(raw) {
+function renderBotReply(raw, truncated) {
   const { main, options } = parseReply(raw);
   let optsHtml = '';
   if (options.length) {
@@ -486,18 +489,42 @@ function renderBotReply(raw) {
       `<span class="opt-num">[${picks.length + 1}]</span>None of these — I'll write my own</button>` +
       '</div>';
   }
-  addBotRaw(`<div class="bubble">${markdownToHtml(main)}</div>${optsHtml}`);
+  // A reply that ran into the token limit stops mid-sentence. Say so, rather
+  // than leaving someone to wonder whether the advisor lost its thread.
+  const cut = truncated
+    ? '<div class="truncated-note">That answer was cut off at the length limit. '
+      + 'Ask it to continue and it will pick up from there.</div>'
+    : '';
+  addBotRaw(`<div class="bubble">${markdownToHtml(main)}${cut}</div>${optsHtml}`);
 }
 
+// Split a reply into prose and the [n] option lines the app renders as buttons.
+//
+// Only a run of option lines at the very END counts. The advisor is told to put
+// nothing after the options, but when it forgot, every line after the first
+// [n] was thrown away: not shown as prose, not offered as a button, just gone.
+// A trailing question after a menu disappeared, and so did any sentence that
+// happened to start with a bracketed number. Text is never dropped now — a
+// stray [n] in the middle of a message stays in the prose where it was written.
 function parseReply(text) {
-  const options = [], mainLines = [];
-  let inOpts = false;
-  for (const line of String(text || '').split('\n')) {
-    const m = line.match(/^\s*\[(\d+)\]\s*(.+)$/);
-    if (m) { inOpts = true; options.push({ num: m[1], text: m[2].trim() }); continue; }
-    if (!inOpts) mainLines.push(line);
+  const lines = String(text || '').split('\n');
+  const isOpt = (l) => /^\s*\[(\d+)\]\s*(.+)$/.exec(l);
+
+  // Walk back from the end over option lines and the blank lines between them.
+  let start = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].trim()) continue;             // blank: keep looking past it
+    if (isOpt(lines[i])) { start = i; continue; }
+    break;                                       // first real prose line: stop
   }
-  const main = mainLines.join('\n').replace(/What would you like to do next\?\s*$/i, '').trimEnd();
+
+  const options = [];
+  for (const line of lines.slice(start)) {
+    const m = isOpt(line);
+    if (m) options.push({ num: m[1], text: m[2].trim() });
+  }
+  const main = lines.slice(0, start).join('\n')
+    .replace(/What would you like to do next\?\s*$/i, '').trimEnd();
   return { main, options };
 }
 
