@@ -3,9 +3,9 @@
 Three bots, one proposal. What each one asks, the checkpoints it cannot skip, the
 rules it works under, and what happens when a conversation goes sideways.
 
-Reflects the prompts and gating logic in `web_app.py` as deployed. Behaviour is
-enforced partly in code (stage gates, hand-edit locks, tool schemas) and partly
-in prompt instructions.
+Reflects the advisor prompt in `prompts/advisor/` and the gating logic in
+`web_app.py` as deployed. Behaviour is enforced partly in code (stage gates,
+hand-edit locks, tool schemas) and partly in prompt instructions.
 
 ---
 
@@ -79,6 +79,32 @@ before novelty existed as a step is not dragged back to the beginning.
 > | Stage 2 | A two-page outline covering seven elements | Stage 4, the outline that opens it |
 > | Stage 3 | Expanded literature review, falsifiable hypotheses, specified methods | Stage 4, the sections |
 
+### Where the prompt lives
+
+The advisor's instructions are **not in `web_app.py` any more**. They are plain
+text files, one per section, assembled at request time:
+
+```
+prompts/advisor/00_role.md … 13_send_check.md   the instruction half
+prompts/advisor_volatile.md                      the live proposal and profile
+advisor_prompt.py                                puts them back together
+```
+
+Edit the `.md` files directly — no Python involved — and restart the server to
+pick up the change. Two rules govern the split:
+
+- **Order comes from `SECTIONS` in `advisor_prompt.py`, not the filesystem.**
+  Alphabetical filename order would work until somebody added `tone_extra.md`,
+  and the failure would be a silently reordered prompt rather than an error.
+- **A missing file is fatal.** If a section fails to ship, the natural failure
+  is not a crash but a working advisor with a hole in it — no send check, or no
+  novelty stage — and nobody notices for weeks. The set is verified at import
+  and the process refuses to start instead.
+
+The split was verified byte-identical: the assembled prompt matched the
+previous single f-string exactly, so nothing about the advisor's behaviour
+changed when it moved.
+
 ### The lenses
 
 The prompt carries Bamshad's nineteen-point framework for interrogating a
@@ -125,6 +151,21 @@ resource in the conversation. The send check enforces this on every message.
 
 Mostly asking. The faculty member already has an idea; the job is making it
 concrete.
+
+> **The project gets named first.** Bamshad asked for the work to start from a
+> project title and a problem description, literally. As soon as the researcher
+> has said what the work is about — their *first* substantive answer — the
+> advisor puts a working title back to them in one clause and saves it. It
+> **proposes**; they correct. A cold "what would you call this?" is the
+> grant-form opening the prompt bans everywhere else, and someone arriving with
+> a rough observation has no title yet. A title they supplied themselves is
+> used verbatim.
+>
+> The title is provisional and re-earned twice: when the problem statement is
+> confirmed, and again when the proposal is finished. That makes drift visible
+> — a title still moving late means the problem never settled, and the advisor
+> is told to say so rather than quietly renaming again. Saving it also renames
+> the project everywhere it is listed, so there is one title rather than two.
 
 ### What it works through, in order
 

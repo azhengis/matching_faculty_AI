@@ -28,7 +28,7 @@ SAVE_PROPOSAL = TOOLS["save_proposal"]["parameters"]["properties"]
 #   Related Work / Research Design and Methodology / Plan of Work and Outcomes /
 #   Conclusions and Future Work / References
 REQUIRED_SECTIONS = [
-    "abstract", "keywords", "background", "objectives", "hypotheses",
+    "title", "abstract", "keywords", "background", "objectives", "hypotheses",
     "assumptions_delimitations", "related_work", "methodology",
     "expected_outcomes", "plan_of_work", "conclusions_future_work",
 ]
@@ -68,6 +68,127 @@ def test_both_panels_can_render_every_section(template):
     html = (Path(web_app.__file__).parent / "templates" / template).read_text()
     missing = [f for f in web_app._PROPOSAL_FIELDS if f not in html]
     assert missing == [], f"{template} cannot render {missing}"
+
+
+# ── Title-first ────────────────────────────────────────────────────────────
+
+def test_the_title_is_a_saved_section_not_a_generated_one():
+    """Bamshad asked for the work to start from a project title and a problem
+    description, literally. The title used to be generated from the problem
+    statement after the fact, which meant nobody ever agreed to it."""
+    assert "title" in web_app._PROPOSAL_FIELDS
+    assert "title" in SAVE_PROPOSAL
+
+
+def test_the_title_is_named_in_the_first_substantive_reply():
+    assert "NAME THE PROJECT FIRST" in STABLE
+    assert "FIRST substantive answer, not later" in STABLE
+
+
+def test_the_advisor_proposes_the_title_rather_than_asking_for_it():
+    """A cold "what would you call this?" is the grant-form opening the prompt
+    bans everywhere else, and a researcher with a rough observation has no
+    title yet. It proposes; they correct."""
+    assert "you propose, they correct" in STABLE
+    assert "never a message of its own" in STABLE
+
+
+def test_a_title_the_researcher_supplied_is_used_verbatim():
+    assert "use theirs verbatim and do not improve it" in STABLE
+
+
+def test_the_title_is_re_earned_at_the_problem_statement_and_at_the_end():
+    """It is set from a first answer, and the problem moves a long way after
+    that. A title still drifting late is evidence, not a cosmetic issue."""
+    assert "LEAD WITH THE TITLE" in STABLE
+    assert "13. Title" in STABLE
+    assert "the proposal drifted from its own problem statement" in STABLE
+
+
+def test_a_confirmed_title_renames_the_project(tmp_path, monkeypatch):
+    """One title, shown in the proposal and in the project list. Two would
+    diverge the moment either changed."""
+    import sqlite3
+    db = tmp_path / "t.db"
+    monkeypatch.setattr(web_app, "DB_PATH", str(db))
+    web_app._init_profiles_db()
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO profiles (id, name) VALUES (1, 'Jane')")
+    con.execute("INSERT INTO projects (id, profile_id, title) VALUES (1, 1, 'Untitled project')")
+    con.commit(); con.close()
+
+    web_app._save_proposal(1, {"title": "Contestability in Benefits Appeals"})
+
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT title FROM projects WHERE id = 1").fetchone()[0] \
+        == "Contestability in Benefits Appeals"
+    con.close()
+
+
+def test_saving_another_section_does_not_resurrect_an_old_title(tmp_path, monkeypatch):
+    """Someone renames the project from the projects page, then the advisor
+    saves methodology. The rename has to survive that."""
+    import sqlite3
+    db = tmp_path / "t.db"
+    monkeypatch.setattr(web_app, "DB_PATH", str(db))
+    web_app._init_profiles_db()
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO profiles (id, name) VALUES (1, 'Jane')")
+    con.execute("INSERT INTO projects (id, profile_id, title) VALUES (1, 1, 'Untitled project')")
+    con.commit(); con.close()
+
+    web_app._save_proposal(1, {"title": "First Title"})
+    con = sqlite3.connect(db)
+    con.execute("UPDATE projects SET title = 'Their Own Rename' WHERE id = 1")
+    con.commit(); con.close()
+
+    web_app._save_proposal(1, {"methodology": "- Interviews."})
+
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT title FROM projects WHERE id = 1").fetchone()[0] \
+        == "Their Own Rename"
+    con.close()
+
+
+def test_a_runaway_title_cannot_become_the_projects_name(tmp_path, monkeypatch):
+    """If the model misreads the field and writes prose into it, that prose
+    would otherwise be the project's name everywhere it is listed."""
+    import sqlite3
+    db = tmp_path / "t.db"
+    monkeypatch.setattr(web_app, "DB_PATH", str(db))
+    web_app._init_profiles_db()
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO profiles (id, name) VALUES (1, 'Jane')")
+    con.execute("INSERT INTO projects (id, profile_id, title) VALUES (1, 1, 'Untitled project')")
+    con.commit(); con.close()
+
+    web_app._save_proposal(1, {"title": "word " * 400})
+
+    con = sqlite3.connect(db)
+    stored = con.execute("SELECT title FROM projects WHERE id = 1").fetchone()[0]
+    con.close()
+    assert len(stored) <= web_app._TITLE_MAX
+
+
+def test_the_document_leads_with_the_projects_own_title(tmp_path):
+    """It used to lead with "Research Proposal: <name>", which named the author
+    and not the work."""
+    from docx import Document
+    import io
+    docx = web_app._build_proposal_docx(
+        "Jane Doe", {"title": "Contestability in Benefits Appeals", "abstract": "A."})
+    paras = [p.text for p in Document(io.BytesIO(docx)).paragraphs if p.text.strip()]
+    assert paras[0] == "Contestability in Benefits Appeals"
+    assert paras[1] == "Jane Doe"
+
+
+def test_an_untitled_proposal_still_renders():
+    """Downloads happen mid-conversation, before a title is settled."""
+    from docx import Document
+    import io
+    docx = web_app._build_proposal_docx("Jane Doe", {"abstract": "A."})
+    paras = [p.text for p in Document(io.BytesIO(docx)).paragraphs if p.text.strip()]
+    assert paras[0] == "Research Proposal: Jane Doe"
 
 
 def test_importance_and_benefits_is_required_somewhere():

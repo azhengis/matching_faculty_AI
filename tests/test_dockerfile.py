@@ -87,3 +87,38 @@ def test_search_itself_is_copied():
 
 def test_the_seed_the_image_is_built_from_is_copied():
     assert "seed_faculty.db.gz" in _copied_into_builder()
+
+
+# ── The prompt files have to reach the runtime image ───────────────────────
+
+def _dockerignore_patterns():
+    path = ROOT / ".dockerignore"
+    if not path.exists():
+        return []
+    return [ln.strip() for ln in path.read_text().splitlines()
+            if ln.strip() and not ln.strip().startswith("#")]
+
+
+def test_the_prompt_directory_is_not_excluded_from_the_image():
+    """The advisor's instructions are text files read at import. Excluding
+    them would not fail the build — the runtime stage would start, hit the
+    missing-section guard in advisor_prompt, and refuse to boot. Cheaper to
+    catch here than in a deploy log."""
+    import fnmatch
+    offenders = [p for p in _dockerignore_patterns()
+                 if not p.startswith("!")
+                 and (fnmatch.fnmatch("prompts", p.rstrip("/*"))
+                      or p.rstrip("/*") == "prompts")]
+    assert offenders == [], f".dockerignore excludes the prompt files: {offenders}"
+
+
+def test_the_runtime_stage_copies_the_whole_repo():
+    """What actually carries prompts/ and advisor_prompt.py into the image. If
+    this stage ever becomes selective the way the builder is, every file the
+    app reads at runtime needs listing, and this test should be replaced by one
+    that checks the list."""
+    parts = re.split(r"^FROM ", DOCKERFILE, flags=re.MULTILINE)
+    runtime = parts[2]
+    assert re.search(r"^\s*COPY\s+\.\s+\.\s*$", runtime, flags=re.MULTILINE), (
+        "the runtime stage no longer does `COPY . .`; confirm prompts/ and "
+        "advisor_prompt.py still reach the image")
