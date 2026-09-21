@@ -1,26 +1,27 @@
 # Render blueprint.
 #
-# Currently on the FREE plan, which has two consequences worth knowing:
+# On the STARTER plan (0.5 CPU / 512MB) with a 1GB disk. That combination buys
+# the two things free could not:
 #
-#   1. USER DATA DOES NOT SURVIVE A DEPLOY. Free instances have no persistent
-#      disk, so the database lives in the container filesystem and is destroyed
-#      on every restart, redeploy and wake-from-sleep. Faculty data comes back
-#      because it is baked into the image, but every account, project and
-#      proposal anyone created is gone.
-#   2. THE INSTANCE SLEEPS after 15 minutes idle, and the next request pays a
-#      cold start: container boot plus model load. That is what produces the
-#      occasional request timeout in the advisor chat.
+#   1. USER DATA SURVIVES A DEPLOY. Without a disk the database lives in the
+#      container filesystem and is destroyed on every restart and redeploy.
+#      Faculty data came back because it is baked into the image, but every
+#      account, project and proposal anyone had created was gone. Paying for
+#      the instance alone does NOT fix this — the disk is the half that does.
+#   2. NO SLEEPING. Free instances sleep after 15 minutes idle and the next
+#      request pays a cold start, which is what produced the request timeouts
+#      in the advisor chat.
 #
-# ── TO UPGRADE (~$7.25/mo) make these three edits TOGETHER ───────────────────
-#   1. plan: free  ->  plan: starter
-#   2. uncomment the disk: block
-#   3. uncomment the DATA_DIR variable
+# The plan, the disk and DATA_DIR move as ONE UNIT. A disk cannot be declared
+# on a free instance (Render rejects the deploy), DATA_DIR without a disk
+# points the database at a path nothing persists, and a disk without DATA_DIR
+# is the quiet one: the app writes to the container filesystem while the paid
+# volume sits empty beside it, losing exactly what it was bought to keep.
+# A test asserts all three agree.
 #
-# They move as one unit or not at all: a disk cannot be declared on a free
-# instance, and Render rejects the whole deploy if you try. Nothing else
-# changes. The app seeds an empty volume on first boot, so the directory comes
-# up populated without anyone SSHing in, and it never overwrites a volume that
-# already holds data.
+# Memory: the app measures ~280MB resident (15MB python, +36 numpy/fastapi,
+# +64 faculty rows, +59 both embedding indexes, +~110 the ONNX model), so it
+# runs at roughly 55% of 512MB.
 #
 # Custom domains are FREE on Render, TLS included — Settings -> Custom Domains.
 # The only cost is the name itself from a registrar, and a depaul.edu subdomain
@@ -30,7 +31,7 @@ services:
     name: depaul-faculty-matcher
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: free
+    plan: starter
     region: ohio                     # closest Render region to Chicago
     healthCheckPath: /login          # returns 200 without a session; / redirects
 
@@ -38,14 +39,14 @@ services:
     # uploaded documents. A test asserts DATA_DIR still equals disk.mountPath —
     # if those drift, the app writes to the container filesystem while the paid
     # disk sits empty beside it, losing exactly what it was bought to keep.
-    # disk:
-    #   name: faculty-data
-    #   mountPath: /data
-    #   sizeGB: 1                    # database ~13MB plus uploaded documents
+    disk:
+      name: faculty-data
+      mountPath: /data
+      sizeGB: 1                      # database ~13MB plus uploaded documents
 
     envVars:
-      # - key: DATA_DIR
-      #   value: /data               # must match disk.mountPath above
+      - key: DATA_DIR
+        value: /data                 # must match disk.mountPath above
       - key: CHATBOT_MODEL
         value: anthropic/claude-sonnet-5   # Sonnet, not Haiku: the advisor is the product, and Haiku kept grading answers ("that's a big canvas") through four prompt iterations. ~3x per-token cost, still tens of cents per full proposal conversation.
       - key: ANTHROPIC_API_KEY
