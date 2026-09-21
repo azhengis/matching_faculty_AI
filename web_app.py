@@ -569,9 +569,107 @@ def _generate_title(text: str) -> str:
         return _project_title_from(text)
 
 
+# Reference data only — the published DePaul roster and its publications.
+# Deliberately an allowlist rather than "every table in the seed". Account
+# tables (users, auth_sessions, profiles, projects, proposals, documents) are
+# created empty by _init_profiles_db and must never arrive from an image: a
+# developer's local faculty.db is the usual source of a baked seed, and copying
+# it wholesale would put their test accounts, and anything those accounts had
+# written, onto a production volume. check_seed_pii.py gates the committed
+# seed; this is the second lock on the same door.
+_SEEDABLE_TABLES = frozenset({
+    "faculty", "papers", "scholar_papers", "faculty_overrides",
+})
+
+
+def _seed_data_dir_if_empty() -> None:
+    """Put the baked faculty database onto an empty mounted volume.
+
+    A persistent disk arrives EMPTY. Point DATA_DIR at it and DB_PATH becomes a
+    file that does not exist, so the app boots, creates the profile tables, and
+    serves a directory with nobody in it. Everything looks healthy: the process
+    is up, the health check passes, and every search returns nothing.
+
+    That was a documented manual step — copy the seed over SSH after attaching
+    the disk — which is a bad thing to rely on remembering on the one day you
+    change hosting plans. So it happens here instead.
+
+    Only ever fills a gap. An existing database with faculty in it is left
+    alone, which is what makes this safe to run on every boot.
+    """
+    if os.path.abspath(DB_PATH) == os.path.abspath(os.path.join(_ROOT, "faculty.db")):
+        return                                    # not using a separate volume
+
+    try:
+        if os.path.exists(DB_PATH):
+            con = sqlite3.connect(DB_PATH)
+            try:
+                n = con.execute("SELECT COUNT(*) FROM faculty").fetchone()[0]
+            finally:
+                con.close()
+            if n:
+                return                            # already populated; hands off
+            print(f"[seed] {DB_PATH} exists but holds no faculty — reseeding")
+    except sqlite3.Error:
+        pass        # no faculty table yet: a fresh or profiles-only database
+
+    baked  = os.path.join(_ROOT, "faculty.db")
+    packed = os.path.join(_ROOT, "data", "seed_faculty.db.gz")
+    os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)) or ".", exist_ok=True)
+
+    # The profile tables may already exist on the volume from a previous boot.
+    # Copying over them would discard accounts, so seed to a temporary file and
+    # move faculty in rather than replacing the file wholesale.
+    src = None
+    if os.path.exists(baked):
+        src = baked
+    elif os.path.exists(packed):
+        import gzip, shutil
+        src = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), ".seed.tmp")
+        with gzip.open(packed, "rb") as f_in, open(src, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    if src is None:
+        print("[seed] no baked database or seed archive found; starting empty")
+        return
+
+    con = sqlite3.connect(DB_PATH)
+    try:
+        con.execute("ATTACH DATABASE ? AS seed", (src,))
+        tables = [r[0] for r in con.execute(
+            "SELECT name FROM seed.sqlite_master WHERE type='table'").fetchall()]
+        copied = {}
+        for t in tables:
+            if t not in _SEEDABLE_TABLES:
+                continue
+            existing = con.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+                (t,)).fetchone()[0]
+            if existing and con.execute(f"SELECT COUNT(*) FROM main.{t}").fetchone()[0]:
+                continue                          # real rows here already
+            if not existing:
+                ddl = con.execute(
+                    "SELECT sql FROM seed.sqlite_master WHERE type='table' AND name=?",
+                    (t,)).fetchone()[0]
+                con.execute(ddl)
+            con.execute(f"INSERT INTO main.{t} SELECT * FROM seed.{t}")
+            copied[t] = con.execute(f"SELECT COUNT(*) FROM main.{t}").fetchone()[0]
+        con.commit()
+        con.execute("DETACH DATABASE seed")
+        print(f"[seed] populated {DB_PATH} from {os.path.basename(src)}: "
+              + ", ".join(f"{k}={v}" for k, v in sorted(copied.items())))
+    except sqlite3.Error as e:
+        print(f"[seed] could not populate {DB_PATH}: {e}")
+    finally:
+        con.close()
+        if src.endswith(".seed.tmp"):
+            try: os.remove(src)
+            except OSError: pass
+
+
 # ── App startup ───────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _seed_data_dir_if_empty()
     _init_profiles_db()
     print("Loading faculty data...")
     _st["people"] = sm.load_faculty()

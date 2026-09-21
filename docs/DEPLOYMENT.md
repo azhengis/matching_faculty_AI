@@ -71,9 +71,27 @@ it before real faculty rely on it. Not done here.
 
 ## Option 2 — any host with a volume (~$3-7/month)
 
-Render Starter ($7/mo) plus a 1 GB disk, or an equivalent elsewhere. Add a
-`disk:` block to `render.yaml` mounted at `/data` and set `DATA_DIR=/data`.
-Nothing else changes, and accounts and proposals then survive redeploys.
+**This is what `render.yaml` is now configured for.** Render Starter plus a 1 GB
+disk mounted at `/data`, with `DATA_DIR=/data`. Accounts, projects, proposals
+and uploaded documents then survive redeploys, and the instance stops sleeping.
+
+A new disk mounts **empty**, which used to mean copying the seed over SSH before
+the site had anybody in it. That step is gone: on boot the app detects an empty
+`DATA_DIR` and copies the baked roster onto it. Two properties make that safe to
+run every time —
+
+- It only ever fills a gap. A volume that already holds faculty is untouched,
+  and a volume holding accounts but no faculty gets the roster merged in rather
+  than the file replaced, so nobody loses a login.
+- It copies **reference data only** (`faculty`, `papers`, `scholar_papers`,
+  `faculty_overrides`). Account tables are created empty by `_init_profiles_db`
+  and never travel inside an image — a baked seed is usually built from a
+  developer's local database, and copying every table would put their test
+  accounts on the production volume.
+
+Custom domains are **free on Render**, TLS included; add one under Settings →
+Custom Domains. The only cost is the name itself from a registrar, and a
+`depaul.edu` subdomain from campus IT costs nothing.
 
 ---
 
