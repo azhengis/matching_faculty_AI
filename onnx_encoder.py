@@ -70,6 +70,20 @@ def _load():
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = _THREADS
         opts.inter_op_num_threads = 1
+
+        # Memory, not speed, is the binding constraint here: the whole app has
+        # to fit in a 512MB container alongside 60MB of embedding indexes, and
+        # it was being OOM-killed during startup.
+        #
+        # The CPU arena pre-allocates a pool and grows it geometrically, so
+        # resident memory settles near the largest batch ever run rather than
+        # near what is currently in use, and it is never handed back. Memory
+        # patterns add another pre-planned block. Both trade RSS for latency on
+        # repeated same-shape inference, which is the wrong side of the trade
+        # when the alternative is not running at all. Queries here are short
+        # and infrequent — one encode per search, not a serving loop.
+        opts.enable_cpu_mem_arena = False
+        opts.enable_mem_pattern = False
         tok = Tokenizer.from_file(os.path.join(MODEL_DIR, "tokenizer.json"))
         tok.enable_truncation(_MAX_TOKENS)
         tok.enable_padding()

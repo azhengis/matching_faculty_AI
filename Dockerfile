@@ -101,6 +101,11 @@ COPY --from=builder /build/paper_index.pkl   /app/paper_index.pkl
 COPY --from=builder /build/faculty.db        /app/faculty.db
 
 # onnxruntime otherwise grabs every visible core and thrashes on a shared CPU.
+# Unbuffered stdout. Python block-buffers when stdout is not a terminal, so
+# print() output sits in the buffer and is LOST if the process is killed —
+# which is exactly what happens on an out-of-memory kill, at the one moment
+# the startup log would have said what it was doing.
+ENV PYTHONUNBUFFERED=1
 ENV ONNX_THREADS=2
 
 # Guard against a silently broken image: a missing model would let the app boot

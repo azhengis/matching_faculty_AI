@@ -245,12 +245,21 @@ def test_account_tables_are_never_copied_from_the_seed(tmp_path, monkeypatch):
     web_app._seed_data_dir_if_empty()
 
     con = sqlite3.connect(vol)
-    present = {r[0] for r in con.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'")}
-    con.close()
-    assert "faculty" in present and "papers" in present
-    for leaked in ("users", "auth_sessions", "proposals"):
-        assert leaked not in present, f"{leaked} was copied out of the seed image"
+    try:
+        # Reference data arrives.
+        assert con.execute("SELECT COUNT(*) FROM faculty").fetchone()[0] == 2
+        assert con.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 1
+        # Account data does not. The tables may exist — _init_profiles_db
+        # creates them anyway — but every row from the image is gone.
+        for leaked in ("users", "auth_sessions", "proposals"):
+            n = con.execute(f"SELECT COUNT(*) FROM {leaked}").fetchone()[0]
+            assert n == 0, f"{leaked} carried {n} row(s) out of the seed image"
+        # Specifically: no credential material.
+        assert con.execute(
+            "SELECT COUNT(*) FROM users WHERE email = 'dev@example.com'"
+        ).fetchone()[0] == 0
+    finally:
+        con.close()
 
 
 def test_the_allowlist_holds_only_reference_data():
@@ -319,3 +328,37 @@ def test_a_full_disk_while_unpacking_the_seed_does_not_take_the_app_down(
 
     web_app._seed_data_dir_if_empty()                      # must not raise
     assert "[seed] skipped" in capsys.readouterr().out
+
+
+# ── Startup memory ─────────────────────────────────────────────────────────
+
+def test_the_paper_index_is_not_loaded_during_startup():
+    """56MB of embeddings that only the Stage 4 collaborator search reads.
+    Loading them at startup put them inside the container's memory high-water
+    mark, which is where a 512MB instance was OOM-killed — before the health
+    check had even run."""
+    import inspect
+    src = inspect.getsource(web_app.lifespan)
+    assert "get_paper_index" not in src, \
+        "the paper index is being loaded during startup again"
+
+
+def test_the_paper_index_loads_on_first_use_and_is_cached(monkeypatch):
+    calls = []
+    monkeypatch.setattr(web_app, "_st", {"people": [], "model": object()})
+    monkeypatch.setattr(web_app.sm, "get_paper_index",
+                        lambda *a, **k: calls.append(1) or {"by_faculty": {}})
+    assert web_app._paper_index() == {"by_faculty": {}}
+    web_app._paper_index()
+    assert len(calls) == 1, "the index should be built once, then cached"
+
+
+def test_the_collaborator_search_goes_through_the_lazy_accessor():
+    """If any caller reads _st["paper_idx"] directly it gets None before the
+    first load, and silently returns no publications as evidence."""
+    from pathlib import Path
+    src = Path(web_app.__file__).read_text()
+    body = src[src.index("def _paper_index"):]
+    body = body[body.index("# ── App startup"):]      # everything after it
+    assert '_st["paper_idx"]' not in body, \
+        "something reads the index directly instead of calling _paper_index()"

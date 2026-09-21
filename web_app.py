@@ -598,7 +598,7 @@ def _seed_data_dir_if_empty() -> None:
     try:
         _seed_volume()
     except Exception as e:                      # noqa: BLE001 - deliberately broad
-        print(f"[seed] skipped: {type(e).__name__}: {e}")
+        print(f"[seed] skipped: {type(e).__name__}: {e}", flush=True)
 
 
 def _seed_volume() -> None:
@@ -628,36 +628,98 @@ def _seed_volume() -> None:
                 con.close()
             if n:
                 return                            # already populated; hands off
-            print(f"[seed] {DB_PATH} exists but holds no faculty — reseeding")
+            print(f"[seed] {DB_PATH} exists but holds no faculty — reseeding", flush=True)
     except sqlite3.Error:
         pass        # no faculty table yet: a fresh or profiles-only database
 
     baked  = os.path.join(_ROOT, "faculty.db")
     packed = os.path.join(_ROOT, "data", "seed_faculty.db.gz")
-    os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)) or ".", exist_ok=True)
+    dest_dir = os.path.dirname(os.path.abspath(DB_PATH)) or "."
+    os.makedirs(dest_dir, exist_ok=True)
 
-    # The profile tables may already exist on the volume from a previous boot.
-    # Copying over them would discard accounts, so seed to a temporary file and
-    # move faculty in rather than replacing the file wholesale.
-    src = None
+    fresh = not os.path.exists(DB_PATH)
+    tmp = None
     if os.path.exists(baked):
         src = baked
     elif os.path.exists(packed):
         import gzip, shutil
-        src = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), ".seed.tmp")
+        tmp = src = os.path.join(dest_dir, ".seed.tmp")
         with gzip.open(packed, "rb") as f_in, open(src, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
-    if src is None:
-        print("[seed] no baked database or seed archive found; starting empty")
+            shutil.copyfileobj(f_in, f_out, length=1 << 20)
+    else:
+        print("[seed] no baked database or seed archive found; starting empty",
+              flush=True)
         return
 
+    try:
+        if fresh:
+            _seed_by_copying(src)
+        else:
+            _seed_by_merging(src)
+    finally:
+        if tmp:
+            try: os.remove(tmp)
+            except OSError: pass
+        # SQLite and the unpack both leave freed pages in Python's allocator,
+        # and the embedding indexes and the ONNX model load immediately after
+        # this on a 512MB instance. Hand back what we can first.
+        import gc; gc.collect()
+
+
+def _seed_by_copying(src: str) -> None:
+    """First boot on an empty volume: copy the file, then clear what must not
+    travel.
+
+    This is the memory-critical path and the reason it is separate. The merge
+    below moves 43,000 rows through one SQLite transaction, which peaked high
+    enough to put the container over its 512MB limit before the model had even
+    loaded. A file copy is O(1) in memory whatever the database weighs.
+
+    Nothing is being preserved here — the destination does not exist yet — so
+    there is nothing a wholesale copy could destroy.
+    """
+    import shutil
+    shutil.copyfile(src, DB_PATH)
+
+    # The image's database is built from somebody's local one, so it may carry
+    # account tables. They are created empty by _init_profiles_db and must
+    # never arrive from an image. Dropping rows is cheap; they should be empty.
+    con = sqlite3.connect(DB_PATH)
+    try:
+        cleared = {}
+        for (t,) in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+            if t.startswith("sqlite_") or t in _SEEDABLE_TABLES:
+                continue
+            n = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            if n:
+                con.execute(f"DELETE FROM {t}")
+                cleared[t] = n
+        con.commit()
+        kept = {t: con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                for t in sorted(_SEEDABLE_TABLES)
+                if con.execute("SELECT COUNT(*) FROM sqlite_master "
+                               "WHERE type='table' AND name=?", (t,)).fetchone()[0]}
+        print(f"[seed] copied {os.path.basename(src)} -> {DB_PATH}: "
+              + ", ".join(f"{k}={v}" for k, v in kept.items())
+              + (f"; cleared {cleared}" if cleared else ""), flush=True)
+    finally:
+        con.close()
+
+
+def _seed_by_merging(src: str) -> None:
+    """The volume already holds a database — accounts, probably — but no
+    faculty. Move the roster in without touching anything else.
+
+    Committing after each table keeps the transaction, and so the memory it
+    holds, bounded by the largest single table rather than by all of them.
+    """
     con = sqlite3.connect(DB_PATH)
     try:
         con.execute("ATTACH DATABASE ? AS seed", (src,))
-        tables = [r[0] for r in con.execute(
-            "SELECT name FROM seed.sqlite_master WHERE type='table'").fetchall()]
         copied = {}
-        for t in tables:
+        for (t,) in con.execute(
+                "SELECT name FROM seed.sqlite_master WHERE type='table'").fetchall():
             if t not in _SEEDABLE_TABLES:
                 continue
             existing = con.execute(
@@ -671,18 +733,34 @@ def _seed_volume() -> None:
                     (t,)).fetchone()[0]
                 con.execute(ddl)
             con.execute(f"INSERT INTO main.{t} SELECT * FROM seed.{t}")
+            con.commit()                          # bound the transaction per table
             copied[t] = con.execute(f"SELECT COUNT(*) FROM main.{t}").fetchone()[0]
-        con.commit()
         con.execute("DETACH DATABASE seed")
-        print(f"[seed] populated {DB_PATH} from {os.path.basename(src)}: "
-              + ", ".join(f"{k}={v}" for k, v in sorted(copied.items())))
-    except sqlite3.Error as e:
-        print(f"[seed] could not populate {DB_PATH}: {e}")
+        print(f"[seed] merged {os.path.basename(src)} into {DB_PATH}: "
+              + ", ".join(f"{k}={v}" for k, v in sorted(copied.items())), flush=True)
     finally:
         con.close()
-        if src.endswith(".seed.tmp"):
-            try: os.remove(src)
-            except OSError: pass
+
+def _paper_index():
+    """The per-paper embedding index, loaded the first time anything needs it.
+
+    56MB of float32 embeddings for 18,681 papers, and exactly one caller: the
+    collaborator search in Stage 4, which names a real paper as evidence for
+    why a person fits. Nothing before Stage 4 touches it, and most sessions
+    never reach Stage 4 at all.
+
+    Loading it during startup put it inside the container's memory high-water
+    mark, which is where a 512MB instance was being OOM-killed — before the
+    health check had even run. Deferring it moves that allocation to a moment
+    when the process is otherwise idle, and skips it entirely for every
+    session that never searches for collaborators.
+
+    The cost is a slower first collaborator search. Cached after that.
+    """
+    if "paper_idx" not in _st:
+        print("Loading paper index (first collaborator search)...", flush=True)
+        _st["paper_idx"] = sm.get_paper_index(_st["people"], _st["model"])
+    return _st["paper_idx"]
 
 
 # ── App startup ───────────────────────────────────────────────────────────────
@@ -695,10 +773,25 @@ async def lifespan(app: FastAPI):
     print("Loading SPECTER2 model...")
     _st["model"] = sm.load_model()
     _st["emb"], _st["labels"], _ = sm.get_index(_st["people"], _st["model"])
-    _st["paper_idx"] = sm.get_paper_index(_st["people"], _st["model"])
+    # NOT loaded here. See _paper_index() — 56MB of embeddings that only the
+    # Stage 4 collaborator search touches, deferred past the health check.
+    # Startup is the memory high-water mark: unpickling an index holds the
+    # serialized bytes and the array at once, and the model export leaves its
+    # own debris. Everything after this is small by comparison, so hand back
+    # what the allocator is still holding before the first request arrives.
+    import gc
+    gc.collect()
+
     n = len(_st["people"])
-    p = len(_st["paper_idx"]["by_faculty"]) if _st["paper_idx"] else 0
-    print(f"Ready — {n} faculty indexed, {p} with publication records")
+    try:
+        import resource
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        peak = peak / (1024 ** 2) if sys.platform == "darwin" else peak / 1024
+        mem = f", peak {peak:.0f}MB"
+    except Exception:
+        mem = ""
+    print(f"Ready — {n} faculty indexed{mem}; paper index loads on first use",
+          flush=True)
     yield
 
 
@@ -2678,7 +2771,7 @@ def _advisor_search(query: str, mode: str = "semantic") -> dict:
                 "bio_url": person.get("bio_url", ""),
             }
             if _st.get("paper_idx"):
-                pubs = sm.find_top_papers(person.get("id"), qv, _st["paper_idx"], n=3, min_sim=0.50)
+                pubs = sm.find_top_papers(person.get("id"), qv, _paper_index(), n=3, min_sim=0.50)
                 if pubs:
                     entry["relevant_papers"] = [{"title": t, "year": y, "cited_by": c} for t, y, c, _ in pubs]
             out.append(entry)
