@@ -362,3 +362,41 @@ def test_the_collaborator_search_goes_through_the_lazy_accessor():
     body = body[body.index("# ── App startup"):]      # everything after it
     assert '_st["paper_idx"]' not in body, \
         "something reads the index directly instead of calling _paper_index()"
+
+
+# ── The two host configs must not disagree ─────────────────────────────────
+
+def _fly():
+    from pathlib import Path
+    import re
+    text = (Path(web_app.__file__).parent / "fly.toml").read_text()
+    # Small hand parse; tomllib would do, but this keeps the test readable
+    # about exactly which two lines it cares about.
+    model = re.search(r'CHATBOT_MODEL\s*=\s*"([^"]+)"', text).group(1)
+    mem   = re.search(r'memory\s*=\s*"(\d+)mb"', text).group(1)
+    data  = re.search(r'DATA_DIR\s*=\s*"([^"]+)"', text).group(1)
+    mount = re.search(r'destination\s*=\s*"([^"]+)"', text).group(1)
+    return {"model": model, "memory_mb": int(mem), "data_dir": data, "mount": mount}
+
+
+def test_both_hosts_talk_to_the_same_model():
+    """A researcher must not get a different advisor depending on where it is
+    deployed. Haiku was tried and rejected: it kept grading answers through
+    four prompt iterations."""
+    fly = _fly()
+    render = next(e["value"] for e in _blueprint()["envVars"]
+                  if e["key"] == "CHATBOT_MODEL")
+    assert fly["model"] == render, f"fly={fly['model']} render={render}"
+
+
+def test_the_fly_volume_and_data_dir_agree():
+    """Same invariant as the Render one: a mount the app does not write to is
+    a paid disk sitting empty while data goes to the container filesystem."""
+    fly = _fly()
+    assert fly["data_dir"] == fly["mount"]
+
+
+def test_fly_is_given_more_than_the_memory_that_was_killed():
+    """512MB is what Render OOM-killed during startup. Shipping the same
+    number here would reproduce it on the alternative host."""
+    assert _fly()["memory_mb"] >= 1024

@@ -9,7 +9,11 @@ primary_region = "ord"          # Chicago — closest region to DePaul
 [env]
   # Everything that must outlive a deploy goes on the mounted volume.
   DATA_DIR = "/data"
-  CHATBOT_MODEL = "anthropic/claude-haiku-4-5"
+  # Sonnet, not Haiku. Haiku kept grading answers ("that's a big canvas")
+  # through four prompt iterations, and the advisor is the product. Kept in
+  # step with render.yaml deliberately — the two must not disagree about which
+  # model the researcher is talking to.
+  CHATBOT_MODEL = "anthropic/claude-sonnet-5"
   # ANTHROPIC_API_KEY is NOT set here — it is a secret.
   #   fly secrets set ANTHROPIC_API_KEY=sk-...
 
@@ -27,11 +31,15 @@ primary_region = "ord"          # Chicago — closest region to DePaul
   min_machines_running = 1
 
 [[vm]]
-  # Measured, not guessed: 280MB steady state after a real query encode and a
-  # 25-pair cross-encoder rerank, and 285MB peak while rebuilding the faculty
-  # index from scratch. 512MB leaves comfortable headroom; 256MB does not.
-  # Ship the prebuilt indexes (see docs/DEPLOYMENT.md) so the host never pays
-  # the rebuild cost at all.
-  memory = "512mb"
+  # 1GB, not 512MB. The old 280MB figure measured steady state AFTER startup;
+  # the high-water mark is during boot, when the ONNX session, the tokenizer
+  # and the faculty index are all being allocated at once. A 512MB container
+  # on Render was OOM-killed there, before its health check even ran. Startup
+  # now prints its own peak RSS, so the honest number is in the boot log.
+  #
+  # On Fly this costs roughly a dollar a month more than 512MB and removes the
+  # whole class of problem. Ship the prebuilt indexes (see docs/DEPLOYMENT.md)
+  # so the host never pays the rebuild cost either.
+  memory = "1024mb"
   cpu_kind = "shared"
   cpus = 2
