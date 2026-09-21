@@ -175,21 +175,44 @@ def _blueprint():
     return yaml.safe_load(path.read_text())["services"][0]
 
 
-def test_the_mount_path_and_data_dir_match():
-    """If these drift, the app writes to the container filesystem while a paid
-    disk sits empty beside it — and the data loss the disk was bought to
-    prevent happens anyway, silently."""
+def test_the_plan_the_disk_and_data_dir_move_as_one_unit():
+    """Three settings, two valid combinations, and every mixture is a bug:
+
+      free    + no disk + no DATA_DIR   deploys, loses data on redeploy
+      starter + disk    + DATA_DIR      deploys, keeps data
+
+    Every other combination fails or silently misbehaves. A disk on a free
+    instance is rejected outright by Render — which is how a blueprint edit
+    made ahead of the actual upgrade broke the deploy. DATA_DIR without a disk
+    points the database at a path nothing persists. A disk without DATA_DIR is
+    the quiet one: the app writes to the container filesystem while the paid
+    volume sits empty beside it, and the data loss it was bought to prevent
+    happens anyway."""
     svc = _blueprint()
-    mount = svc["disk"]["mountPath"]
-    data_dir = next(e["value"] for e in svc["envVars"] if e["key"] == "DATA_DIR")
-    assert data_dir == mount, f"DATA_DIR={data_dir} but disk mounts at {mount}"
+    paid = svc["plan"] != "free"
+    has_disk = "disk" in svc
+    data_dir = next((e.get("value") for e in svc["envVars"]
+                     if e["key"] == "DATA_DIR"), None)
+
+    assert has_disk == bool(data_dir), (
+        f"disk declared={has_disk} but DATA_DIR={data_dir!r} — "
+        "these must be set together or not at all")
+    if has_disk:
+        assert paid, "free instances cannot mount a persistent disk"
+        assert data_dir == svc["disk"]["mountPath"], (
+            f"DATA_DIR={data_dir} but the disk mounts at {svc['disk']['mountPath']}")
 
 
-def test_a_disk_is_only_declared_on_a_plan_that_can_mount_one():
-    """Render free instances cannot take a disk; the deploy is rejected."""
-    svc = _blueprint()
-    if "disk" in svc:
-        assert svc["plan"] != "free", "free instances cannot mount a persistent disk"
+def test_the_upgrade_instructions_stay_next_to_the_thing_they_change():
+    """The three edits live commented in the file so nobody has to remember
+    them. If the disk block is uncommented the instructions have served their
+    purpose; while it is commented they must still be there."""
+    from pathlib import Path
+    text = (Path(web_app.__file__).parent / "render.yaml").read_text()
+    if "disk" not in _blueprint():
+        assert "TO UPGRADE" in text
+        assert "mountPath: /data" in text, "the disk block to uncomment is missing"
+        assert "value: /data" in text, "the DATA_DIR line to uncomment is missing"
 
 
 def test_the_api_key_is_never_committed():

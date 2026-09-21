@@ -1,47 +1,51 @@
 # Render blueprint.
 #
-# This is on the Starter plan with a mounted disk, which buys two things the
-# free plan cannot:
+# Currently on the FREE plan, which has two consequences worth knowing:
 #
-#   1. USER DATA SURVIVES A DEPLOY. Free instances have no persistent disk, so
-#      the database lives in the container filesystem and is destroyed on every
-#      restart, redeploy, and wake-from-sleep. Faculty data came back each time
-#      because it is baked into the image, but every account, project, and
-#      proposal anyone had created was gone.
-#   2. NO SLEEPING. Free instances sleep after 15 minutes idle, and the next
-#      request pays a cold start: container boot plus model load. That is what
-#      produced the request timeouts in the advisor chat.
+#   1. USER DATA DOES NOT SURVIVE A DEPLOY. Free instances have no persistent
+#      disk, so the database lives in the container filesystem and is destroyed
+#      on every restart, redeploy and wake-from-sleep. Faculty data comes back
+#      because it is baked into the image, but every account, project and
+#      proposal anyone created is gone.
+#   2. THE INSTANCE SLEEPS after 15 minutes idle, and the next request pays a
+#      cold start: container boot plus model load. That is what produces the
+#      occasional request timeout in the advisor chat.
 #
-# Custom domains are FREE on Render, including the TLS certificate. Add one in
-# the dashboard under Settings -> Custom Domains; the only cost is the domain
-# name itself from a registrar, and a depaul.edu subdomain from campus IT would
-# cost nothing at all.
+# ── TO UPGRADE (~$7.25/mo) make these three edits TOGETHER ───────────────────
+#   1. plan: free  ->  plan: starter
+#   2. uncomment the disk: block
+#   3. uncomment the DATA_DIR variable
 #
-# To go back to free: set `plan: free`, delete the `disk:` block, and remove
-# DATA_DIR. The app falls back to the image directory and works, minus both
-# guarantees above.
+# They move as one unit or not at all: a disk cannot be declared on a free
+# instance, and Render rejects the whole deploy if you try. Nothing else
+# changes. The app seeds an empty volume on first boot, so the directory comes
+# up populated without anyone SSHing in, and it never overwrites a volume that
+# already holds data.
+#
+# Custom domains are FREE on Render, TLS included — Settings -> Custom Domains.
+# The only cost is the name itself from a registrar, and a depaul.edu subdomain
+# from campus IT would cost nothing at all.
 services:
   - type: web
     name: depaul-faculty-matcher
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     region: ohio                     # closest Render region to Chicago
     healthCheckPath: /login          # returns 200 without a session; / redirects
 
-    # Everything that must outlive a deploy: accounts, projects, proposals, and
-    # uploaded documents. A new disk mounts EMPTY — the app detects that on
-    # first boot and copies the baked faculty database onto it, so the
-    # directory is populated without anyone SSHing in. It never overwrites a
-    # volume that already holds data.
-    disk:
-      name: faculty-data
-      mountPath: /data
-      sizeGB: 1                      # database ~14MB plus uploaded documents
+    # Everything that must outlive a deploy: accounts, projects, proposals and
+    # uploaded documents. A test asserts DATA_DIR still equals disk.mountPath —
+    # if those drift, the app writes to the container filesystem while the paid
+    # disk sits empty beside it, losing exactly what it was bought to keep.
+    # disk:
+    #   name: faculty-data
+    #   mountPath: /data
+    #   sizeGB: 1                    # database ~13MB plus uploaded documents
 
     envVars:
-      - key: DATA_DIR
-        value: /data                 # must match disk.mountPath above
+      # - key: DATA_DIR
+      #   value: /data               # must match disk.mountPath above
       - key: CHATBOT_MODEL
         value: anthropic/claude-sonnet-5   # Sonnet, not Haiku: the advisor is the product, and Haiku kept grading answers ("that's a big canvas") through four prompt iterations. ~3x per-token cost, still tens of cents per full proposal conversation.
       - key: ANTHROPIC_API_KEY
