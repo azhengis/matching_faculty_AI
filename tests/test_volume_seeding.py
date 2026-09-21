@@ -257,3 +257,65 @@ def test_the_allowlist_holds_only_reference_data():
     """A table added here later is a table that can travel in an image."""
     assert web_app._SEEDABLE_TABLES == {
         "faculty", "papers", "scholar_papers", "faculty_overrides"}
+
+
+# ── Seeding must never stop the app starting ───────────────────────────────
+
+@pytest.mark.parametrize("failing,exc", [
+    ("os.makedirs",     OSError("read-only file system")),
+    ("sqlite3.connect", sqlite3.OperationalError("unable to open database file")),
+])
+def test_a_filesystem_failure_does_not_take_the_app_down(failing, exc, tmp_path,
+                                                         monkeypatch, capsys):
+    """Every failure here is a filesystem one on a disk mounted seconds ago:
+    not writable yet, full, wrong permissions. Letting any of them out of
+    lifespan kills the process, the health check times out and the deploy
+    fails — trading "the directory is empty" for "the site is gone".
+
+    These three calls sat outside any try/except, which is a plausible cause of
+    a deploy failing the moment a disk was first attached."""
+    root = tmp_path / "app"; root.mkdir()
+    _make_seed(root / "faculty.db")
+    monkeypatch.setattr(web_app, "_ROOT", str(root))
+    monkeypatch.setattr(web_app, "DB_PATH", str(tmp_path / "vol" / "faculty.db"))
+
+    module, _, attr = failing.rpartition(".")
+    def boom(*a, **k):
+        raise exc
+    monkeypatch.setattr({"os": os, "sqlite3": sqlite3}[module], attr, boom)
+
+    web_app._seed_data_dir_if_empty()           # must not raise
+    assert "[seed] skipped" in capsys.readouterr().out
+
+
+def test_the_app_still_starts_when_the_volume_cannot_be_seeded(tmp_path, monkeypatch):
+    """The whole point, stated as the outcome rather than the mechanism."""
+    monkeypatch.setattr(web_app, "_ROOT", str(tmp_path / "nothing-here"))
+    monkeypatch.setattr(web_app, "DB_PATH", str(tmp_path / "vol" / "faculty.db"))
+    def boom(*a, **k):
+        raise OSError("read-only file system")
+    monkeypatch.setattr(os, "makedirs", boom)
+
+    web_app._seed_data_dir_if_empty()           # the assertion is that this returns
+
+
+def test_a_full_disk_while_unpacking_the_seed_does_not_take_the_app_down(
+        tmp_path, monkeypatch, capsys):
+    """The gzip fallback writes a temporary file onto the volume. That is the
+    one place seeding needs free space, so it is the one most likely to fail on
+    a disk that is smaller than someone thought."""
+    import shutil
+    root = tmp_path / "app"; (root / "data").mkdir(parents=True)
+    plain = tmp_path / "plain.db"
+    _make_seed(plain)
+    with open(plain, "rb") as f_in, gzip.open(root / "data" / "seed_faculty.db.gz", "wb") as f_out:
+        f_out.write(f_in.read())
+    monkeypatch.setattr(web_app, "_ROOT", str(root))       # no baked faculty.db
+    monkeypatch.setattr(web_app, "DB_PATH", str(tmp_path / "vol" / "faculty.db"))
+
+    def boom(*a, **k):
+        raise OSError("no space left on device")
+    monkeypatch.setattr(shutil, "copyfileobj", boom)
+
+    web_app._seed_data_dir_if_empty()                      # must not raise
+    assert "[seed] skipped" in capsys.readouterr().out

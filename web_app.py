@@ -583,6 +583,25 @@ _SEEDABLE_TABLES = frozenset({
 
 
 def _seed_data_dir_if_empty() -> None:
+    """Seed an empty volume, and never let that stop the app from starting.
+
+    The work happens in _seed_volume. This wrapper exists because every failure
+    mode in there is a filesystem one on a disk that was mounted seconds ago:
+    a directory that is not writable yet, a full volume, a permissions
+    mismatch. Letting any of those out of lifespan means the process dies, the
+    health check times out, and the deploy fails — trading "the directory is
+    empty" for "the site is gone", which is a much worse trade.
+
+    An unseeded volume is recoverable: the app serves, someone notices the
+    directory is empty, and the next boot tries again.
+    """
+    try:
+        _seed_volume()
+    except Exception as e:                      # noqa: BLE001 - deliberately broad
+        print(f"[seed] skipped: {type(e).__name__}: {e}")
+
+
+def _seed_volume() -> None:
     """Put the baked faculty database onto an empty mounted volume.
 
     A persistent disk arrives EMPTY. Point DATA_DIR at it and DB_PATH becomes a
