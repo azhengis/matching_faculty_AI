@@ -16,7 +16,24 @@ import pytest
 
 import web_app
 
-STABLE, _ = web_app._advisor_system_prompt({"name": "Jane", "proposal": {}})
+import advisor_prompt
+
+# Every stage's instructions joined together. Since the prompt became
+# stage-conditional, no single turn carries all the rules — Stage 1 does not
+# ship the proposal-building sections, Stage 4 does not ship the interview.
+# These tests ask "is this rule still in the prompt at all", which is a
+# question about the whole set; where a rule has to reach a PARTICULAR stage,
+# the tests below say so explicitly.
+STABLE = "\n".join(
+    web_app._advisor_system_prompt({"name": "Jane", "proposal": p})[0]
+    for p in ({}, {"novelty": "N."}, {"problem_statement": "P."})
+)
+
+
+def _stage_prompt(stage):
+    proposal = {"1-2": {}, "3": {"novelty": "N."},
+                "4": {"problem_statement": "P."}}[stage]
+    return web_app._advisor_system_prompt({"name": "Jane", "proposal": proposal})[0]
 TOOLS = {t["function"]["name"]: t["function"] for t in web_app._ADVISOR_TOOLS}
 SAVE_PROPOSAL = TOOLS["save_proposal"]["parameters"]["properties"]
 
@@ -391,3 +408,94 @@ def test_the_send_check_enforces_the_expert_only_preference():
     """A rule stated once in a 70KB prompt is a rule that gets skipped. The
     send check is what runs on every message."""
     assert "could only {name} answer".replace("{name}", "Jane") in STABLE
+
+
+# ── Stage-conditional assembly ─────────────────────────────────────────────
+
+def test_stage_one_does_not_carry_the_proposal_building_rules():
+    """The reason this is more than a cost saving. Stage 4 is where the stance
+    inverts and putting options on the table becomes correct; Stage 1 is where
+    doing that destroys the interview. Rules it must not follow yet are simply
+    not in the prompt."""
+    p = _stage_prompt("1-2")
+    assert "STAGE 4 — BUILD THE PROPOSAL\n" not in p
+    assert "BE A COLLABORATOR, NOT AN INTAKE FORM" not in p
+    assert "Make concrete suggestions and let them react" not in p
+
+
+def test_stage_four_does_not_carry_the_stage_one_interview():
+    """The mirror. By Stage 4 the problem is settled and saved, and the rules
+    that forbid suggesting a direction no longer apply."""
+    p = _stage_prompt("4")
+    assert "STAGE 1 — SPECIFY THE RESEARCH PROBLEM" not in p
+    assert "STAGE 2 — TEST WHETHER IT IS NOVEL" not in p
+
+
+def test_the_collaborator_search_only_ships_once_there_is_a_proposal():
+    """Searching for people is the last thing that happens, and its rules are
+    long. Nothing before Stage 4 can act on them."""
+    assert "search_faculty" not in _stage_prompt("1-2")
+    assert "search_faculty" in _stage_prompt("4")
+
+
+@pytest.mark.parametrize("stage", ["1-2", "3", "4"])
+def test_the_spine_reaches_every_stage(stage):
+    """Rules that hold everywhere must not be stage-scoped by accident."""
+    p = _stage_prompt(stage)
+    assert "NEVER VALIDATE BY DEFAULT" in p       # how you think
+    assert "THE LENSES" in p                       # the nineteen lenses
+    assert "SEND CHECK" in p                       # runs on every message
+    assert "NEVER CAPITULATE" in p                 # tone
+    assert "OFFERING CHOICES AS BUTTONS" in p      # referenced from both sides
+    assert "save_proposal" in p                    # saving happens throughout
+
+
+@pytest.mark.parametrize("stage", ["1-2", "3", "4"])
+def test_every_stage_still_knows_the_whole_map(stage):
+    """A professor can ask "what happens after this?" at any point, and the
+    advisor explains where it is going. The stage overview always ships."""
+    assert "THE FOUR STAGES" in _stage_prompt(stage)
+
+
+def test_each_stage_carries_the_next_one_for_a_mid_turn_handover():
+    """Stage is derived once, at the top of a turn, but a turn can cross a
+    boundary: the advisor saves a novelty claim and the project is in Stage 3
+    from that moment while still holding the prompt it started with. Without
+    the next stage's text it would improvise the handover."""
+    assert "STAGE 3 — WRITE THE PROBLEM STATEMENT" in _stage_prompt("1-2")
+    assert "STAGE 4 — BUILD THE PROPOSAL" in _stage_prompt("3")
+
+
+def test_no_section_references_a_rule_that_is_not_shipped_with_it():
+    """Sections cross-refer with "below". A reference whose target was cut is
+    an instruction pointing at nothing."""
+    for stage in ("1-2", "3", "4"):
+        p = _stage_prompt(stage)
+        if "the stuck-menu below" in p or "the operational reframe below" in p:
+            assert "STAGE 1 — SPECIFY THE RESEARCH PROBLEM" in p
+        if "the option block described below" in p:
+            assert "OFFERING CHOICES AS BUTTONS" in p
+
+
+def test_the_assembly_is_meaningfully_smaller_than_sending_everything():
+    """If this stops being true the split is pure risk with no return."""
+    import advisor_prompt as ap
+    full = sum(len(ap._SECTION_TEXT[n]) for n in ap.SECTIONS)
+    for stage in ("1-2", "3", "4"):
+        sent = len(_stage_prompt(stage))
+        assert sent < full * 0.80, f"stage {stage} saves less than 20%"
+
+
+def test_the_prompt_for_a_stage_is_stable_across_turns():
+    """Prompt caching bills a repeated prefix at a tenth of the rate, and only
+    survives if the bytes are identical. Two turns in the same stage must
+    assemble the same text."""
+    assert _stage_prompt("1-2") == _stage_prompt("1-2")
+
+
+def test_an_unknown_stage_is_refused_rather_than_silently_empty():
+    import advisor_prompt as ap
+    with pytest.raises(ValueError, match="unknown stage"):
+        ap.stable(name="Jane", stage_line="X", stage="99")
+    with pytest.raises(ValueError, match="unknown stage"):
+        ap.sections_for("99")

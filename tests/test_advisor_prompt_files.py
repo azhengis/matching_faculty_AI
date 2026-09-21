@@ -42,10 +42,14 @@ def test_no_section_is_empty():
 
 def test_a_missing_section_is_fatal_rather_than_silently_dropped(tmp_path, monkeypatch):
     """The important one. A prompt with a hole in it still answers, which is
-    why this has to raise instead of degrade."""
+    why this has to raise instead of degrade.
+
+    Every section is loaded at import even though a turn only sends a subset,
+    precisely so a file that just Stage 4 uses cannot be absent for weeks
+    before anybody reaches Stage 4."""
     monkeypatch.setattr(advisor_prompt, "_STABLE_DIR", tmp_path)
     with pytest.raises(RuntimeError, match="advisor prompt section missing"):
-        advisor_prompt._load_stable_template()
+        advisor_prompt._load_sections()
 
 
 def test_the_sections_are_sent_in_the_declared_order():
@@ -54,9 +58,9 @@ def test_the_sections_are_sent_in_the_declared_order():
     that the two are deliberately kept in step."""
     assert advisor_prompt.SECTIONS == sorted(advisor_prompt.SECTIONS)
 
-    built = advisor_prompt.stable(name="Jane", stage_line="X")
+    built = advisor_prompt.stable(name="Jane", stage_line="X", stage="4")
     positions = []
-    for section in advisor_prompt.SECTIONS:
+    for section in advisor_prompt.sections_for("4"):
         text = (STABLE_DIR / f"{section}.md").read_text()
         head = text.replace("{name}", "Jane").replace("{stage_line}", "X").strip().splitlines()[0]
         positions.append(built.index(head))
@@ -89,14 +93,14 @@ def test_nothing_unfilled_survives_into_a_built_prompt():
 
 
 def test_the_researchers_name_reaches_the_prompt():
-    stable = advisor_prompt.stable(name="Ada Lovelace", stage_line="X")
+    stable = advisor_prompt.stable(name="Ada Lovelace", stage_line="X", stage="1-2")
     assert "Ada Lovelace" in stable
     assert "{name}" not in stable
 
 
 def test_braces_in_a_researchers_name_do_not_break_assembly():
     """str.format would raise on this; plain replacement does not care."""
-    stable = advisor_prompt.stable(name="Jane {Doe}", stage_line="X")
+    stable = advisor_prompt.stable(name="Jane {Doe}", stage_line="X", stage="1-2")
     assert "Jane {Doe}" in stable
 
 
@@ -113,7 +117,7 @@ def test_web_app_no_longer_carries_the_prompt_inline():
 def test_the_assembled_prompt_is_the_one_that_gets_sent():
     """Guards against the loader being correct but unused."""
     stable, _ = web_app._advisor_system_prompt({"name": "Jane", "proposal": {}})
-    for section in advisor_prompt.SECTIONS:
+    for section in advisor_prompt.sections_for("1-2"):
         head = (STABLE_DIR / f"{section}.md").read_text()
         head = head.replace("{name}", "Jane").strip().splitlines()[0]
         assert head in stable, f"{section} never reaches the sent prompt"

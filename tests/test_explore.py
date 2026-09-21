@@ -466,8 +466,12 @@ def test_the_opening_removes_the_burden_of_organising_anything():
 
 def test_the_proposal_is_judged_as_a_whole_before_it_is_called_done():
     """Incremental saving settles each section alone; nothing otherwise looks
-    at whether they contradict each other."""
-    text = _advisor()
+    at whether they contradict each other.
+
+    Built at Stage 4 deliberately. The prompt is stage-conditional, and the
+    proposal-building rules are not sent while the problem is still being
+    specified — there is no proposal to judge yet."""
+    text = _advisor(proposal={"problem_statement": "The problem."})
     assert "BEFORE YOU CALL THE PROPOSAL DONE" in text
     assert "judged TOGETHER" in text
 

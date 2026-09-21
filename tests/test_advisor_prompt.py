@@ -57,18 +57,27 @@ def test_whitespace_only_sections_do_not_advance_the_stage():
     assert "STAGES 1-2" in stable
 
 
-def test_the_instruction_half_is_identical_across_stages_apart_from_the_directive():
-    """The stable half is what prompt caching bills at a tenth of the rate. If
-    anything but the stage line varied, the cache would miss on every save."""
-    prompts = {}
-    for label, proposal, _ in STAGES:
-        stable, _ = web_app._advisor_system_prompt({"name": "Jane", "proposal": proposal})
-        body = [l for l in stable.splitlines()
-                if not l.startswith(("STAGES 1-2 —", "STAGE 3 — WRITE", "STAGE 4 — BUILD"))]
-        prompts[label] = body
-    baseline = prompts["stages 1-2"]
-    for label, body in prompts.items():
-        assert body == baseline, f"{label} diverges from the cached instruction half"
+def test_each_stage_assembles_the_same_bytes_every_time():
+    """This used to assert the instruction half was identical across ALL
+    stages, which was true when every turn carried all fourteen sections. The
+    prompt is stage-conditional now, so the invariant moved: within a stage it
+    must be byte-stable, because that is what prompt caching requires. Across
+    stages it is deliberately different."""
+    for proposal in ({}, {"novelty": "N."}, {"problem_statement": "P."}):
+        a, _ = web_app._advisor_system_prompt({"name": "Jane", "proposal": proposal})
+        b, _ = web_app._advisor_system_prompt({"name": "Jane", "proposal": proposal})
+        assert a == b
+
+
+def test_the_stages_really_do_send_different_instructions():
+    """Guards the guard above: if every stage sent the same text, the test
+    would pass while the saving had silently disappeared."""
+    prompts = {
+        st: web_app._advisor_system_prompt({"name": "Jane", "proposal": p})[0]
+        for st, p in (("1-2", {}), ("3", {"novelty": "N."}),
+                      ("4", {"problem_statement": "P."}))
+    }
+    assert len(set(prompts.values())) == 3
 
 
 def test_the_live_proposal_lands_in_the_volatile_half_not_the_stable_one():

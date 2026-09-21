@@ -91,7 +91,28 @@ advisor_prompt.py                                puts them back together
 ```
 
 Edit the `.md` files directly — no Python involved — and restart the server to
-pick up the change. Two rules govern the split:
+pick up the change.
+
+**Each turn sends only the sections that stage needs.** A spine goes out every
+time — role, how it thinks, the lenses, the stage map, option blocks, saving,
+tone, the send check — plus the current stage's own instructions and the next
+stage's. Everything else is left out. That is roughly **28% fewer tokens per
+turn** at every stage, but the reason is not only cost: a project in Stage 1 no
+longer carries the Stage 4 rules, and Stage 4 is where the stance inverts and
+putting options on the table becomes correct. Rules the advisor must not follow
+yet are simply absent rather than present-but-forbidden.
+
+The next stage ships too, and that is not padding. Stage is derived once, at the
+top of a turn, but a turn can cross a boundary: the advisor saves a novelty
+claim and the project is in Stage 3 from that moment while still holding the
+prompt it started with. Without the next stage's text it would improvise the
+handover — the one moment the interview is most likely to lose its shape.
+
+Prompt caching still works. Each stage assembles byte-identical text for every
+turn spent in it; the prefix changes three times over a whole project, against a
+smaller prompt on every turn in between.
+
+Two more rules govern the split:
 
 - **Order comes from `SECTIONS` in `advisor_prompt.py`, not the filesystem.**
   Alphabetical filename order would work until somebody added `tone_extra.md`,

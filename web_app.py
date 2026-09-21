@@ -2330,22 +2330,29 @@ def _advisor_system_prompt(profile: dict) -> tuple[str, str]:
     # survives restarts and resumed sessions. The problem statement is the
     # stronger gate: a project that has one from before novelty existed as a
     # step is not dragged back to the beginning.
+    # The same derivation names the stage twice over: the line the model reads,
+    # and the key deciding which instruction sections get sent at all. They are
+    # produced together so they can never disagree — a prompt saying STAGE 4
+    # while carrying the Stage 1 interview rules would be worse than either.
     if (proposal.get("problem_statement") or "").strip():
+        stage = "4"
         stage_line = ("STAGE 4 — BUILD THE PROPOSAL. The problem statement is settled and saved. "
                       "Build the remaining proposal sections; every section must stay consistent "
                       "with the saved problem statement and novelty claim.")
     elif (proposal.get("novelty") or "").strip():
+        stage = "3"
         stage_line = ("STAGE 3 — WRITE THE PROBLEM STATEMENT. Novelty is settled and saved, but no "
                       "problem statement has been written yet. Draft it, confirm the wording, save it. "
                       "Do NOT draft or save any other proposal section first.")
     else:
+        stage = "1-2"
         stage_line = ("STAGES 1-2 — SPECIFY THE PROBLEM, THEN TEST ITS NOVELTY. Nothing is settled yet. "
                       "Draw out a specific problem, a primary objective, and 2-4 research questions by "
                       "ASKING — do not suggest what to study. Do NOT draft or save any proposal section "
                       "(other than research_questions) until the problem is specific, its novelty is "
                       "established and saved, and a problem statement is confirmed and saved.")
 
-    stable = advisor_prompt.stable(name=name, stage_line=stage_line)
+    stable = advisor_prompt.stable(name=name, stage_line=stage_line, stage=stage)
 
     volatile = advisor_prompt.volatile(
         name=name, project_title=project_title,
