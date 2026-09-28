@@ -480,3 +480,34 @@ def test_ci_builds_the_image_because_the_instance_cannot():
     text = wf.read_text()
     assert "ghcr.io" in text
     assert "cache-from: type=gha" in text, "without caching every push rebuilds the model export"
+
+
+def test_the_image_name_is_lowercased_before_tagging():
+    """Docker references must be lowercase. This repository is
+    azhengis/matching_faculty_AI, so ${{ github.repository }} used directly
+    produces an invalid tag and build-push-action fails in ONE SECOND with
+    "repository name must be lowercase" — before the build starts, which reads
+    like a build error rather than a naming one. It cost a full CI run to
+    diagnose."""
+    from pathlib import Path
+    wf = (Path(web_app.__file__).parent / ".github" / "workflows"
+          / "build-image.yml").read_text()
+    assert "${GITHUB_REPOSITORY,,}" in wf, \
+        "the image name is not being lowercased; tags will be invalid"
+    # And the raw form must not survive anywhere in the tag list.
+    assert "IMAGE: ${{ github.repository }}" not in wf
+
+
+def test_the_repository_name_actually_needs_lowercasing():
+    """Guards the guard: if the repo is ever renamed to something already
+    lowercase, the test above would pass vacuously and the reason for the step
+    would be lost."""
+    import subprocess
+    url = subprocess.run(["git", "remote", "get-url", "origin"],
+                         capture_output=True, text=True).stdout.strip()
+    if not url:
+        pytest.skip("no git remote configured")
+    name = url.rsplit("/", 1)[-1].removesuffix(".git")
+    if name.islower():
+        pytest.skip(f"repository {name!r} is already lowercase")
+    assert not name.islower()      # documents why the step exists
