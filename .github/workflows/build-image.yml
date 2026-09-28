@@ -1,0 +1,58 @@
+# Build the container and push it to GitHub Container Registry.
+#
+# This exists because the image CANNOT be built on the machine that runs it.
+# The builder stage downloads a 437MB model, exports it to ONNX, quantizes it,
+# and embeds 18,681 papers — several GB of peak memory. The target is a 1GB
+# instance. So the build happens here, on a runner with room, and the instance
+# only ever pulls a finished image.
+#
+# It also keeps the expensive layers cached between runs. Without that, every
+# push pays the full model export and index build.
+name: Build image
+
+on:
+  push:
+    branches: [main]
+    # Documentation and tests do not change the image.
+    paths-ignore: ['docs/**', '**/*.md']
+  workflow_dispatch:        # lets you rebuild without pushing
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write       # needed to push to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}   # provided automatically
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+          # Cache the model export and index bake between runs, the same way
+          # the Dockerfile's layer ordering does locally.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report the image
+        run: |
+          echo "Pushed ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest"
+          echo "Pull on the instance with: sudo /opt/faculty-matcher/deploy.sh"

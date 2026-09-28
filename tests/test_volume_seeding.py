@@ -400,3 +400,83 @@ def test_fly_is_given_more_than_the_memory_that_was_killed():
     """512MB is what Render OOM-killed during startup. Shipping the same
     number here would reproduce it on the alternative host."""
     assert _fly()["memory_mb"] >= 1024
+
+
+# ── The AWS deployment assets ──────────────────────────────────────────────
+
+def _deploy_dir():
+    from pathlib import Path
+    return Path(web_app.__file__).parent / "deploy" / "aws"
+
+
+@pytest.mark.parametrize("script", ["bootstrap.sh", "enable-https.sh", "backup.sh"])
+def test_the_deploy_scripts_are_valid_shell(script):
+    """A syntax error here is found at 2am on a box with no app on it."""
+    import subprocess
+    r = subprocess.run(["bash", "-n", str(_deploy_dir() / script)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize("script", ["bootstrap.sh", "enable-https.sh", "backup.sh"])
+def test_the_deploy_scripts_fail_fast(script):
+    """set -euo pipefail. Without it a failed step is skipped over and the
+    script reports success having done half its job."""
+    assert "set -euo pipefail" in (_deploy_dir() / script).read_text()
+
+
+def test_the_host_volume_matches_the_data_dir_the_container_is_told_to_use():
+    """The same invariant as Render's and Fly's. A mount the app does not
+    write to means data goes to the container filesystem and dies with it."""
+    unit = (_deploy_dir() / "bootstrap.sh").read_text()
+    assert "-v /var/lib/faculty-matcher:/data" in unit
+    assert "-e DATA_DIR=/data" in unit
+
+
+def test_the_service_survives_a_reboot_and_a_crash():
+    unit = (_deploy_dir() / "bootstrap.sh").read_text()
+    assert "Restart=always" in unit
+    assert "systemctl enable faculty-matcher" in unit
+
+
+def test_the_api_key_is_read_from_a_file_not_baked_into_the_unit():
+    """A systemd unit is world-readable. The key belongs in an env file the
+    README tells you to chmod 600."""
+    unit = (_deploy_dir() / "bootstrap.sh").read_text()
+    assert "EnvironmentFile=/opt/faculty-matcher/env" in unit
+    assert "sk-ant-" not in unit or "sk-ant-..." in unit   # placeholder only
+
+
+def test_no_real_secret_is_committed_in_the_deploy_assets():
+    import re
+    for path in _deploy_dir().glob("*"):
+        text = path.read_text()
+        real = re.findall(r"sk-ant-api\d{2}-[A-Za-z0-9_-]{20,}", text)
+        assert real == [], f"{path.name} contains what looks like a live key"
+
+
+def test_the_backup_uses_sqlites_own_backup_not_a_file_copy():
+    """cp on a live SQLite file can capture a torn page — a backup that
+    restores to a corrupt database, discovered only when it is needed."""
+    text = (_deploy_dir() / "backup.sh").read_text()
+    assert ".backup" in text
+    assert "cp " not in text.replace("aws s3 cp", "")
+
+
+def test_https_setup_refuses_to_run_against_the_wrong_dns():
+    """Requesting a certificate for a name that points elsewhere fails in a
+    way that is hard to read. Check first, say so plainly."""
+    text = (_deploy_dir() / "enable-https.sh").read_text()
+    assert "does not resolve" in text
+    assert "checkip.amazonaws.com" in text
+
+
+def test_ci_builds_the_image_because_the_instance_cannot():
+    """The builder stage needs several GB; the instance has one. If this
+    workflow disappears there is no way to produce an image to deploy."""
+    from pathlib import Path
+    wf = Path(web_app.__file__).parent / ".github" / "workflows" / "build-image.yml"
+    assert wf.is_file()
+    text = wf.read_text()
+    assert "ghcr.io" in text
+    assert "cache-from: type=gha" in text, "without caching every push rebuilds the model export"

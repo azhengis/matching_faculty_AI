@@ -12,8 +12,15 @@ Measured, not estimated:
 | Peak, faculty index rebuild | 238 MB (63s) |
 | Peak, paper index rebuild | 262 MB (475s, 18,665 papers) |
 
-So it fits any 512 MB instance, including free tiers. SPECTER2's weights are
-mmap'd from safetensors and cost far less resident than their 440 MB on disk.
+> **512 MB is not enough, despite those numbers.** They measure steady state
+> *after* startup. The high-water mark is *during* boot, when the ONNX session,
+> the tokenizer and the faculty index are allocated at once — and a 512 MB
+> container on Render was OOM-killed there, before its health check ran.
+>
+> Three changes cut that peak: the ONNX CPU arena is disabled, the 56 MB paper
+> index now loads on first use rather than at boot, and startup prints its own
+> peak RSS so the real figure is in the log rather than estimated. **Give it
+> 1 GB.** The difference is about a dollar a month anywhere.
 
 Two things still constrain the choice of host:
 
@@ -95,7 +102,27 @@ Custom Domains. The only cost is the name itself from a registrar, and a
 
 ---
 
-## Option 3 — Fly.io
+## Option 3 — AWS EC2 (~$0 for year one, then ~$8/mo)
+
+Full walkthrough: [`deploy/aws/README.md`](../deploy/aws/README.md).
+
+Keeps SQLite and the existing image; only the host changes. The image is built
+in GitHub Actions and pulled by the instance, because the builder stage needs
+several GB and a `t3.micro` has one.
+
+Three things Render did for you that become yours here: **HTTPS** (a script
+using Caddy is provided, and it needs a domain — Let's Encrypt will not issue
+for an IP), **backups** (a cron script using `sqlite3 .backup`, not `cp`), and
+**OS patching**.
+
+Be honest about year two: this saves the ~$7/mo Render charge for twelve
+months and then costs about the same, for more maintenance. Check your
+account's Free Tier page first — AWS moved newer accounts to a credit
+allowance rather than twelve months of `t3.micro`.
+
+---
+
+## Option 4 — Fly.io
 
 Fly is preconfigured here (`fly.toml`, `Dockerfile`) because it does persistent
 volumes and always-on machines simply. Render, Railway, or a DePaul-hosted VM
