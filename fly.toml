@@ -31,15 +31,29 @@ primary_region = "ord"          # Chicago — closest region to DePaul
   min_machines_running = 1
 
 [[vm]]
-  # 1GB, not 512MB. The old 280MB figure measured steady state AFTER startup;
-  # the high-water mark is during boot, when the ONNX session, the tokenizer
-  # and the faculty index are all being allocated at once. A 512MB container
-  # on Render was OOM-killed there, before its health check even ran. Startup
-  # now prints its own peak RSS, so the honest number is in the boot log.
+  # 2GB to start, deliberately more than needed. Budget, measured:
   #
-  # On Fly this costs roughly a dollar a month more than 512MB and removes the
-  # whole class of problem. Ship the prebuilt indexes (see docs/DEPLOYMENT.md)
-  # so the host never pays the rebuild cost either.
-  memory = "1024mb"
+  #     ~150MB  python + numpy + fastapi + onnxruntime + litellm
+  #     ~110MB  the int8 ONNX model
+  #      ~13MB  faculty rows
+  #       ~4MB  faculty index
+  #     -------
+  #     ~330MB  unavoidable at startup
+  #      +56MB  paper index, once a collaborator search runs
+  #
+  # That suggests 512MB should fit. It does not: a 512MB container was
+  # OOM-killed during boot on Render, twice, and the reason is not in the list
+  # above — allocator overhead, page cache counted against the cgroup, and the
+  # transient cost of unpickling an index while still holding its bytes.
+  #
+  # The honest answer is that nobody has measured the real peak, because every
+  # deploy that would have printed it failed before printing anything. So this
+  # starts high on purpose. Startup logs "Ready — ... peak NNNMB"; read it, then
+  #
+  #     fly scale memory 1024
+  #
+  # and watch it again. Sizing down from a known number beats guessing upward
+  # from a failure.
+  memory = "2048mb"
   cpu_kind = "shared"
   cpus = 2
