@@ -563,3 +563,76 @@ def test_every_host_config_agrees_on_the_model():
     from pathlib import Path
     doc = (Path(web_app.__file__).parent / "docs" / "DEPLOYMENT.md").read_text()
     assert f"`{render}`" in doc, "the Railway setup table names a different model"
+
+
+# ── The indexes have to reach the volume too ───────────────────────────────
+
+def test_the_prebuilt_indexes_are_seeded_onto_an_empty_volume(tmp_path, monkeypatch):
+    """The bug that killed three deploys. search.py resolves its index paths
+    under DATA_DIR; the Dockerfile bakes them next to the code. Point DATA_DIR
+    at a fresh volume and the app finds no index, decides to build one, and
+    falls back from the 110MB ONNX encoder to full SPECTER2 via torch (~834MB)
+    to embed 1,440 faculty during startup. Killed partway through, with a log
+    that says "Killed" while building embeddings."""
+    root = tmp_path / "app"; root.mkdir()
+    _make_seed(root / "faculty.db")
+    (root / "faculty_index.pkl").write_bytes(b"FACULTY-INDEX")
+    (root / "paper_index.pkl").write_bytes(b"PAPER-INDEX")
+    vol = tmp_path / "vol"
+    monkeypatch.setattr(web_app, "_ROOT", str(root))
+    monkeypatch.setattr(web_app, "DATA_DIR", str(vol))
+    monkeypatch.setattr(web_app, "DB_PATH", str(vol / "faculty.db"))
+
+    web_app._seed_data_dir_if_empty()
+
+    assert (vol / "faculty_index.pkl").read_bytes() == b"FACULTY-INDEX"
+    assert (vol / "paper_index.pkl").read_bytes() == b"PAPER-INDEX"
+
+
+def test_an_existing_index_on_the_volume_is_never_overwritten(tmp_path, monkeypatch):
+    """An index is rewritten when the faculty text changes and its fingerprint
+    stops matching. That rebuilt copy is newer than the baked one and must
+    survive every subsequent boot."""
+    root = tmp_path / "app"; root.mkdir()
+    _make_seed(root / "faculty.db")
+    (root / "faculty_index.pkl").write_bytes(b"BAKED")
+    vol = tmp_path / "vol"; vol.mkdir()
+    (vol / "faculty_index.pkl").write_bytes(b"REBUILT-ON-THE-VOLUME")
+    monkeypatch.setattr(web_app, "_ROOT", str(root))
+    monkeypatch.setattr(web_app, "DATA_DIR", str(vol))
+    monkeypatch.setattr(web_app, "DB_PATH", str(vol / "faculty.db"))
+
+    web_app._seed_data_dir_if_empty()
+    assert (vol / "faculty_index.pkl").read_bytes() == b"REBUILT-ON-THE-VOLUME"
+
+
+def test_local_development_does_not_copy_indexes_onto_itself(tmp_path, monkeypatch):
+    root = tmp_path / "app"; root.mkdir()
+    _make_seed(root / "faculty.db")
+    (root / "faculty_index.pkl").write_bytes(b"X")
+    monkeypatch.setattr(web_app, "_ROOT", str(root))
+    monkeypatch.setattr(web_app, "DATA_DIR", str(root))
+    monkeypatch.setattr(web_app, "DB_PATH", str(root / "faculty.db"))
+    web_app._seed_data_dir_if_empty()           # must be a no-op, not a self-copy
+    assert (root / "faculty_index.pkl").read_bytes() == b"X"
+
+
+def test_where_search_looks_for_an_index_is_where_seeding_puts_one():
+    """The two must agree. They did not, and nothing failed until a volume was
+    attached — so this asserts the contract rather than the symptom."""
+    import search as sm
+    from pathlib import Path
+    assert Path(sm.INDEX).name == "faculty_index.pkl"
+    assert Path(sm.PAPER_INDEX).name == "paper_index.pkl"
+    src = Path(web_app.__file__).read_text()
+    assert '"faculty_index.pkl", "paper_index.pkl"' in src, \
+        "seeding no longer copies the files search.py expects to find"
+
+
+def test_the_rebuild_path_says_what_it_will_cost():
+    """When it does happen, the log has to explain itself. "Killed" partway
+    through building embeddings reads as an app fault; it is a missing file."""
+    from pathlib import Path
+    src = (Path(web_app.__file__).parent / "search.py").read_text()
+    assert "No usable index at" in src
+    assert "OOM-killed" in src

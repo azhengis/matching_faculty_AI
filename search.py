@@ -666,7 +666,17 @@ def get_index(people, model):
         if cache.get("count") == len(people) and cache.get("model") == MODEL:
             print("Faculty text changed since the index was built — rebuilding.")
 
-    print(f"Building SPECTER2 embeddings for {len(people)} faculty (one-time ~1-2 min)...")
+    # This path needs the FULL SPECTER2 via torch — measured ~834MB resident —
+    # because the int8 ONNX encoder exists to serve queries, not to build an
+    # index. On a 512MB-2GB container that is usually fatal, and the log just
+    # says "Killed" partway through, which reads like an app fault rather than
+    # a missing file. Say plainly what is about to happen.
+    print(f"Building SPECTER2 embeddings for {len(people)} faculty from scratch.\n"
+          f"  No usable index at {INDEX}\n"
+          f"  This needs ~1GB of memory beyond the app and takes minutes. On a\n"
+          f"  small container it will be OOM-killed. The image ships a prebuilt\n"
+          f"  index; if DATA_DIR is set, it must be seeded onto that volume.",
+          flush=True)
     emb = model.encode(texts, normalize_embeddings=True, show_progress_bar=True)
     print(f"Clustering into {K_CLUSTERS} research-topic groups...")
     labels, centroids = kmeans(emb, K_CLUSTERS)

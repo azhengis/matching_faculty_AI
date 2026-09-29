@@ -597,8 +597,46 @@ def _seed_data_dir_if_empty() -> None:
     """
     try:
         _seed_volume()
+        _seed_indexes()
     except Exception as e:                      # noqa: BLE001 - deliberately broad
         print(f"[seed] skipped: {type(e).__name__}: {e}", flush=True)
+
+
+def _seed_indexes() -> None:
+    """Put the prebuilt embedding indexes on the volume too.
+
+    THIS IS THE ONE THAT KEPT KILLING DEPLOYS. search.py resolves its index
+    paths under DATA_DIR, and the Dockerfile bakes them next to the code at
+    /app. Point DATA_DIR at a fresh volume and the app finds no index there,
+    concludes it must build one, and falls back from the 110MB ONNX encoder to
+    the full SPECTER2 via torch — measured at ~834MB resident — to embed 1,440
+    faculty and 18,681 papers during startup. The container is killed partway
+    through, and the log says "Killed" while building embeddings, which reads
+    like an app fault rather than a missing file.
+
+    Seeding the database without these was half a fix. The indexes are exactly
+    as much a part of "what an empty volume is missing" as the roster is.
+
+    Copied, not symlinked: an index is rewritten when the faculty data changes
+    and its fingerprint stops matching, and that write has to land on the
+    volume rather than on a read-only image layer.
+    """
+    import shutil
+    if os.path.abspath(DATA_DIR) == os.path.abspath(_ROOT):
+        return                                  # not using a separate volume
+
+    for name in ("faculty_index.pkl", "paper_index.pkl"):
+        dest = os.path.join(DATA_DIR, name)
+        if os.path.exists(dest):
+            continue                            # already there; never overwrite
+        src = os.path.join(_ROOT, name)
+        if not os.path.exists(src):
+            print(f"[seed] no baked {name}; it will be rebuilt on first use "
+                  f"(slow, and memory-hungry)", flush=True)
+            continue
+        shutil.copyfile(src, dest)
+        print(f"[seed] copied {name} ({os.path.getsize(dest) / 1e6:.0f}MB) "
+              f"-> {dest}", flush=True)
 
 
 def _seed_volume() -> None:
