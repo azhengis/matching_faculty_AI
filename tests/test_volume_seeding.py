@@ -636,3 +636,37 @@ def test_the_rebuild_path_says_what_it_will_cost():
     src = (Path(web_app.__file__).parent / "search.py").read_text()
     assert "No usable index at" in src
     assert "OOM-killed" in src
+
+
+# ── Say whether data will survive ──────────────────────────────────────────
+
+def test_startup_warns_loudly_when_data_will_not_survive(tmp_path, monkeypatch, capsys):
+    """Accounts vanished on every redeploy for weeks and nothing in the log
+    said so — the faculty roster always came back, because it is baked into
+    the image, which made it look like the database was fine."""
+    import inspect, re
+    src = inspect.getsource(web_app.lifespan)
+    # The message is built across several source lines; join them so the test
+    # reads the text a user would see, not the way it happens to be wrapped.
+    flat = re.sub(r'"\s*\n\s*"', "", src)
+    assert "EPHEMERAL" in flat
+    assert "will be LOST on the next deploy" in flat
+    assert "Mount a volume and set DATA_DIR" in flat
+
+
+def test_startup_confirms_persistence_when_a_volume_is_mounted():
+    """The reassuring half matters too: somebody who mounted a volume should
+    be able to see that it took effect, rather than inferring it."""
+    import inspect
+    assert "persistent — user data survives redeploys" in inspect.getsource(web_app.lifespan)
+
+
+def test_nothing_expires_a_profile():
+    """Sessions expire after 30 days; profiles never do. A sweep that reached
+    profiles, users or projects would silently delete somebody's proposal."""
+    from pathlib import Path
+    src = Path(web_app.__file__).read_text()
+    for table in ("profiles", "users", "projects", "proposals"):
+        assert f"DELETE FROM {table} WHERE datetime" not in src, \
+            f"something expires rows in {table}"
+    assert "DELETE FROM auth_sessions WHERE datetime(expires_at)" in src

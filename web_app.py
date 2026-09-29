@@ -804,6 +804,18 @@ def _paper_index():
 # ── App startup ───────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Say plainly whether anything anyone creates will still be here tomorrow.
+    # This was invisible for weeks: accounts vanished on every redeploy, the
+    # faculty roster always came back because it is baked into the image, and
+    # nothing in the log distinguished "volume mounted" from "writing into a
+    # container that is about to be replaced".
+    _ephemeral = os.path.abspath(DATA_DIR) == os.path.abspath(_ROOT)
+    print(f"Data directory: {DATA_DIR}" + (
+        "  *** EPHEMERAL — accounts, projects and proposals will be LOST on the "
+        "next deploy. Mount a volume and set DATA_DIR to its path. ***"
+        if _ephemeral else "  (persistent — user data survives redeploys)"),
+        flush=True)
+
     _seed_data_dir_if_empty()
     _init_profiles_db()
     print("Loading faculty data...")
