@@ -511,3 +511,55 @@ def test_the_repository_name_actually_needs_lowercasing():
     if name.islower():
         pytest.skip(f"repository {name!r} is already lowercase")
     assert not name.islower()      # documents why the step exists
+
+
+# ── Railway ────────────────────────────────────────────────────────────────
+
+def _railway():
+    import json
+    from pathlib import Path
+    return json.loads((Path(web_app.__file__).parent / "railway.json").read_text())
+
+
+def test_railway_builds_the_dockerfile_not_a_guessed_buildpack():
+    """Nixpacks would try to infer a Python app and miss the ONNX export and
+    the baked indexes entirely."""
+    b = _railway()["build"]
+    assert b["builder"] == "DOCKERFILE"
+    assert b["dockerfilePath"] == "Dockerfile"
+
+
+def test_railway_binds_the_port_it_is_given():
+    """Railway assigns $PORT; it is not fixed at 8000. Binding the wrong one
+    means the health check never connects and the deploy is rolled back."""
+    assert "$PORT" in _railway()["deploy"]["startCommand"]
+
+
+def test_the_health_check_allows_time_for_the_model_to_load():
+    """First boot loads the ONNX model and seeds the volume. A default
+    timeout fails a start that is working perfectly, and the failure looks
+    like a crash."""
+    d = _railway()["deploy"]
+    assert d["healthcheckPath"] == "/login"     # 200 without a session
+    assert d["healthcheckTimeout"] >= 300
+
+
+def test_the_health_check_path_really_answers_without_a_session():
+    """Checking an authenticated path would mark every healthy deploy failed,
+    because the checker has no cookie. Asserted against the app, not just the
+    config: /login is a route, and / redirects rather than returning 200."""
+    from fastapi.testclient import TestClient
+    client = TestClient(web_app.app)
+    assert client.get(_railway()["deploy"]["healthcheckPath"]).status_code == 200
+
+
+def test_every_host_config_agrees_on_the_model():
+    """Three hosts now describe this app. A researcher must not get a
+    different advisor depending on which one is serving."""
+    render = next(e["value"] for e in _blueprint()["envVars"]
+                  if e["key"] == "CHATBOT_MODEL")
+    assert _fly()["model"] == render
+    # Railway sets it in the dashboard, so the doc is what carries it.
+    from pathlib import Path
+    doc = (Path(web_app.__file__).parent / "docs" / "DEPLOYMENT.md").read_text()
+    assert f"`{render}`" in doc, "the Railway setup table names a different model"

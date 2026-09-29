@@ -102,7 +102,73 @@ Custom Domains. The only cost is the name itself from a registrar, and a
 
 ---
 
-## Option 3 — AWS EC2 (~$0 for year one, then ~$8/mo)
+## Option 3 — Railway (recommended; ~$5/mo base plus usage)
+
+`railway.json` in the repo root configures the build and the health check.
+Everything else is four settings in the dashboard.
+
+**Why this one.** Railway does not impose a fixed per-service memory ceiling
+the way Render and Fly do. A 512MB cap OOM-killed this app twice during
+startup, and the real peak is still unmeasured — on Railway an app that spikes
+during boot is billed slightly more for that minute rather than killed. It also
+deploys automatically on push, which removes the "did the deploy actually run?"
+question that cost several rounds of debugging here.
+
+**The tradeoff** is that usage billing is less predictable than a fixed monthly
+size. This app holds the ONNX model resident, so it will not idle down to
+nothing. Watch the first week.
+
+### Setup
+
+1. **New Project → Deploy from GitHub repo.** Railway reads `railway.json` and
+   builds the Dockerfile. The first build takes 15–20 minutes: it downloads the
+   model, quantizes it, and embeds 18,681 papers.
+
+2. **Add a volume.** Service → Data → Add Volume, mount path **`/data`**.
+   Without this the database lives in the container filesystem and every deploy
+   wipes accounts — the exact problem being escaped.
+
+3. **Set variables** (Service → Variables):
+
+   | Key | Value |
+   |---|---|
+   | `DATA_DIR` | `/data` — **must equal the volume mount path** |
+   | `CHATBOT_MODEL` | `anthropic/claude-sonnet-5` |
+   | `ANTHROPIC_API_KEY` | your key |
+
+4. **Generate a domain.** Settings → Networking → Generate Domain. HTTPS is
+   included; no certificate to manage.
+
+### Checking it worked
+
+In the deploy logs, look for:
+
+```
+[seed] copied faculty.db -> /data/faculty.db: faculty=1440, papers=18681
+Ready — 1440 faculty indexed, peak NNNMB; paper index loads on first use
+```
+
+The first line means the volume seeded itself — no data upload step. The second
+gives the **real peak memory**, which is the number this project has never had.
+Note it down; it settles the sizing question on any host.
+
+Then sign up, and check you are still logged in tomorrow. That is the proof the
+volume is real.
+
+### Gotchas
+
+- **`DATA_DIR` must match the volume mount exactly.** If they differ the app
+  writes to the container filesystem while the volume sits empty beside it, and
+  the data loss happens anyway, silently.
+- **The health check needs a long timeout.** `railway.json` sets 300s because
+  the first boot loads the model and seeds the volume. The default would fail a
+  perfectly healthy start.
+- **`$PORT` is assigned by Railway**, not fixed at 8000. The start command in
+  `railway.json` uses it.
+
+---
+
+## Option 4 — AWS EC2 (~$0 for year one, then ~$8/mo)
 
 Full walkthrough: [`deploy/aws/README.md`](../deploy/aws/README.md).
 
@@ -122,7 +188,7 @@ allowance rather than twelve months of `t3.micro`.
 
 ---
 
-## Option 4 — Fly.io
+## Option 5 — Fly.io
 
 Fly is preconfigured here (`fly.toml`, `Dockerfile`) because it does persistent
 volumes and always-on machines simply. Render, Railway, or a DePaul-hosted VM
