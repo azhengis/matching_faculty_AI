@@ -499,3 +499,88 @@ def test_an_unknown_stage_is_refused_rather_than_silently_empty():
         ap.stable(name="Jane", stage_line="X", stage="99")
     with pytest.raises(ValueError, match="unknown stage"):
         ap.sections_for("99")
+
+
+# ── Never volunteer an idea ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("stage", ["1-2", "3", "4"])
+def test_asking_before_offering_holds_at_every_stage(stage):
+    """Reported by the user: it kept suggesting instead of asking. The rule is
+    in the spine, so it reaches every stage including Stage 4, where the
+    stance inverts but does not become a licence to volunteer."""
+    p = _stage_prompt(stage)
+    assert "ASK BEFORE YOU OFFER" in p
+    assert "You do not volunteer ideas" in p
+    assert "Wanting to be asked is not asking" in p
+
+
+@pytest.mark.parametrize("stage", ["1-2", "3", "4"])
+def test_the_prompt_no_longer_prefers_a_recommendation_over_a_question(stage):
+    """The rule that caused it. "Prefer a reasoned recommendation over another
+    question" shipped in the spine — at EVERY stage — directly contradicting
+    "NEVER HAND THEM POSSIBLE ANSWERS" two sections later. Its worked example
+    supplied three candidate interpretations and picked one, which is exactly
+    the behaviour the interview forbids."""
+    p = _stage_prompt(stage)
+    assert "Prefer a reasoned recommendation over another question" not in p
+    assert "I see three functional interpretations here" not in p
+
+
+def test_not_knowing_yet_is_treated_as_the_start_of_the_interview():
+    """"I don't know" used to trigger automatic ideation. It usually means
+    they have not been asked the right question yet."""
+    p = _stage_prompt("1-2")
+    assert "do NOT start offering directions" in p
+    assert "not a request for suggestions" in p
+
+
+def test_being_stuck_still_requires_asking_first():
+    """The one place the old prompt and the new one agreed; now nothing
+    contradicts it."""
+    p = _stage_prompt("1-2")
+    assert "ASK whether they want options rather than producing them" in p
+    assert "ASK WHETHER THEY WANT OPTIONS" in p       # the option-block section
+
+
+def test_stage_four_asks_for_their_method_before_proposing_one():
+    """An experienced researcher usually has an approach half-formed. Taking
+    theirs seriously beats replacing it, and the Stage 4 inversion lowers the
+    bar for offering rather than removing it."""
+    p = _stage_prompt("4")
+    assert "start by asking how they would approach it" in p
+    assert "Ask first, then offer" in p
+    assert "lowers the bar for offering; it does not remove it" in p
+
+
+def test_an_explicit_request_is_still_answered():
+    """The whole point is that being asked licenses offering. A prompt that
+    refused even then would be useless to somebody who genuinely wants help."""
+    p = _stage_prompt("1-2")
+    assert "The exception is an explicit request" in p
+    assert "what could AI even do here?" in p
+
+
+def test_synthesis_is_not_a_loophole():
+    """"Stop asking and synthesize" was the wording that licensed supplying
+    options. Synthesis has to mean summarising THEIR material."""
+    p = _stage_prompt("1-2")
+    assert "Synthesis is not suggestion" in p
+    assert "contains no option you invented" in p
+
+
+def test_the_send_check_catches_an_unsolicited_offer():
+    """A rule stated once in a 15,000-token prompt is a rule that gets
+    skipped. The send check runs on every drafted message."""
+    p = _stage_prompt("1-2")
+    assert "DID YOU OFFER SOMETHING THEY DID NOT ASK FOR?" in p
+    assert '"they seemed stuck" is not a licence' in p
+
+
+def test_the_questions_get_better_rather_than_fewer():
+    """The opposite failure: pure question-and-answer ping-pong with nothing
+    given back. The fix is better questions, not filling the gap with
+    suggestions."""
+    p = _stage_prompt("1-2")
+    assert "DO NOT INTERROGATE" in p
+    assert "never by filling the gap with suggestions" in p
+    assert "Reflect before you ask" in p
