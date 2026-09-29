@@ -39,6 +39,20 @@ _THREADS = int(os.environ.get("ONNX_THREADS", "2"))
 
 _MAX_TOKENS = 512          # matches sentence-transformers' max_seq_length
 
+# How many texts go through the model at once. Eight, not sixteen, and the
+# reason is a single transient allocation: self-attention is
+# batch x heads x tokens x tokens x 4 bytes, so at batch 16 and 512 tokens that
+# is 201MB in one block, on top of the ~110MB model and ~150MB of Python. A
+# container building an index was killed there repeatedly, reporting only
+# "Killed" partway through "Building SPECTER2 embeddings".
+#
+#   batch 16 -> 201MB      batch 8 -> 101MB      batch 4 -> 50MB
+#
+# Eight halves the peak for a modest loss of throughput, and index building is
+# rare — the image ships prebuilt indexes and they are seeded onto the volume.
+# Raise it with ONNX_BATCH where memory is plentiful, such as the CI builder.
+_BATCH = int(os.environ.get("ONNX_BATCH", "8"))
+
 _session = None
 _tokenizer = None
 _input_names: set[str] = set()
@@ -94,10 +108,11 @@ def _load():
         _tokenizer, _session = tok, sess
 
 
-def encode(texts, batch_size: int = 16, normalize_embeddings: bool = True) -> np.ndarray:
+def encode(texts, batch_size: int = None, normalize_embeddings: bool = True) -> np.ndarray:
     """Embed texts. Signature mirrors SentenceTransformer.encode so callers
     that already hold a model object keep working unchanged."""
     _load()
+    batch_size = batch_size or _BATCH
     if isinstance(texts, str):
         texts = [texts]
     texts = [t if isinstance(t, str) else str(t) for t in texts]
@@ -137,7 +152,7 @@ class OnnxEncoder:
     so load_model() can return this and nothing downstream has to change."""
 
     def encode(self, sentences, normalize_embeddings: bool = True,
-               batch_size: int = 16, show_progress_bar: bool = False, **_):
+               batch_size: int = None, show_progress_bar: bool = False, **_):
         return encode(sentences, batch_size=batch_size,
                       normalize_embeddings=normalize_embeddings)
 

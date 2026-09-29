@@ -166,3 +166,4 @@ def test_int8_preserves_the_top_match():
         onx_top = int(np.argmax(onx_c @ onnx_encoder.encode([query])[0]))
         assert ref_top == expected, f"reference model itself missed: {query}"
         assert onx_top == expected, f"int8 changed the top match for: {query}"
+

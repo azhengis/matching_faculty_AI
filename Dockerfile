@@ -66,6 +66,9 @@ RUN python pipeline/13_export_onnx.py --out /build/onnx_model
 # the next line.
 COPY search.py text_clean.py ./
 COPY data/seed_faculty.db.gz data/
+# The runtime default is 8, sized for a small container. The builder has room,
+# and index building is the one place throughput matters — this halves the bake.
+ENV ONNX_BATCH=16
 RUN gunzip -c data/seed_faculty.db.gz > /build/faculty.db \
     && python -c "\
 import search as sm; \
