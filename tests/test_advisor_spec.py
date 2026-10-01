@@ -593,3 +593,63 @@ def test_the_title_must_be_saved_not_merely_announced():
     p = _stage_prompt("1-2")
     assert "CALL save_proposal WITH IT IN THE SAME TURN" in p
     assert "Saying the title in the chat is not naming the project" in p
+
+
+# ── Candidate lists inside questions ───────────────────────────────────────
+
+def test_the_objective_taxonomy_is_applied_silently():
+    """Rule B used to say "help them say which kind of aim it is: descriptive,
+    evaluative, or interventional" — the prompt instructing a three-item menu
+    while another section bans menus. They pick one instead of saying what
+    they want."""
+    p = _stage_prompt("1-2")
+    assert "Work out SILENTLY which kind of aim it is" in p
+    assert "is a three-item menu" in p
+
+
+def test_the_operational_reframe_cannot_carry_a_list():
+    """Observed in production: the reframe's own "In other words" opener was
+    used to wrap four candidate answers onto a question that was fine until
+    that point."""
+    p = _stage_prompt("1-2")
+    assert "THE REFRAME IS NOT A CONTAINER FOR A LIST" in p
+    assert "It adds no nouns they did not say" in p
+
+
+def test_the_advisor_does_not_announce_which_part_is_weak():
+    """"The part that needs the most pressure is X" grades the answer, and the
+    sentence that follows it usually enumerates the alternatives."""
+    p = _stage_prompt("1-2")
+    assert "announcing WHERE the weakness is before asking about it" in p
+    assert "the choice of what you asked about already shows what you think is soft" in p
+
+
+@pytest.mark.parametrize("stage", ["1-2", "3", "4"])
+def test_the_list_scan_runs_at_every_stage(stage):
+    """It was scoped to "Stage 1 digs only", which is an out — and the message
+    that prompted this was a Stage 1 dig anyway."""
+    p = _stage_prompt(stage)
+    assert "RUN THIS ON EVERY MESSAGE, NOT JUST STAGE 1 DIGS" in p
+    assert "two or more comma-separated things that could themselves BE the answer" in p
+
+
+def test_the_list_scan_shows_the_edit_rather_than_describing_it():
+    """A rule the model has to interpret is weaker than one it can copy."""
+    p = _stage_prompt("1-2")
+    assert 'is sent as "What would you see happening?"' in p
+
+
+def test_not_knowing_the_answer_counts_as_asking_for_options():
+    """The user's own refinement: somebody who replies "I have no idea" or
+    "what do you mean?" has been asked and could not answer, which is exactly
+    when options help rather than lead."""
+    p = _stage_prompt("1-2")
+    assert "Answering your question with not-knowing" in p
+    assert '"I have no idea"' in p
+    assert "can you give an example?" in p
+
+
+def test_one_licence_to_offer_is_not_a_standing_one():
+    """Otherwise a single "I don't know" turns the rest of the conversation
+    into a suggestion engine."""
+    assert "One licence is not a standing one" in _stage_prompt("1-2")
