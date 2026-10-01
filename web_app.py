@@ -2843,6 +2843,74 @@ def _read_edited_sections(con, pid: int) -> list:
     return [f for f in parsed if f in _PROPOSAL_FIELDS] if isinstance(parsed, list) else []
 
 
+# Kickoff strings the app sends on the researcher's behalf when they click
+# into a project. They never typed these and never see them, so nothing may
+# read meaning into them — naming a project "Back Where We Were" because the
+# resume message was the first thing in the transcript is exactly the kind of
+# mistake this list prevents. Kept in step with the list in advisor.html,
+# including retired strings, because old transcripts still contain them.
+_SCRIPTED_OPENERS = frozenset({
+    "Let's start a new project.",
+    "I\u2019m back \u2014 where were we?",
+    "Hello \u2014 I just filled in the intake for this project.",
+    "Hello \u2014 this project already has some sections written.",
+    "Hello \u2014 this project already has some sections written",
+    "Hello.",
+    "Let's explore some directions.",
+})
+
+
+def _name_project_if_untitled(project_id, history: list) -> None:
+    """Give a project a real name from what the researcher actually said.
+
+    The advisor is told to propose a working title in its first substantive
+    reply and save it. It does not always do so, and when it only SAYS the
+    title in the chat without calling save_proposal, the project sits in the
+    list as "Untitled project" while the conversation plainly has a subject.
+
+    The existing fallback inside _save_proposal only fires when a problem
+    statement or background is saved, and neither happens until Stage 3 — so a
+    project could stay untitled through the whole interview.
+
+    This closes that. It runs after a turn, costs one short model call, and
+    only ever replaces the placeholder: a title the advisor saved, or one the
+    researcher typed on the projects page, is never touched.
+
+    Nothing in here may raise. Naming is a convenience, and the caller has
+    already persisted the transcript and is about to return the reply — losing
+    the researcher's turn over a locked database would be a far worse trade
+    than an unnamed project.
+    """
+    con = None
+    try:
+        con = sqlite3.connect(DB_PATH)
+        row = con.execute("SELECT title FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not row:
+            return
+        current = (row[0] or "").strip()
+        if current and current not in ("Untitled project", "Exploring new directions"):
+            return                                   # already has a real name
+
+        # The researcher's own words, not the advisor's. Skip the scripted
+        # opener the app sends on their behalf, which says nothing about them.
+        said = [e.get("content") or "" for e in history if e.get("role") == "user"]
+        source = next((t.strip() for t in said
+                       if len(t.strip()) > 40 and t.strip() not in _SCRIPTED_OPENERS), "")
+        if not source:
+            return                                   # nothing substantive yet
+
+        title = _generate_title(source)
+        if title and title != "Untitled project":
+            con.execute("UPDATE projects SET title = ? WHERE id = ?",
+                        (title[:_TITLE_MAX], project_id))
+            con.commit()
+    except Exception:   # noqa: BLE001 - see the docstring; never fail a turn
+        pass
+    finally:
+        if con is not None:
+            con.close()
+
+
 def _save_proposal(project_id, args: dict) -> dict:
     """Upsert the structured research proposal for a project.
 
@@ -4223,6 +4291,7 @@ async def api_advisor_chat(req: Request):
                 said.append(msg.content.strip())
             if reason != "tool_calls":
                 _persist_history(project_id, history)
+                _name_project_if_untitled(project_id, history)
                 reply = "\n\n".join(said)
                 # finish_reason "length" means the model ran into max_tokens
                 # mid-sentence. This used to be treated exactly like "stop",

@@ -584,3 +584,12 @@ def test_the_questions_get_better_rather_than_fewer():
     assert "DO NOT INTERROGATE" in p
     assert "never by filling the gap with suggestions" in p
     assert "Reflect before you ask" in p
+
+
+def test_the_title_must_be_saved_not_merely_announced():
+    """Announcing a title in the chat does not name the project — the project
+    list reads the saved value. A title only mentioned leaves the entry as
+    "Untitled project" while the conversation plainly has a subject."""
+    p = _stage_prompt("1-2")
+    assert "CALL save_proposal WITH IT IN THE SAME TURN" in p
+    assert "Saying the title in the chat is not naming the project" in p
