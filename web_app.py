@@ -50,6 +50,7 @@ import search as sm
 from text_clean import split_interests, is_topic_line
 import doc_extract
 import auth
+import firebase_auth
 import advisor_prompt   # assembles the advisor's system prompt from prompts/
 
 # ── LiteLLM ───────────────────────────────────────────────────────────────────
@@ -351,6 +352,14 @@ def _init_profiles_db():
             created_at     TEXT DEFAULT (datetime('now'))
         )
     """)
+
+    # Links a local account to its Firebase identity. Null for the original
+    # password accounts; set once someone signs in through Firebase. The email
+    # stays the join key either way, so an existing password account and a new
+    # Firebase sign-in for the same address are the same person. Placed right
+    # after CREATE TABLE users on purpose — a migration above its own table is
+    # the latent bug test_migrations.py exists to catch.
+    _add_column(con, "users", "firebase_uid", "TEXT")
 
     # Uploaded documents and links attached to a profile (CVs, grant docs,
     # personal sites, Google Scholar, etc.) — separate from
@@ -998,6 +1007,65 @@ async def api_auth_logout(req: Request):
 async def api_auth_mode():
     """Whether email-only sign-in is enabled, so the login page can match."""
     return JSONResponse({"test_login": TEST_LOGIN})
+
+
+@app.get("/api/auth/firebase/config")
+async def api_firebase_config():
+    """Public Firebase settings for the login page, or {enabled:false}.
+
+    Everything here is non-secret and already shipped to the browser; serving
+    it from the server just keeps the single source of truth in the
+    environment rather than hardcoded in the template."""
+    return JSONResponse(firebase_auth.public_config())
+
+
+@app.post("/api/auth/firebase")
+async def api_auth_firebase(req: Request):
+    """Exchange a verified Firebase ID token for one of our own sessions.
+
+    The browser has already signed in through Firebase (password or Google);
+    this confirms the token with Google, finds or creates the local account by
+    email, and issues the same session cookie the password path uses. Firebase
+    owns the credential; we still own the session and the profile."""
+    body = await req.json()
+    try:
+        identity = firebase_auth.verify_id_token(body.get("id_token") or body.get("idToken"))
+    except firebase_auth.FirebaseAuthError as e:
+        # 403, not 401: the token was understood, the account is just not
+        # allowed in (unverified, or wrong domain). The message is user-safe.
+        return JSONResponse({"error": str(e)}, status_code=403)
+
+    email = identity["email"]
+    uid   = identity["uid"]
+
+    con = sqlite3.connect(DB_PATH)
+    try:
+        row = con.execute("SELECT id, firebase_uid FROM users WHERE email = ?", (email,)).fetchone()
+        if row:
+            user_id = row[0]
+            if uid and not row[1]:
+                # First Firebase sign-in for an address that already had a
+                # password account. Link them; the password still works.
+                con.execute("UPDATE users SET firebase_uid = ? WHERE id = ?", (uid, user_id))
+                con.commit()
+        else:
+            # New account. The password columns are NOT NULL, so store a random
+            # hash this person will never use — their credential lives in
+            # Firebase. Anyone later setting a local password overwrites it.
+            pw_hash, salt = auth.hash_password(secrets.token_urlsafe(32))
+            cur = con.execute(
+                "INSERT INTO users (email, password_hash, password_salt, firebase_uid) "
+                "VALUES (?, ?, ?, ?)", (email, pw_hash, salt, uid))
+            con.commit()
+            user_id = cur.lastrowid
+    finally:
+        con.close()
+
+    token = secrets.token_urlsafe(32)
+    _start_session(token, user_id)
+    response = JSONResponse({"email": email})
+    response.set_cookie("session_token", token, httponly=True, samesite="lax")
+    return response
 
 
 @app.get("/api/auth/me")

@@ -74,12 +74,26 @@ h2{font-family:var(--serif);font-size:26px;font-weight:normal;margin-bottom:6px;
     </div>
 
     <button class="btn" id="btn-submit" onclick="submitForm()">Log in</button>
+
+    <a href="#" id="forgot-link" onclick="resetPassword();return false;"
+       style="display:none;font-size:12.5px;color:var(--navy-lift);text-decoration:none;margin-top:10px">Forgot your password?</a>
+
+    <div id="firebase-extra" style="display:none">
+      <div style="display:flex;align-items:center;gap:12px;margin:18px 0;color:var(--ink-3);font-size:12px">
+        <span style="flex:1;height:1px;background:var(--border)"></span>or<span style="flex:1;height:1px;background:var(--border)"></span>
+      </div>
+      <button class="btn" id="btn-google" onclick="signInWithGoogle()"
+              style="background:#fff;color:var(--ink);border:1px solid var(--border-2)">Continue with Google</button>
+    </div>
+
     <div class="status" id="status"></div>
   </div>
 
   <p class="footnote">Find collaborators across DePaul, and build your research proposal as you talk.</p>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 // Demo mode hides the password field entirely: typing a DePaul email signs
 // you in and the profile assistant greets you by name. The server decides —
@@ -108,6 +122,66 @@ h2{font-family:var(--serif);font-size:26px;font-weight:normal;margin-bottom:6px;
 })();
 
 let _mode = 'login';
+let _fb = null;   // the Firebase auth instance, or null when not configured
+
+// Turn on Firebase sign-in if the server is set up for it. Until then the page
+// behaves exactly as before — legacy password login against our own endpoints.
+(async function initFirebase() {
+  try {
+    const cfg = await (await fetch('/api/auth/firebase/config')).json();
+    if (!cfg || !cfg.enabled || typeof firebase === 'undefined') return;
+    firebase.initializeApp({
+      apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId });
+    _fb = firebase.auth();
+    _fb.allowedDomain = cfg.allowedDomain || '';
+    document.getElementById('firebase-extra').style.display = 'block';
+    document.getElementById('forgot-link').style.display = 'inline-block';
+  } catch (e) {}
+})();
+
+// Exchange a signed-in Firebase user for one of our sessions, then enter.
+async function _enterWithFirebaseUser(user, status, btn) {
+  const idToken = await user.getIdToken();
+  const res = await fetch('/api/auth/firebase', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ id_token: idToken }) });
+  const data = await res.json();
+  if (data.error) { status.textContent = data.error; if (btn) btn.disabled = false; return; }
+  window.location.href = '/profile';
+}
+
+function _firebaseMessage(err) {
+  const m = (err && err.code) || '';
+  if (m.includes('wrong-password') || m.includes('invalid-credential')) return 'Incorrect email or password.';
+  if (m.includes('user-not-found')) return 'No account with that email. Switch to Sign up.';
+  if (m.includes('email-already-in-use')) return 'An account with that email already exists. Switch to Log in.';
+  if (m.includes('weak-password')) return 'Password must be at least 6 characters.';
+  if (m.includes('invalid-email')) return 'That is not a valid email address.';
+  if (m.includes('popup-closed') || m.includes('cancelled-popup')) return '';
+  return (err && err.message) || 'Sign-in failed. Please try again.';
+}
+
+async function signInWithGoogle() {
+  const status = document.getElementById('status');
+  if (!_fb) return;
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    if (_fb.allowedDomain) provider.setCustomParameters({ hd: _fb.allowedDomain });
+    const result = await _fb.signInWithPopup(provider);
+    await _enterWithFirebaseUser(result.user, status, null);
+  } catch (e) { status.textContent = _firebaseMessage(e); }
+}
+
+async function resetPassword() {
+  const email  = document.getElementById('email-input').value.trim();
+  const status = document.getElementById('status');
+  if (!_fb) return;
+  if (!email) { status.textContent = 'Enter your email above first, then click reset.'; return; }
+  try {
+    await _fb.sendPasswordResetEmail(email);
+    status.textContent = 'Reset link sent. Check your inbox.';
+  } catch (e) { status.textContent = _firebaseMessage(e); }
+}
 
 function setMode(mode) {
   _mode = mode;
@@ -134,6 +208,25 @@ async function submitForm() {
 
   btn.disabled = true;
   status.textContent = '';
+
+  if (_fb) {
+    try {
+      let cred;
+      if (_mode === 'signup') {
+        cred = await _fb.createUserWithEmailAndPassword(email, password);
+        try { await cred.user.sendEmailVerification(); } catch (e) {}
+        status.textContent = 'Account created. Check your email to verify, then log in.';
+        btn.disabled = false;
+        return;
+      }
+      cred = await _fb.signInWithEmailAndPassword(email, password);
+      await _enterWithFirebaseUser(cred.user, status, btn);
+    } catch (e) {
+      status.textContent = _firebaseMessage(e);
+      btn.disabled = false;
+    }
+    return;
+  }
 
   try {
     const res  = await fetch('/api/auth/' + _mode, {

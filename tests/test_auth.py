@@ -45,7 +45,11 @@ def test_init_profiles_db_creates_users_table(tmp_path, monkeypatch):
 
     con = sqlite3.connect(db_path)
     cols = _columns(con, "users")
-    assert cols == ["id", "email", "password_hash", "password_salt", "created_at"]
+    # firebase_uid is added by a migration right after the table is created;
+    # it links an account to its Firebase identity and is null for the
+    # original password accounts.
+    assert cols == ["id", "email", "password_hash", "password_salt",
+                    "created_at", "firebase_uid"]
     con.close()
 
 

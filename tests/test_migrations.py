@@ -102,6 +102,7 @@ def test_a_malformed_column_declaration_raises():
 # ── The result on a brand-new database ───────────────────────────────────────
 
 EXPECTED = {
+    "users": ["firebase_uid"],
     "projects": ["chat_history", "gap_map", "lit_references", "mode"],
     "profiles": ["research_interests", "user_id", "photo_file", "chat_history",
                  "research_activities", "explore_history", "explore_understanding"],
