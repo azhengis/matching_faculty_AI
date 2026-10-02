@@ -72,6 +72,17 @@ def test_not_configured_means_firebase_is_simply_off(monkeypatch):
     assert firebase_auth.public_config() == {"enabled": False}
 
 
+def test_the_config_reports_whether_verification_is_required(monkeypatch):
+    """The login page reads this to decide whether to send a verification email
+    at all — so a testing deployment with it off never mails a real address."""
+    monkeypatch.setattr(firebase_auth, "PROJECT_ID", "p")
+    monkeypatch.setattr(firebase_auth, "API_KEY", "k")
+    monkeypatch.setattr(firebase_auth, "REQUIRE_VERIFIED", False)
+    assert firebase_auth.public_config()["requireVerified"] is False
+    monkeypatch.setattr(firebase_auth, "REQUIRE_VERIFIED", True)
+    assert firebase_auth.public_config()["requireVerified"] is True
+
+
 def test_public_config_exposes_only_non_secret_fields(configured):
     cfg = firebase_auth.public_config()
     assert cfg["enabled"] is True
@@ -79,7 +90,7 @@ def test_public_config_exposes_only_non_secret_fields(configured):
     assert cfg["authDomain"] == "demo-project.firebaseapp.com"
     # The web api key is public by design (it ships in the frontend), but there
     # must be no service-account or private material anywhere in here.
-    assert set(cfg) == {"enabled", "apiKey", "authDomain", "projectId", "allowedDomain"}
+    assert set(cfg) == {"enabled", "apiKey", "authDomain", "projectId", "allowedDomain", "requireVerified"}
 
 
 # ── Verifying the token ─────────────────────────────────────────────────────

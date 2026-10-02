@@ -65,6 +65,10 @@ def public_config() -> dict:
         "authDomain": f"{PROJECT_ID}.firebaseapp.com",
         "projectId": PROJECT_ID,
         "allowedDomain": ALLOWED_DOMAIN,
+        # Lets the login page skip the verification email entirely when the
+        # server is not going to require it — so testing with addresses you do
+        # not control never mails a real person.
+        "requireVerified": REQUIRE_VERIFIED,
     }
 
 

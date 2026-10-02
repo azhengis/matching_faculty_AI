@@ -134,6 +134,7 @@ let _fb = null;   // the Firebase auth instance, or null when not configured
       apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId });
     _fb = firebase.auth();
     _fb.allowedDomain = cfg.allowedDomain || '';
+    _fb.requireVerified = cfg.requireVerified !== false;
     document.getElementById('firebase-extra').style.display = 'block';
     document.getElementById('forgot-link').style.display = 'inline-block';
   } catch (e) {}
@@ -214,9 +215,14 @@ async function submitForm() {
       let cred;
       if (_mode === 'signup') {
         cred = await _fb.createUserWithEmailAndPassword(email, password);
-        try { await cred.user.sendEmailVerification(); } catch (e) {}
-        status.textContent = 'Account created. Check your email to verify, then log in.';
-        btn.disabled = false;
+        if (_fb.requireVerified) {
+          try { await cred.user.sendEmailVerification(); } catch (e) {}
+          status.textContent = 'Account created. Check your email to verify, then log in.';
+          btn.disabled = false;
+          return;
+        }
+        // Verification not required (testing): no email, straight in.
+        await _enterWithFirebaseUser(cred.user, status, btn);
         return;
       }
       cred = await _fb.signInWithEmailAndPassword(email, password);
