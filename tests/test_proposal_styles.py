@@ -186,16 +186,29 @@ def _doc_aff(style):
         affiliation="Department of Computer Science, DePaul University")))
 
 
-@pytest.mark.parametrize("style", ["mla", "apa"])
-def test_the_front_matter_is_a_centered_title_block(style):
-    """A research proposal by a professor: centered title, author, affiliation,
-    date — not the left-aligned name/instructor/course block of a class paper."""
+def test_mla_heading_block_is_left_aligned_with_a_centered_title():
+    """Canonical MLA: name, affiliation and date are LEFT-aligned at the top;
+    only the title is centered, above the body. There is no title page."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    doc = _doc_aff(style)
-    opening = [p for p in doc.paragraphs if p.text.strip()][:4]
-    for p in opening:
+    doc = _doc_aff("mla")
+    lines = [p for p in doc.paragraphs if p.text.strip()]
+    name, aff, date, title = lines[0], lines[1], lines[2], lines[3]
+    assert name.text == "Peter Bondarenko"
+    assert aff.text == "Department of Computer Science, DePaul University"
+    for p in (name, aff, date):
+        assert p.alignment != WD_ALIGN_PARAGRAPH.CENTER, f"{p.text!r} should be left"
+    assert title.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert "A Research Proposal" in title.text
+
+
+def test_apa_title_page_is_centered():
+    """APA does use a centered title page: title, author, affiliation, date."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    doc = _doc_aff("apa")
+    block = [p for p in doc.paragraphs if p.text.strip()][:4]
+    for p in block:
         assert p.alignment == WD_ALIGN_PARAGRAPH.CENTER, f"{p.text!r} not centered"
-    joined = "\n".join(p.text for p in opening)
+    joined = "\n".join(p.text for p in block)
     assert "Peter Bondarenko" in joined
     assert "Department of Computer Science, DePaul University" in joined
 

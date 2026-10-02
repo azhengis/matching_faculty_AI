@@ -133,22 +133,25 @@ def _front_matter(doc, title: str, researcher_name: str, affiliation: str,
         heading = f"{heading}: A Research Proposal"
 
     if style == "mla":
-        # First page, centered. No separate title page in MLA.
+        # MLA: the identifying block is LEFT-aligned at the top of the first
+        # page; only the title is centered, above the body. No title page.
+        if researcher_name:
+            _body_paragraph(doc, researcher_name, indent=False)
+        if affiliation:
+            _body_paragraph(doc, affiliation, indent=False)
+        _body_paragraph(doc, today, indent=False)
         _centered(doc, heading, bold=False)
     else:
-        # APA professional title page, pushed down the page, title in bold.
+        # APA: a centered title page, title in bold, then a page break.
         for _ in range(3):
             doc.add_paragraph()
         _centered(doc, heading, bold=True)
         doc.add_paragraph()
-
-    if researcher_name:
-        _centered(doc, researcher_name)
-    if affiliation:
-        _centered(doc, affiliation)
-    _centered(doc, today)
-
-    if style == "apa":
+        if researcher_name:
+            _centered(doc, researcher_name)
+        if affiliation:
+            _centered(doc, affiliation)
+        _centered(doc, today)
         doc.add_page_break()
 
 
