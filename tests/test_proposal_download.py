@@ -18,9 +18,10 @@ def _body(response):
 
 
 class _FakeRequest:
-    def __init__(self, body=None, cookies=None):
+    def __init__(self, body=None, cookies=None, query=None):
         self._body = body or {}
         self.cookies = cookies or {}
+        self.query_params = query or {}
 
     async def json(self):
         return self._body
@@ -237,3 +238,51 @@ def test_download_returns_docx_when_proposal_exists(tmp_path, monkeypatch):
 
     texts = _paragraph_texts(response.body)
     assert "bg text" in texts
+
+
+# ── Styled downloads (MLA / APA) ───────────────────────────────────────────
+
+def _project_with_proposal(tmp_path, monkeypatch):
+    db_path = _init_db(tmp_path, monkeypatch)
+    token = _signup_session()
+    project_id = _profile_and_project(db_path, token, title="Consent and imagery")
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO proposals (project_id, background, methodology) "
+                "VALUES (?, 'bg text', 'method text')", (project_id,))
+    con.commit(); con.close()
+    return token, project_id
+
+
+def test_mla_style_download_is_named_and_formatted(tmp_path, monkeypatch):
+    token, project_id = _project_with_proposal(tmp_path, monkeypatch)
+    resp = _run(api_project_proposal_download(
+        project_id, _FakeRequest(cookies={"session_token": token}, query={"style": "mla"})))
+    assert resp.status_code == 200
+    assert "_MLA.docx" in resp.headers["content-disposition"]
+    doc = Document(io.BytesIO(resp.body))
+    assert doc.styles["Normal"].font.name == "Times New Roman"
+
+
+def test_apa_style_download_is_named_and_formatted(tmp_path, monkeypatch):
+    token, project_id = _project_with_proposal(tmp_path, monkeypatch)
+    resp = _run(api_project_proposal_download(
+        project_id, _FakeRequest(cookies={"session_token": token}, query={"style": "apa"})))
+    assert resp.status_code == 200
+    assert "_APA.docx" in resp.headers["content-disposition"]
+
+
+def test_no_style_still_returns_the_plain_document(tmp_path, monkeypatch):
+    """Backward compatibility: the original download path is untouched."""
+    token, project_id = _project_with_proposal(tmp_path, monkeypatch)
+    resp = _run(api_project_proposal_download(
+        project_id, _FakeRequest(cookies={"session_token": token})))
+    assert resp.status_code == 200
+    assert "_MLA" not in resp.headers["content-disposition"]
+    assert "_APA" not in resp.headers["content-disposition"]
+
+
+def test_an_unknown_style_is_rejected(tmp_path, monkeypatch):
+    token, project_id = _project_with_proposal(tmp_path, monkeypatch)
+    resp = _run(api_project_proposal_download(
+        project_id, _FakeRequest(cookies={"session_token": token}, query={"style": "chicago"})))
+    assert resp.status_code == 400

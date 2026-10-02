@@ -51,6 +51,7 @@ from text_clean import split_interests, is_topic_line
 import doc_extract
 import auth
 import firebase_auth
+import proposal_doc
 import advisor_prompt   # assembles the advisor's system prompt from prompts/
 
 # ── LiteLLM ───────────────────────────────────────────────────────────────────
@@ -3080,14 +3081,22 @@ def _format_reference(r: dict) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
-def _build_proposal_docx(researcher_name: str, proposal: dict, references: list | None = None) -> bytes:
+def _build_proposal_docx(researcher_name: str, proposal: dict, references: list | None = None,
+                         style: str = "") -> bytes:
     """Render a saved proposal dict into a .docx file's raw bytes.
+
+    style "mla" or "apa" produces a submission-formatted document (see
+    proposal_doc). The default "" keeps the original plain layout unchanged, so
+    every existing caller and test is unaffected.
 
     Pure function — no DB/request access — so it's independently testable.
     Sections with empty text are skipped entirely. Within a section, lines
     starting with "- " or "• " become bulleted list items; other lines
     become plain paragraphs. Any references passed are listed at the end.
     """
+    if style:
+        return proposal_doc.build(proposal, researcher_name, references, style)
+
     import io
     from docx import Document
 
@@ -3159,7 +3168,10 @@ def _build_proposal_docx(researcher_name: str, proposal: dict, references: list 
 
 @app.get("/api/projects/{project_id}/proposal/download")
 async def api_project_proposal_download(project_id: int, req: Request):
-    """Download a project's research proposal as a .docx file."""
+    """Download the proposal as a .docx — plain, or MLA/APA formatted via ?style="""
+    style = (req.query_params.get("style") or "").lower()
+    if style not in ("", "mla", "apa"):
+        return JSONResponse({"error": "style must be mla or apa"}, status_code=400)
     user = _current_user(req)
     if not user:
         return JSONResponse({"error": "Not logged in"}, status_code=401)
@@ -3188,9 +3200,10 @@ async def api_project_proposal_download(project_id: int, req: Request):
     except (ValueError, TypeError):
         references = []
     proposal = dict(zip(_PROPOSAL_FIELDS, row))
-    docx_bytes = _build_proposal_docx(name, proposal, references)
+    docx_bytes = _build_proposal_docx(name, proposal, references, style=style)
     safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", title or name or "proposal").strip("_") or "proposal"
-    filename = f"Research_Proposal_{safe_name}.docx"
+    suffix = f"_{style.upper()}" if style else ""
+    filename = f"Research_Proposal_{safe_name}{suffix}.docx"
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
