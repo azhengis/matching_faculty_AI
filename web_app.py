@@ -3081,8 +3081,27 @@ def _format_reference(r: dict) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
+_INSTITUTION = "DePaul University"
+_UNIT_PREFIXED = ("department", "school", "college", "division", "program",
+                  "institute", "center", "centre")
+
+
+def _affiliation_line(unit: str) -> str:
+    """A title-block affiliation: the researcher's unit plus the university.
+
+    Faculty units are stored bare ("Computer Science") or already qualified
+    ("School of Music"). Prefix "Department of" only when it is a bare field,
+    so "School of Music" is not mangled into "Department of School of Music"."""
+    unit = (unit or "").strip()
+    if not unit:
+        return _INSTITUTION
+    if not unit.lower().startswith(_UNIT_PREFIXED):
+        unit = f"Department of {unit}"
+    return f"{unit}, {_INSTITUTION}"
+
+
 def _build_proposal_docx(researcher_name: str, proposal: dict, references: list | None = None,
-                         style: str = "") -> bytes:
+                         style: str = "", affiliation: str = "") -> bytes:
     """Render a saved proposal dict into a .docx file's raw bytes.
 
     style "mla" or "apa" produces a submission-formatted document (see
@@ -3095,7 +3114,7 @@ def _build_proposal_docx(researcher_name: str, proposal: dict, references: list 
     become plain paragraphs. Any references passed are listed at the end.
     """
     if style:
-        return proposal_doc.build(proposal, researcher_name, references, style)
+        return proposal_doc.build(proposal, researcher_name, references, style, affiliation)
 
     import io
     from docx import Document
@@ -3181,10 +3200,24 @@ async def api_project_proposal_download(project_id: int, req: Request):
         con.close()
         return JSONResponse({"error": "No such project"}, status_code=404)
     name_row = con.execute(
-        "SELECT p.name FROM profiles p JOIN projects pr ON pr.profile_id = p.id WHERE pr.id = ?",
+        "SELECT p.name, p.faculty_id FROM profiles p "
+        "JOIN projects pr ON pr.profile_id = p.id WHERE pr.id = ?",
         (project_id,)
     ).fetchone()
-    name  = name_row[0] if name_row else "Researcher"
+    name = (name_row[0] if name_row else "") or "Researcher"
+    # Department for the title block. Guarded: the faculty table is absent in
+    # some minimal setups, and a profile may not be linked to a faculty record.
+    unit = ""
+    try:
+        fid = name_row[1] if name_row else None
+        if fid is not None:
+            frow = con.execute(
+                "SELECT department, college FROM faculty WHERE id = ?", (fid,)).fetchone()
+            if frow:
+                unit = (frow[0] or frow[1] or "").strip()
+    except sqlite3.OperationalError:
+        pass
+    affiliation = _affiliation_line(unit)
     title = con.execute("SELECT title FROM projects WHERE id = ?", (project_id,)).fetchone()[0]
     row = con.execute(_PROPOSAL_SELECT, (project_id,)).fetchone()
     try:
@@ -3200,7 +3233,8 @@ async def api_project_proposal_download(project_id: int, req: Request):
     except (ValueError, TypeError):
         references = []
     proposal = dict(zip(_PROPOSAL_FIELDS, row))
-    docx_bytes = _build_proposal_docx(name, proposal, references, style=style)
+    docx_bytes = _build_proposal_docx(name, proposal, references, style=style,
+                                      affiliation=affiliation)
     safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", title or name or "proposal").strip("_") or "proposal"
     suffix = f"_{style.upper()}" if style else ""
     filename = f"Research_Proposal_{safe_name}{suffix}.docx"

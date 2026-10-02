@@ -121,28 +121,34 @@ def _surname(full_name: str) -> str:
     return full_name.split()[-1]
 
 
-def _front_matter(doc, title: str, researcher_name: str, style: str) -> None:
+def _front_matter(doc, title: str, researcher_name: str, affiliation: str,
+                  style: str) -> None:
+    """A professor's research-proposal title block: title, author, affiliation,
+    date — centered, with no instructor or course. The student heading block is
+    deliberately not used; this is a proposal, not a class paper."""
     today = _dt.date.today().strftime("%d %B %Y") if style == "mla" \
         else _dt.date.today().strftime("%B %d, %Y")
+    heading = (title or "Research Proposal")
+    if style == "mla" and "proposal" not in heading.lower():
+        heading = f"{heading}: A Research Proposal"
 
     if style == "mla":
-        # Heading block, upper left, double-spaced. Name and date; instructor
-        # and course are omitted rather than invented — the app does not hold
-        # them. Then the centered title in regular type.
-        if researcher_name:
-            _body_paragraph(doc, researcher_name, indent=False)
-        _body_paragraph(doc, today, indent=False)
-        _centered(doc, title or "Research Proposal", bold=False)
+        # First page, centered. No separate title page in MLA.
+        _centered(doc, heading, bold=False)
     else:
-        # APA title page: title in bold title case, then author and date,
-        # centered, then a page break to the body.
+        # APA professional title page, pushed down the page, title in bold.
         for _ in range(3):
             doc.add_paragraph()
-        _centered(doc, title or "Research Proposal", bold=True)
+        _centered(doc, heading, bold=True)
         doc.add_paragraph()
-        if researcher_name:
-            _centered(doc, researcher_name)
-        _centered(doc, today)
+
+    if researcher_name:
+        _centered(doc, researcher_name)
+    if affiliation:
+        _centered(doc, affiliation)
+    _centered(doc, today)
+
+    if style == "apa":
         doc.add_page_break()
 
 
@@ -229,7 +235,7 @@ def _references_page(doc, references: list, style: str) -> None:
 
 
 def build(proposal: dict, researcher_name: str, references: list | None,
-          style: str) -> bytes:
+          style: str, affiliation: str = "") -> bytes:
     """Render the proposal in 'mla' or 'apa' style. Returns .docx bytes."""
     style = (style or "").lower()
     if style not in ("mla", "apa"):
@@ -237,7 +243,7 @@ def build(proposal: dict, researcher_name: str, references: list | None,
 
     title = (proposal.get("title") or "").strip()
     doc = _base_document(_surname(researcher_name), style)
-    _front_matter(doc, title, researcher_name, style)
+    _front_matter(doc, title, researcher_name, affiliation, style)
 
     for heading, key in _SECTIONS:
         text = (proposal.get(key) or "").strip()

@@ -176,3 +176,38 @@ def test_every_written_section_reaches_the_document():
     joined = "\n".join(_text(doc))
     assert "Abstract" in joined and "cost variance" in joined
     assert "Research Design and Methodology" in joined
+
+
+# ── A professor's title block, not a student heading ───────────────────────
+
+def _doc_aff(style):
+    return Document(io.BytesIO(proposal_doc.build(
+        PROPOSAL, "Peter Bondarenko", REFS, style,
+        affiliation="Department of Computer Science, DePaul University")))
+
+
+@pytest.mark.parametrize("style", ["mla", "apa"])
+def test_the_front_matter_is_a_centered_title_block(style):
+    """A research proposal by a professor: centered title, author, affiliation,
+    date — not the left-aligned name/instructor/course block of a class paper."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    doc = _doc_aff(style)
+    opening = [p for p in doc.paragraphs if p.text.strip()][:4]
+    for p in opening:
+        assert p.alignment == WD_ALIGN_PARAGRAPH.CENTER, f"{p.text!r} not centered"
+    joined = "\n".join(p.text for p in opening)
+    assert "Peter Bondarenko" in joined
+    assert "Department of Computer Science, DePaul University" in joined
+
+
+@pytest.mark.parametrize("style", ["mla", "apa"])
+def test_no_instructor_or_course_appears(style):
+    """The thing that was wrong before — student-paper fields on a proposal."""
+    joined = "\n".join(_text(_doc_aff(style)))
+    assert "Professor" not in joined
+    assert "ENG" not in joined and "Instructor" not in joined
+
+
+def test_mla_appends_research_proposal_to_a_plain_title():
+    joined = "\n".join(_text(_doc_aff("mla")))
+    assert "Workload-Aware Cost Optimization in Cloud Analytics: A Research Proposal" in joined
