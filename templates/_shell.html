@@ -123,6 +123,20 @@ h2{font-family:var(--serif);font-size:24px;font-weight:normal;letter-spacing:-.0
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:7px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* ── Download-format modal (shared) ── */
+.dl-backdrop{position:fixed;inset:0;background:rgba(9,17,30,.55);z-index:210;display:none;align-items:center;justify-content:center;padding:24px}
+.dl-backdrop.open{display:flex}
+.dl-card{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--sh-lg);width:100%;max-width:400px;padding:26px 26px 24px;animation:fp-in .18s ease-out}
+.dl-card h3{font-family:var(--serif);font-size:21px;letter-spacing:-.01em;margin-bottom:4px}
+.dl-card p{font-size:13px;color:var(--ink-3);margin-bottom:18px;line-height:1.5}
+.dl-options{display:flex;flex-direction:column;gap:10px}
+.dl-opt{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r-sm);padding:13px 16px;font-family:inherit;font-size:14.5px;font-weight:600;color:var(--navy);cursor:pointer;transition:background .15s,border-color .15s}
+.dl-opt:hover{background:var(--canvas);border-color:var(--navy-lift)}
+.dl-opt .dl-sub{font-size:12px;font-weight:400;color:var(--ink-3)}
+.dl-opt.plain{font-weight:500;color:var(--ink-2)}
+.dl-cancel{margin-top:16px;background:none;border:none;font-family:inherit;font-size:13px;color:var(--ink-3);cursor:pointer;width:100%;padding:4px}
+.dl-cancel:hover{color:var(--ink)}
+
 /* ── Faculty profile overlay ── */
 .person[data-faculty]{cursor:pointer}
 .person[data-faculty]:hover .person-name{text-decoration:underline}
@@ -188,6 +202,20 @@ h2{font-family:var(--serif);font-size:24px;font-weight:normal;letter-spacing:-.0
   </div>
 </aside>
 
+<!-- Download-format modal, opened from the advisor panel or a project -->
+<div class="dl-backdrop" id="dl-backdrop" onclick="if(event.target===this) closeDownloadModal()">
+  <div class="dl-card" role="dialog" aria-modal="true" aria-labelledby="dl-title">
+    <h3 id="dl-title">Download proposal</h3>
+    <p>Choose a citation style. The file opens in Word; save as PDF from there.</p>
+    <div class="dl-options">
+      <button class="dl-opt" onclick="doDownload('mla')">MLA 9th edition<span class="dl-sub">Works Cited</span></button>
+      <button class="dl-opt" onclick="doDownload('apa')">APA 7th edition<span class="dl-sub">References</span></button>
+      <button class="dl-opt plain" onclick="doDownload('')">Plain (no style)<span class="dl-sub">.docx</span></button>
+    </div>
+    <button class="dl-cancel" onclick="closeDownloadModal()">Cancel</button>
+  </div>
+</div>
+
 <!-- Faculty profile overlay, opened by clicking a matched person -->
 <div class="fp-backdrop" id="fp-backdrop" onclick="if(event.target===this) closeFacultyProfile()">
   <div class="fp" role="dialog" aria-modal="true" aria-labelledby="fp-name">
@@ -201,6 +229,26 @@ h2{font-family:var(--serif);font-size:24px;font-weight:normal;letter-spacing:-.0
 </div>
 
 <script>
+// Download-format modal — shared. The opener passes the project id.
+let _dlProjectId = null;
+function openDownloadModal(projectId) {
+  if (!projectId) return;
+  _dlProjectId = projectId;
+  document.getElementById('dl-backdrop').classList.add('open');
+}
+function closeDownloadModal() {
+  document.getElementById('dl-backdrop').classList.remove('open');
+}
+function doDownload(style) {
+  if (!_dlProjectId) return;
+  const q = style ? ('?style=' + style) : '';
+  window.location = '/api/projects/' + _dlProjectId + '/proposal/download' + q;
+  closeDownloadModal();
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDownloadModal();
+});
+
 // Shared by every page that renders matched people.
 function fpEsc(s) {
   return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')

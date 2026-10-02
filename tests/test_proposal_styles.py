@@ -14,6 +14,7 @@ from docx.enum.text import WD_LINE_SPACING
 from docx.shared import Pt
 
 import proposal_doc
+import web_app
 
 PROPOSAL = {
     "title": "Workload-Aware Cost Optimization in Cloud Analytics",
@@ -224,3 +225,24 @@ def test_no_instructor_or_course_appears(style):
 def test_mla_appends_research_proposal_to_a_plain_title():
     joined = "\n".join(_text(_doc_aff("mla")))
     assert "Workload-Aware Cost Optimization in Cloud Analytics: A Research Proposal" in joined
+
+
+# ── The download modal is one shared control ───────────────────────────────
+
+def test_the_download_modal_lives_in_the_shell_and_offers_both_styles():
+    """A single Download button opens a window with the style choices, rather
+    than several buttons sitting in the panel. The modal is in the shared shell
+    so both the advisor panel and the projects page use the same one."""
+    from pathlib import Path
+    shell = (Path(web_app.__file__).parent / "templates" / "_shell.html").read_text()
+    assert "dl-backdrop" in shell
+    assert "openDownloadModal" in shell and "doDownload" in shell
+    assert "MLA 9th edition" in shell and "APA 7th edition" in shell
+
+
+@pytest.mark.parametrize("template", ["advisor.html", "projects.html"])
+def test_each_page_has_a_single_download_button_that_opens_the_modal(template):
+    from pathlib import Path
+    html = (Path(web_app.__file__).parent / "templates" / template).read_text()
+    assert "openDownloadModal" in html
+    assert "download-menu" not in html        # the old dropdown is gone

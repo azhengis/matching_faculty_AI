@@ -121,12 +121,6 @@
 .btn-download{display:block;margin-top:30px;padding:12px 16px;background:var(--navy);color:#fff;border:none;border-radius:var(--r-sm);font-size:13.5px;font-weight:600;cursor:pointer;text-decoration:none;text-align:center;box-shadow:var(--sh-sm);transition:background .15s}
 .btn-download:hover{background:var(--navy-lift)}
 .btn-download.disabled{opacity:.35;pointer-events:none}
-.download-group{position:relative;margin-top:30px}
-.download-group .btn-download{margin-top:0}
-.download-menu{position:absolute;left:0;right:0;bottom:calc(100% + 6px);background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r-sm);box-shadow:var(--sh-md);overflow:hidden;z-index:5}
-.download-menu a{display:block;padding:10px 14px;font-size:13px;color:var(--ink);text-decoration:none}
-.download-menu a:hover{background:var(--canvas)}
-.download-menu a+a{border-top:1px solid var(--border)}
 
 /* ── Messages ── */
 .messages{flex:1;overflow-y:auto;padding:24px 0 16px;display:flex;flex-direction:column;gap:18px;min-height:0}
@@ -256,14 +250,7 @@
           <div class="refs-sub">Real papers from the advisor's literature search. Included in your download — verify against your field's databases.</div>
           <ol class="refs-list" id="refs-list"></ol>
         </div>
-        <div class="download-group" id="download-group">
-          <button class="btn-download disabled" id="btn-download-proposal" onclick="return toggleDownloadMenu(event)">Download ▾</button>
-          <div class="download-menu" id="download-menu" hidden>
-            <a href="#" onclick="return downloadProposal('mla')">MLA style (.docx)</a>
-            <a href="#" onclick="return downloadProposal('apa')">APA style (.docx)</a>
-            <a href="#" onclick="return downloadProposal('')">Plain (.docx)</a>
-          </div>
-        </div>
+        <button class="btn-download disabled" id="btn-download-proposal" onclick="return openDownloadFor(event)">Download</button>
       </div>
 
     </div>
@@ -1029,27 +1016,12 @@ async function releaseSection(k) {
   renderProposalPanel();
 }
 
-function toggleDownloadMenu(event) {
+function openDownloadFor(event) {
   event.preventDefault();
   if (document.getElementById('btn-download-proposal').classList.contains('disabled')) return false;
-  const m = document.getElementById('download-menu');
-  m.hidden = !m.hidden;
+  openDownloadModal(_projectId);   // shared modal from _shell.html
   return false;
 }
-
-function downloadProposal(style) {
-  if (!_projectId) return false;
-  const q = style ? ('?style=' + style) : '';
-  window.location = `/api/projects/${_projectId}/proposal/download${q}`;
-  document.getElementById('download-menu').hidden = true;
-  return false;
-}
-
-// Click outside closes the menu.
-document.addEventListener('click', e => {
-  const g = document.getElementById('download-group');
-  if (g && !g.contains(e.target)) document.getElementById('download-menu').hidden = true;
-});
 
 // ── Input events ──────────────────────────────────────────────────────────────
 const chatInput = document.getElementById('chat-input');
