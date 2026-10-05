@@ -79,6 +79,26 @@ before novelty existed as a step is not dragged back to the beginning.
 > | Stage 2 | A two-page outline covering seven elements | Stage 4, the outline that opens it |
 > | Stage 3 | Expanded literature review, falsifiable hypotheses, specified methods | Stage 4, the sections |
 
+### The research-process ground truth
+
+The advisor prompt opens with an authoritative framing of the standard research
+process (`prompts/advisor/01a_research_process.md`), taken from a university
+research guide and treated as the source of truth the rest of the prompt serves:
+
+- **Five steps:** choose the topic, identify the problem, formulate research
+  questions, create a research design, write the proposal. The advisor's stages
+  map onto these (identify-the-problem is Stages 1–2; research design is Stage 4
+  methodology).
+- **What a research problem is:** a specific issue or gap, either **practical**
+  (aimed at change) or **theoretical** (aimed at expanding knowledge). The
+  advisor works out which silently and confirms in a clause — never as a menu.
+- **Narrowing:** from a broad area to a specific gap, via the context questions
+  (who it affects, what is known, what has been proposed, what the debates miss)
+  and the specificity questions (which place/time/group, what it won't tackle,
+  the consequences if unresolved). Those questions are the Stage 1 interview.
+
+It ships in the spine, so it frames every stage.
+
 ### Where the prompt lives
 
 The advisor's instructions are **not in `web_app.py` any more**. They are plain

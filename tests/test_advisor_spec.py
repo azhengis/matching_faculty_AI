@@ -653,3 +653,53 @@ def test_one_licence_to_offer_is_not_a_standing_one():
     """Otherwise a single "I don't know" turns the rest of the conversation
     into a suggestion engine."""
     assert "One licence is not a standing one" in _stage_prompt("1-2")
+
+
+# ── The research-process ground truth ──────────────────────────────────────
+
+@pytest.mark.parametrize("stage", ["1-2", "3", "4"])
+def test_the_research_process_framing_reaches_every_stage(stage):
+    """Added as authoritative top-level guidance, in the spine, so it frames
+    the whole conversation rather than one phase."""
+    p = _stage_prompt(stage)
+    assert "THE RESEARCH PROCESS — THE GROUND TRUTH" in p
+    assert "authoritative reference" in p
+
+
+def test_the_five_step_process_is_present():
+    p = _stage_prompt("1-2")
+    for step in ("CHOOSE THE TOPIC", "IDENTIFY THE PROBLEM",
+                 "FORMULATE RESEARCH QUESTIONS", "CREATE A RESEARCH DESIGN",
+                 "WRITE THE PROPOSAL"):
+        assert step in p, f"missing step: {step}"
+
+
+def test_a_research_problem_is_defined_as_practical_or_theoretical():
+    """The meaning the user set as ground truth."""
+    p = _stage_prompt("1-2")
+    assert "A research problem is a specific issue or gap" in p
+    assert "PRACTICAL" in p and "aimed at contributing to change" in p
+    assert "THEORETICAL" in p and "aimed at expanding knowledge" in p
+
+
+def test_practical_vs_theoretical_is_inferred_not_offered_as_a_menu():
+    """Consistent with the no-candidate-lists rule."""
+    p = _stage_prompt("1-2")
+    assert "Work out SILENTLY which kind" in p
+    assert 'Do not offer "practical or theoretical?" as a menu' in p
+
+
+def test_narrowing_uses_the_context_and_specificity_questions():
+    p = _stage_prompt("1-2")
+    assert "CONTEXT AND BACKGROUND" in p
+    assert "Who does the problem affect?" in p
+    assert "SPECIFICITY AND RELEVANCE" in p
+    assert "What particular place, time, or group" in p
+
+
+def test_stage_one_applies_the_framework():
+    """The interview explicitly runs step 2 of the process, not a separate
+    invented procedure."""
+    p = _stage_prompt("1-2")
+    assert "step 2 of the research process" in p
+    assert "PRACTICAL (aimed at change) or THEORETICAL" in p

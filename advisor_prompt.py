@@ -37,6 +37,7 @@ _VOLATILE = _ROOT / "advisor_volatile.md"
 SECTIONS = [
     "00_role",
     "01_how_you_think",
+    "01a_research_process",
     "02_lenses",
     "03_stages_and_opening",
     "04_stage1_specify",
@@ -64,8 +65,9 @@ SECTIONS = [
 # is, how it thinks, the lenses, the stage map, how choices are offered, how
 # sections are saved, tone, and the send check.
 SPINE = [
-    "00_role", "01_how_you_think", "02_lenses", "03_stages_and_opening",
-    "09_option_blocks", "10_saving", "12_tone", "13_send_check",
+    "00_role", "01_how_you_think", "01a_research_process", "02_lenses",
+    "03_stages_and_opening", "09_option_blocks", "10_saving", "12_tone",
+    "13_send_check",
 ]
 
 # Then the stage's own instructions, PLUS THE NEXT STAGE'S. The lookahead is
