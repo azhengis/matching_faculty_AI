@@ -13,8 +13,12 @@ name: Build image
 on:
   push:
     branches: [main]
-    # Documentation and tests do not change the image.
-    paths-ignore: ['docs/**', '**/*.md']
+    # Skip rebuilds for pure documentation. NOT a blanket '**/*.md': the
+    # advisor prompts live in prompts/**/*.md and ARE baked into the image, so
+    # ignoring every .md meant a prompt-only change silently never deployed.
+    # 'docs/**' ignores the docs tree; '*.md' ignores only root-level markdown
+    # (README and friends), because path globs don't cross '/'.
+    paths-ignore: ['docs/**', '*.md']
   workflow_dispatch:        # lets you rebuild without pushing
 
 env:
