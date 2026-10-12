@@ -420,6 +420,20 @@ def test_stage_one_stays_out_of_data_and_methods():
     assert "Methods are Stage 4" in text
 
 
+def test_the_advisor_does_not_propose_technical_solutions_early():
+    """Repeatedly flagged: a professor names something technical and the advisor
+    jumps to proposing how to build it or what the objective should be. The
+    prompt must forbid introducing a technique, dataset, or evaluation the
+    professor has not raised, and tell it to follow their thread with a
+    question instead."""
+    text = _advisor()
+    assert "DO NOT INTRODUCE TECHNICAL SOLUTIONS" in text
+    assert "FOLLOW THE SPECIFICS THEY RAISE" in text
+    # The role is framed as interviewer, not solution-proposer.
+    assert "You are an interviewer first" in text
+    assert "could strengthen" not in text
+
+
 def test_option_blocks_are_confined_to_three_cases():
     text = _advisor()
     assert "THREE PLACES ONLY" in text
