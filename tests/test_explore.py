@@ -420,6 +420,21 @@ def test_stage_one_stays_out_of_data_and_methods():
     assert "Methods are Stage 4" in text
 
 
+def test_stage_one_walks_the_whole_checklist_before_research_questions():
+    """Reported: it asked a couple of clarifying questions then jumped to the
+    research questions, leaving the problem-statement panel half grey. Stage 1
+    must walk contextualize -> why it matters -> aims, one item per turn,
+    recording each, and reach the research questions only after."""
+    text = _advisor()
+    assert "WALK THE PROBLEM-STATEMENT CHECKLIST IN ORDER" in text
+    # The research-questions step is gated behind the problem-statement items.
+    assert "only once the problem-statement items above are answered" in text
+    # All three groups are present as explicit steps.
+    assert "CONTEXTUALIZE THE PROBLEM" in text
+    assert "SHOW WHY IT MATTERS" in text
+    assert "SET AIMS AND OBJECTIVES" in text
+
+
 def test_the_advisor_does_not_propose_technical_solutions_early():
     """Repeatedly flagged: a professor names something technical and the advisor
     jumps to proposing how to build it or what the objective should be. The

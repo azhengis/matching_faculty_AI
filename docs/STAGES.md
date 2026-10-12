@@ -47,12 +47,21 @@ specific. The advisor:
 - Names the project early (a working title it proposes; the researcher corrects).
 - Works out silently whether the problem is **practical** (aimed at change) or
   **theoretical** (aimed at expanding knowledge).
-- Narrows from a broad area to a specific gap, using the problem-statement
-  tracker's questions (below) as the substance of the interview.
-- Draws out 2–4 **research questions** and saves them.
+- **Walks the problem-statement checklist in order, one question per turn**, and
+  records each answer in the panel the moment it is given — so the researcher
+  watches each circle fill in with their own words beneath it:
+  1. **Contextualize** — where/when it arises, who it affects, what has been
+     attempted *(ctx_1, ctx_2, ctx_3)*.
+  2. **Why it matters** — what happens if unsolved, who feels it, wider
+     relevance *(why_1, why_2, why_3)*.
+  3. **Aims and objectives** — the overall aim, and the concrete objectives.
+  Then it lays the problem back in the researcher's own words to confirm it.
+- **Only then** draws out 2–4 **research questions** and saves them. It does not
+  jump to the research questions while problem-statement items are still blank.
 
-It does **not** suggest directions, offer candidate answers, or ask about
-methods here. One focused question per turn.
+It does **not** suggest directions, offer candidate answers, introduce
+technical solutions, or ask about methods here. One focused question per turn —
+skipping only what an earlier answer already settled.
 
 > **Tracker — Problem statement** *(fills in as you answer)*
 > - **Contextualize:** Where/when does it arise? Who does it affect? What has
