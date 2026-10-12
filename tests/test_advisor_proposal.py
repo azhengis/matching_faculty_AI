@@ -275,11 +275,15 @@ def test_get_proposal_returns_empty_defaults_when_none_saved(tmp_path, monkeypat
 
     response = _run(api_project_proposal(1, _FakeRequest(cookies={"session_token": token})))
     assert response.status_code == 200
-    # Every declared section, blank, plus the edit lock. Derived rather than
-    # listed so adding a section does not need this test rewritten — what it
-    # guards is that the endpoint answers with the full shape instead of {}.
-    assert _body(response) == {**{f: "" for f in web_app._PROPOSAL_FIELDS},
-                               "edited_sections": []}
+    # Every declared section, blank, plus the edit lock. The endpoint also now
+    # carries the stage and the problem-statement tracker, so check the section
+    # shape is present and blank rather than demanding an exact key set.
+    body = _body(response)
+    for f in web_app._PROPOSAL_FIELDS:
+        assert body[f] == "", f"{f} should be blank"
+    assert body["edited_sections"] == []
+    assert body["stage"] == "1-2"            # nothing saved yet
+    assert body["tracker"]["answered"] == 0  # the empty checklist
 
 
 def test_get_proposal_returns_saved_values(tmp_path, monkeypatch):

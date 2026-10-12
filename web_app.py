@@ -438,6 +438,12 @@ def _init_profiles_db():
     # it has to persist, or resuming an exploration reopens it as an interview.
     _add_column(con, "projects", "mode", "TEXT DEFAULT 'problem'")
 
+    # The problem-statement progress tracker: which of the guide's checklist
+    # questions the researcher has answered, in their own words, plus whether
+    # the problem is practical or theoretical. Filled by the advisor's
+    # note_progress tool and shown in the panel.
+    _add_column(con, "projects", "progress", "TEXT DEFAULT '{}'")
+
     # Collaborators surfaced for a project, kept so "people you matched with"
     # survives the chat session that produced them.
     con.execute("""
@@ -2120,10 +2126,155 @@ def _owned_project(con, user, project_id) -> int | None:
 def _read_proposal(con, project_id) -> dict:
     row = con.execute(_PROPOSAL_SELECT, (project_id,)).fetchone()
     if not row:
-        return dict(EMPTY_PROPOSAL)
-    out = {f: (row[i] or "") for i, f in enumerate(_PROPOSAL_FIELDS)}
-    out["edited_sections"] = _read_edited_sections(con, project_id)
-    return out
+        proposal = dict(EMPTY_PROPOSAL)
+    else:
+        proposal = {f: (row[i] or "") for i, f in enumerate(_PROPOSAL_FIELDS)}
+        proposal["edited_sections"] = _read_edited_sections(con, project_id)
+    # The stage the project is in, and the problem-statement tracker, so the
+    # panel can show where the researcher is and what still needs answering.
+    proposal["stage"] = _derive_stage(proposal)
+    proposal["stage_label"] = _STAGE_LABELS[proposal["stage"]]
+    proposal["tracker"] = _problem_statement_tracker(proposal, _read_progress(con, project_id))
+    return proposal
+
+
+# ── Stage, and the problem-statement progress tracker ──────────────────────
+#
+# The stage is derived from what is saved, the same rule the advisor prompt
+# uses — factored out here so the panel and the prompt cannot disagree about
+# where the project is.
+_STAGE_LABELS = {
+    "1-2": "Specifying the problem",
+    "3":   "Writing the problem statement",
+    "4":   "Building the proposal",
+}
+
+
+def _derive_stage(proposal: dict) -> str:
+    if (proposal.get("problem_statement") or "").strip():
+        return "4"
+    if (proposal.get("novelty") or "").strip():
+        return "3"
+    return "1-2"
+
+
+# The problem-statement checklist, from the research-guide steps. Each item has
+# a PRACTICAL and a THEORETICAL phrasing; the advisor records which kind the
+# project is (problem_type) and the researcher's own answer to each item. The
+# panel shows the phrasing that matches the type.
+_PS_STEPS = [
+    ("Contextualize the problem", [
+        ("ctx_1", "Where and when does the problem arise?",
+                  "What is already known about the problem?"),
+        ("ctx_2", "Who does the problem affect?",
+                  "Is it limited to a certain time period or geographical area?"),
+        ("ctx_3", "What attempts have been made to solve it?",
+                  "How has it been defined and debated in the literature?"),
+    ]),
+    ("Show why it matters", [
+        ("why_1", "What will happen if the problem is not solved?",
+                  "How will resolving it advance understanding of the topic?"),
+        ("why_2", "Who will feel the consequences?",
+                  "What benefits will it have for future research?"),
+        ("why_3", "Does the problem have wider relevance elsewhere?",
+                  "Does it have direct or indirect consequences for society?"),
+    ]),
+    ("Set aims and objectives", [
+        ("aim",        "The research aim — the overall purpose.",
+                       "The research aim — the overall purpose."),
+        ("objectives", "The research objectives — the concrete steps.",
+                       "The research objectives — the concrete steps."),
+    ]),
+]
+_PROGRESS_FIELDS = [k for _, items in _PS_STEPS for (k, _p, _t) in items]
+
+
+def _read_progress(con, project_id) -> dict:
+    try:
+        row = con.execute("SELECT progress FROM projects WHERE id = ?", (project_id,)).fetchone()
+    except sqlite3.OperationalError:
+        return {}
+    if not row or not row[0]:
+        return {}
+    try:
+        data = json.loads(row[0])
+        return data if isinstance(data, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _problem_statement_tracker(proposal: dict, progress: dict) -> dict:
+    """Display-ready checklist: each step, each item with the question that fits
+    the project's type, whether it is answered, and the captured answer.
+
+    Marked complete once the problem statement is saved (Stage 4). Until then
+    the panel shows exactly which of the guide's questions still need an
+    answer, from the ongoing conversation."""
+    ptype = (progress.get("problem_type") or "").lower()
+    theoretical = ptype == "theoretical"
+    steps = []
+    answered = 0
+    for title, items in _PS_STEPS:
+        rendered = []
+        for key, practical_q, theoretical_q in items:
+            note = (progress.get(key) or "").strip()
+            done = bool(note)
+            if done:
+                answered += 1
+            rendered.append({
+                "key": key,
+                "question": theoretical_q if theoretical else practical_q,
+                "done": done,
+                "note": note,
+            })
+        steps.append({"title": title, "items": rendered})
+    return {
+        "problem_type": ptype,
+        "steps": steps,
+        "answered": answered,
+        "total": len(_PROGRESS_FIELDS),
+        "complete": bool((proposal.get("problem_statement") or "").strip()),
+    }
+
+
+def _note_progress(project_id, args: dict) -> dict:
+    """Merge newly answered checklist items into the project's progress.
+
+    Mirrors _note_understanding: the advisor sends only what just became clear,
+    in the researcher's own words, and a later call must not blank an earlier
+    answer. An explicitly empty string clears an item, so a correction walks it
+    back. `problem_type` records practical vs theoretical."""
+    try:
+        pid = int(project_id)
+    except (TypeError, ValueError):
+        return {"status": "error", "reason": "no project"}
+    con = sqlite3.connect(DB_PATH)
+    try:
+        current = _read_progress(con, pid)
+        changed = []
+        pt = (args.get("problem_type") or "").strip().lower()
+        if pt in ("practical", "theoretical"):
+            current["problem_type"] = pt
+            changed.append("problem_type")
+        for field in _PROGRESS_FIELDS:
+            if field not in args:
+                continue
+            value = " ".join(str(args[field] or "").split())[:400]
+            if value:
+                current[field] = value
+            else:
+                current.pop(field, None)
+            changed.append(field)
+        if not changed:
+            return {"status": "error",
+                    "reason": "Pass problem_type or at least one checklist item: "
+                              + ", ".join(_PROGRESS_FIELDS)}
+        con.execute("UPDATE projects SET progress = ? WHERE id = ?",
+                    (json.dumps(current), pid))
+        con.commit()
+    finally:
+        con.close()
+    return {"status": "noted", "answered": [c for c in changed if c != "problem_type"]}
 
 
 def _read_matches(con, project_id) -> list:
@@ -2683,6 +2834,36 @@ _ADVISOR_TOOLS = [{
             # Deliberately empty: sections are saved one at a time as the
             # conversation settles each one, so no single field is ever required.
             "required": []
+        }
+    }
+}, {
+    "type": "function",
+    "function": {
+        "name": "note_progress",
+        "description": (
+            "Record which problem-statement questions the researcher has now answered, "
+            "in THEIR OWN words. This fills a checklist in the panel so they can see what "
+            "the problem statement still needs. Call it as each question gets a real "
+            "answer in the conversation — not before. Send only the items that just became "
+            "clear; omit the rest. Never write an answer they have not actually given. "
+            "Set problem_type as soon as you can tell whether the project is practical "
+            "(aimed at change) or theoretical (aimed at expanding knowledge), because it "
+            "decides which wording the panel shows."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "problem_type": {"type": "string", "enum": ["practical", "theoretical"],
+                                 "description": "Practical (aimed at change) or theoretical (aimed at expanding knowledge)."},
+                "ctx_1": {"type": "string", "description": "Where/when the problem arises (practical) OR what is already known (theoretical). Their answer, one line."},
+                "ctx_2": {"type": "string", "description": "Who it affects (practical) OR whether it is limited to a time/area (theoretical)."},
+                "ctx_3": {"type": "string", "description": "What solutions have been attempted (practical) OR how it is defined/debated in the literature (theoretical)."},
+                "why_1": {"type": "string", "description": "What happens if unsolved (practical) OR how resolving it advances understanding (theoretical)."},
+                "why_2": {"type": "string", "description": "Who feels the consequences (practical) OR benefits for future research (theoretical)."},
+                "why_3": {"type": "string", "description": "Wider relevance elsewhere (practical) OR consequences for society (theoretical)."},
+                "aim": {"type": "string", "description": "The overall research aim, in one sentence."},
+                "objectives": {"type": "string", "description": "The concrete objectives — the steps to achieve the aim."},
+            },
         }
     }
 }]
@@ -4429,6 +4610,8 @@ async def api_advisor_chat(req: Request):
                 args = json.loads(tc.function.arguments)
                 if tc.function.name == "save_proposal":
                     result = _save_proposal(project_id, args)
+                elif tc.function.name == "note_progress":
+                    result = _note_progress(project_id, args)
                 elif tc.function.name == "search_literature":
                     result = _search_literature(query=args.get("query", ""))
                     # Turn the real hits into a gap map the researcher can see,

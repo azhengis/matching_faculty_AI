@@ -41,6 +41,25 @@
 .proposal-doc-head{margin-bottom:24px;padding-bottom:18px;border-bottom:1px solid var(--paper-line)}
 .proposal-sidepanel h3{font-family:var(--serif);font-size:24px;font-weight:normal;margin-bottom:5px;letter-spacing:-.01em}
 .proposal-sidepanel-sub{font-size:12.5px;color:var(--ink-3)}
+.ps-stage{margin-top:12px;display:inline-flex;align-items:center;gap:8px}
+.ps-stage-k{font-size:9.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#fff;background:var(--navy-lift);padding:3px 8px;border-radius:999px}
+#ps-stage-name{font-size:13px;font-weight:600;color:var(--navy)}
+
+/* ── Problem-statement tracker ── */
+.ps-tracker{margin-bottom:26px;padding:16px 16px 6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm)}
+.ps-tracker-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.ps-tracker-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--navy)}
+.ps-tracker-count{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.ps-tracker-sub{font-size:12px;color:var(--ink-3);margin:4px 0 12px;line-height:1.45}
+.ps-step{margin-bottom:12px}
+.ps-step-title{font-size:11.5px;font-weight:650;color:var(--ink-2);margin-bottom:6px}
+.ps-item{display:grid;grid-template-columns:18px 1fr;gap:9px;align-items:start;padding:5px 0}
+.ps-check{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--border-2);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;margin-top:1px}
+.ps-item.done .ps-check{background:var(--teal);border-color:var(--teal)}
+.ps-q{font-size:12.5px;color:var(--ink-2);line-height:1.4}
+.ps-item.done .ps-q{color:var(--ink)}
+.ps-note{font-size:12px;color:var(--teal);margin-top:3px;line-height:1.4;font-style:italic}
+.ps-complete{font-size:12.5px;color:var(--teal);font-weight:600;padding:2px 0 10px}
 
 /* ── Research-gap map ── */
 .gap-map-card{margin-bottom:26px;padding:16px 16px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm)}
@@ -224,7 +243,20 @@
         <div class="proposal-doc-head">
           <h3>Research Proposal</h3>
           <div class="proposal-sidepanel-sub">Sections appear as you settle them. Edit any section to make it your own.</div>
+          <div class="ps-stage" id="ps-stage" style="display:none">
+            <span class="ps-stage-k">Stage</span><span id="ps-stage-name"></span>
+          </div>
         </div>
+
+        <div class="ps-tracker" id="ps-tracker" style="display:none">
+          <div class="ps-tracker-head">
+            <span class="ps-tracker-title">Problem statement</span>
+            <span class="ps-tracker-count" id="ps-tracker-count"></span>
+          </div>
+          <div class="ps-tracker-sub">The questions your problem statement needs. They fill in as you answer them.</div>
+          <div id="ps-tracker-steps"></div>
+        </div>
+
         <div class="gap-map-card" id="gap-map-card" style="display:none">
           <div class="gap-map-head">
             <span class="gap-map-label">Research landscape</span>
@@ -378,6 +410,7 @@ async function openProject(projectId, opts = {}) {
   clearStartMenu();
   _proposal = project.proposal || null;
   renderProposalPanel();   // reveals the panel only if there's already content
+  checkProposal();         // fetch stage + tracker so the roadmap shows from the start
   checkGapMap();           // restore the research-gap map if one was built before
   checkReferences();       // restore the accumulated reference list
   checkMatches();          // restore matched collaborators, clickable to full profile
@@ -820,7 +853,47 @@ function isLocked(k) {
   return !!(_proposal && Array.isArray(_proposal.edited_sections) && _proposal.edited_sections.includes(k));
 }
 
+// The stage indicator and the problem-statement checklist. Shown from the
+// start of the problem-specification stages, so the researcher sees the
+// roadmap — which questions their problem statement needs — before anything is
+// written, and watches items tick off as they answer them.
+function renderTracker() {
+  const stageWrap = document.getElementById('ps-stage');
+  const stageName = document.getElementById('ps-stage-name');
+  const t = _proposal && _proposal.tracker;
+
+  const label = (_proposal && _proposal.stage_label) || '';
+  if (label) { stageName.textContent = label; stageWrap.style.display = 'inline-flex'; }
+  else stageWrap.style.display = 'none';
+
+  const wrap = document.getElementById('ps-tracker');
+  // Show the checklist while the problem is still being worked (Stages 1-2 and
+  // 3). Once the problem statement is saved it is complete, and the proposal
+  // sections below take over.
+  const stage = _proposal && _proposal.stage;
+  const show = t && t.steps && (stage === '1-2' || stage === '3');
+  if (!show) { wrap.style.display = 'none'; return; }
+
+  let html = '';
+  for (const step of t.steps) {
+    html += `<div class="ps-step"><div class="ps-step-title">${esc(step.title)}</div>`;
+    for (const it of step.items) {
+      html += `<div class="ps-item ${it.done ? 'done' : ''}">`
+        + `<span class="ps-check">${it.done ? '✓' : ''}</span>`
+        + `<div><div class="ps-q">${esc(it.question)}</div>`
+        + (it.note ? `<div class="ps-note">${esc(it.note)}</div>` : '')
+        + `</div></div>`;
+    }
+    html += '</div>';
+  }
+  document.getElementById('ps-tracker-steps').innerHTML = html;
+  document.getElementById('ps-tracker-count').textContent = `${t.answered}/${t.total}`;
+  wrap.style.display = 'block';
+  showProposalPanel();   // the tracker is reason enough to reveal the panel
+}
+
 function renderProposalPanel() {
+  renderTracker();
   const container  = document.getElementById('proposal-sections');
   const keys       = Object.keys(PROPOSAL_LABELS);
   const hasContent = keys.some(k => (_proposal && _proposal[k] || '').trim());

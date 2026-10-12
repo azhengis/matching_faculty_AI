@@ -100,7 +100,7 @@ def test_init_profiles_db_creates_projects_and_matches(tmp_path, monkeypatch):
     assert _columns(con, "projects") == [
         "id", "profile_id", "title", "intake", "session_id", "status",
         "created_at", "updated_at", "chat_history", "gap_map", "lit_references",
-        "mode",
+        "mode", "progress",
     ]
     assert _columns(con, "project_matches") == [
         "id", "project_id", "faculty_id", "name", "title", "department",
