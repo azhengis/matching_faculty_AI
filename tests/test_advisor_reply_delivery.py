@@ -80,22 +80,46 @@ def _chat(cookies, message="Go on."):
         _FakeRequest({"message": message, "project_id": 1}, cookies))).body)
 
 
-# ── 1. A truncated reply says so ───────────────────────────────────────────
+# ── 1. A reply cut off at the token limit is finished, not flagged ──────────
 
-def test_a_reply_cut_off_by_the_token_limit_is_flagged(project, monkeypatch):
-    """The exact report: a message that stops mid-sentence. It used to arrive
-    indistinguishable from a complete one, so nobody could tell a truncated
-    answer from a badly written one."""
-    _stub(monkeypatch, _resp("Right now this is observational. Do you want to keep",
-                             finish="length"))
+def test_a_reply_cut_off_by_the_token_limit_is_finished_automatically(project, monkeypatch):
+    """The exact report: a message that stops mid-sentence. Rather than hand the
+    researcher a half-answer and ask them to type "continue", the server keeps
+    calling the model until it finishes and stitches the pieces into one reply.
+    A continuation picks up exactly where the last one stopped, so the join
+    carries no separator — the sentence reads straight through."""
+    _stub(monkeypatch,
+          _resp("Right now this is observational. Do you want to keep", finish="length"),
+          _resp(" it that way, or add a comparison group?", finish="stop"))
     body = _chat(project)
-    assert body["truncated"] is True
-    assert body["reply"].endswith("Do you want to keep")
+    assert body["reply"] == (
+        "Right now this is observational. Do you want to keep"
+        " it that way, or add a comparison group?")
+    assert "truncated" not in body
+
+
+def test_the_merged_transcript_is_a_single_assistant_message(project, monkeypatch):
+    """A continuation must fold into the message it continues, not append a
+    second assistant turn — otherwise the next request has two assistant
+    messages back to back and the stored history reads as two half-sentences."""
+    _stub(monkeypatch,
+          _resp("The gap here is that nobody has measured", finish="length"),
+          _resp(" uptake over more than a single term.", finish="stop"))
+    _chat(project)
+
+    con = sqlite3.connect(web_app.DB_PATH)
+    hist = json.loads(con.execute(
+        "SELECT chat_history FROM projects WHERE id = 1").fetchone()[0])
+    con.close()
+    contents = [e.get("content") for e in hist if e["role"] == "assistant"]
+    assert contents == [
+        "The gap here is that nobody has measured"
+        " uptake over more than a single term."]
 
 
 def test_a_complete_reply_is_not_flagged(project, monkeypatch):
     _stub(monkeypatch, _resp("What do you mean by scale?", finish="stop"))
-    assert _chat(project)["truncated"] is False
+    assert "truncated" not in _chat(project)
 
 
 # ── 2. Nothing said before a tool call is lost ─────────────────────────────
@@ -228,8 +252,26 @@ def test_a_runaway_tool_loop_ends_instead_of_hanging(project, monkeypatch):
     monkeypatch.setattr(web_app, "_search_literature", lambda **kw: {"results": []})
 
     body = _chat(project)
-    assert calls["n"] == web_app.MAX_TOOL_ROUNDS
+    assert calls["n"] == web_app.MAX_TURN_ROUNDS
     assert body["reply"], "a capped turn must still say something"
+
+
+def test_an_endless_continuation_also_ends_instead_of_hanging(project, monkeypatch):
+    """Auto-continue must honour the same cap. A model that reports "length"
+    forever (max_tokens too small for its plan) would otherwise loop without
+    end; it stops at the cap and returns the partial it has assembled."""
+    calls = {"n": 0}
+
+    def completion(**kw):
+        calls["n"] += 1
+        return _resp(" more", finish="length")
+
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
+
+    body = _chat(project)
+    assert calls["n"] == web_app.MAX_TURN_ROUNDS
+    assert body["reply"].strip(), "a capped turn must still say something"
 
 
 def test_every_model_call_in_the_turn_is_bounded(project, monkeypatch):

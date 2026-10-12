@@ -201,7 +201,6 @@ body.resizing{cursor:col-resize;user-select:none}
 
 /* Shown when finish_reason came back "length": the answer stops mid-sentence
    and the reader deserves to know that was the limit, not the advisor. */
-.truncated-note{margin-top:10px;padding-top:9px;border-top:1px dashed var(--border-2);font-size:12.5px;color:var(--ink-3);font-style:italic}
 .options{display:flex;flex-direction:column;gap:7px;margin-top:11px}
 .opt-btn{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 15px;text-align:left;font-size:13.5px;color:var(--ink);cursor:pointer;font-family:inherit;display:flex;gap:11px;align-items:baseline;box-shadow:var(--sh-sm);transition:border-color .15s,background .15s}
 .opt-btn:hover{background:var(--canvas);border-color:var(--navy-lift)}
@@ -537,7 +536,7 @@ async function callAdvisorAPI(message) {
     } else if (data.error) {
       addBotRaw('<div class="bubble" style="color:#9B2020">' + esc(data.error) + '</div>');
     } else {
-      renderBotReply(data.reply || '', data.truncated);
+      renderBotReply(data.reply || '');
       checkProposal();
       checkGapMap();
       checkReferences();
@@ -554,7 +553,7 @@ async function callAdvisorAPI(message) {
 }
 
 // ── Rendering the reply ───────────────────────────────────────────────────────
-function renderBotReply(raw, truncated) {
+function renderBotReply(raw) {
   const { main, options } = parseReply(raw);
   let optsHtml = '';
   if (options.length) {
@@ -574,13 +573,9 @@ function renderBotReply(raw, truncated) {
       `<span class="opt-num">[${picks.length + 1}]</span>None of these — I'll write my own</button>` +
       '</div>';
   }
-  // A reply that ran into the token limit stops mid-sentence. Say so, rather
-  // than leaving someone to wonder whether the advisor lost its thread.
-  const cut = truncated
-    ? '<div class="truncated-note">That answer was cut off at the length limit. '
-      + 'Ask it to continue and it will pick up from there.</div>'
-    : '';
-  addBotRaw(`<div class="bubble">${markdownToHtml(main)}${cut}</div>${optsHtml}`);
+  // A long answer that runs into the token limit is finished server-side and
+  // arrives whole, so there is nothing to flag here.
+  addBotRaw(`<div class="bubble">${markdownToHtml(main)}</div>${optsHtml}`);
 }
 
 // Split a reply into prose and the [n] option lines the app renders as buttons.

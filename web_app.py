@@ -2694,6 +2694,12 @@ LLM_CALL_TIMEOUT = 90
 # a literature search followed by several saves might reach six.
 MAX_TOOL_ROUNDS = 8
 
+# One turn can also make extra model calls to finish an answer that ran into
+# max_tokens, so the researcher gets the whole thing without typing "continue".
+# This caps the TOTAL calls in a turn — tool rounds and continuations together —
+# so a long chain can't run away. A few continuations on top of the tool budget.
+MAX_TURN_ROUNDS = 12
+
 
 def _cached_system(stable: str, volatile: str) -> list:
     """System prompt as two blocks, the stable one marked cacheable.
@@ -4655,60 +4661,90 @@ async def api_advisor_chat(req: Request):
     # and the search results arrived with no lead-in.
     said: list = []
     try:
-        for _round in range(MAX_TOOL_ROUNDS):
-            resp   = _litellm.completion(model=CHATBOT_MODEL, max_tokens=1800,
-                                         timeout=LLM_CALL_TIMEOUT,
-                                         tools=_ADVISOR_TOOLS, messages=messages)
-            msg    = resp.choices[0].message
-            reason = resp.choices[0].finish_reason
-            entry: dict = {"role": "assistant", "content": msg.content}
-            if msg.tool_calls:
-                entry["tool_calls"] = [{"id": tc.id, "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                    for tc in msg.tool_calls]
-            history.append(entry); messages.append(entry)
-            if (msg.content or "").strip():
-                said.append(msg.content.strip())
-            if reason != "tool_calls":
-                _persist_history(project_id, history)
-                _name_project_if_untitled(project_id, history)
-                reply = "\n\n".join(said)
-                # finish_reason "length" means the model ran into max_tokens
-                # mid-sentence. This used to be treated exactly like "stop",
-                # so the researcher got a reply that simply stopped partway
-                # with nothing to say it had — and no way to tell a truncated
-                # answer from a badly-written one.
-                return JSONResponse({"reply": reply, "session_id": session_id,
-                                     "truncated": reason == "length"})
-            for tc in msg.tool_calls:
-                args = json.loads(tc.function.arguments)
-                if tc.function.name == "save_proposal":
-                    result = _save_proposal(project_id, args)
-                elif tc.function.name == "note_progress":
-                    result = _note_progress(project_id, args)
-                elif tc.function.name == "search_literature":
-                    result = _search_literature(query=args.get("query", ""))
-                    # Turn the real hits into a gap map the researcher can see,
-                    # and accumulate them as the project's reference list.
-                    gap_map = _compute_gap_map(args.get("query", ""), result.get("results", []))
-                    if gap_map:
-                        _save_gap_map(project_id, gap_map)
-                    _add_references(project_id, result.get("results", []))
-                else:
-                    result = _advisor_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
-                    _record_matches(project_id, result.get("results", []))
-                tool_entry = {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)}
-                history.append(tool_entry); messages.append(tool_entry)
+        # True while the previous call stopped at the token limit, so this one
+        # is its continuation rather than a new message.
+        continuing = False
+        for _round in range(MAX_TURN_ROUNDS):
+            resp    = _litellm.completion(model=CHATBOT_MODEL, max_tokens=1800,
+                                          timeout=LLM_CALL_TIMEOUT,
+                                          tools=_ADVISOR_TOOLS, messages=messages)
+            msg     = resp.choices[0].message
+            reason  = resp.choices[0].finish_reason
+            content = msg.content or ""
+            tcs     = [{"id": tc.id, "type": "function",
+                        "function": {"name": tc.function.name,
+                                     "arguments": tc.function.arguments}}
+                       for tc in (msg.tool_calls or [])]
 
-        # Fell out of the loop still wanting tools. Whatever it did along the
-        # way is saved, so return that rather than an error on a turn that
-        # mostly worked.
+            if continuing and history and history[-1].get("role") == "assistant" \
+                    and not history[-1].get("tool_calls"):
+                # The last call was cut off at max_tokens and the model has
+                # picked up where it stopped. Merge this into that same
+                # assistant message instead of starting a new one — it keeps
+                # the transcript clean and stops two assistant messages from
+                # sitting back to back in the next request. history[-1] and
+                # messages[-1] are the same dict object, so set each field once.
+                merged = (history[-1].get("content") or "") + content
+                history[-1]["content"] = merged
+                messages[-1]["content"] = merged
+                if content:
+                    said[-1] = (said[-1] + content) if said else content
+                if tcs:
+                    history[-1]["tool_calls"] = tcs
+                    messages[-1]["tool_calls"] = tcs
+            else:
+                entry: dict = {"role": "assistant", "content": content}
+                if tcs:
+                    entry["tool_calls"] = tcs
+                history.append(entry); messages.append(entry)
+                if content.strip():
+                    said.append(content.strip())
+
+            if tcs:
+                continuing = False
+                for tc in msg.tool_calls:
+                    args = json.loads(tc.function.arguments)
+                    if tc.function.name == "save_proposal":
+                        result = _save_proposal(project_id, args)
+                    elif tc.function.name == "note_progress":
+                        result = _note_progress(project_id, args)
+                    elif tc.function.name == "search_literature":
+                        result = _search_literature(query=args.get("query", ""))
+                        # Turn the real hits into a gap map the researcher can
+                        # see, and accumulate them as the reference list.
+                        gap_map = _compute_gap_map(args.get("query", ""), result.get("results", []))
+                        if gap_map:
+                            _save_gap_map(project_id, gap_map)
+                        _add_references(project_id, result.get("results", []))
+                    else:
+                        result = _advisor_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
+                        _record_matches(project_id, result.get("results", []))
+                    tool_entry = {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)}
+                    history.append(tool_entry); messages.append(tool_entry)
+                continue
+
+            if reason == "length":
+                # Ran into max_tokens mid-answer. Loop again so the model
+                # finishes it, assembling the whole thing server-side — the
+                # researcher never has to ask it to continue.
+                continuing = True
+                continue
+
+            # reason "stop" (or anything else terminal): the answer is whole.
+            _persist_history(project_id, history)
+            _name_project_if_untitled(project_id, history)
+            return JSONResponse({"reply": "\n\n".join(said),
+                                 "session_id": session_id})
+
+        # Fell out of the loop at the per-turn call cap — a long chain of tools
+        # or continuations. Whatever it did along the way is saved, so return
+        # that rather than an error on a turn that mostly worked.
         _persist_history(project_id, history)
         return JSONResponse({
             "reply": "\n\n".join(said) or
                      "I got stuck working through that one. Ask me again, "
                      "or tell me which part to focus on.",
-            "session_id": session_id, "truncated": False})
+            "session_id": session_id})
     except Exception as e:
         # Keep whatever was exchanged before the failure — losing the turn is
         # bad, losing the conversation is worse.
