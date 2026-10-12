@@ -26,6 +26,13 @@
    and the document builds up beside it. */
 .proposal-sidepanel{width:min(44vw,600px);flex-shrink:0;border-left:1px solid var(--border);background:var(--paper);overflow-y:auto;padding:28px 32px 40px;display:none}
 .proposal-sidepanel.visible{display:block;animation:panel-in .45s ease-out}
+/* Drag handle to resize the panel. Hidden until the panel is shown. */
+.panel-resizer{display:none;flex-shrink:0;width:7px;cursor:col-resize;background:transparent;position:relative}
+.panel-resizer.visible{display:block}
+.panel-resizer::before{content:"";position:absolute;inset:0 3px;background:var(--border);transition:background .15s}
+.panel-resizer:hover::before,.panel-resizer.dragging::before{background:var(--navy-lift)}
+body.resizing{cursor:col-resize;user-select:none}
+@media(max-width:1080px){.panel-resizer{display:none!important}}
 /* Collapsed by the reader, which is different from having nothing to show.
    Both hide it; only this one is reversible from the toolbar. */
 .proposal-sidepanel.visible.collapsed{display:none}
@@ -50,7 +57,7 @@
 .trk-head{width:100%;display:flex;align-items:center;gap:9px;padding:12px 14px;background:none;border:none;font-family:inherit;cursor:pointer;text-align:left}
 .trk-head:hover{background:var(--canvas)}
 .trk-chev{font-size:10px;color:var(--ink-3);transition:transform .18s}
-.trk.open .trk-chev{transform:rotate(90deg)}
+.trk:not(.open) .trk-chev{transform:rotate(-90deg)}
 .trk-title{flex:1;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--navy)}
 .trk-count{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
 .trk.done .trk-count{color:var(--teal);font-weight:700}
@@ -65,13 +72,19 @@
 .ps-tracker-sub{font-size:12px;color:var(--ink-3);margin:4px 0 12px;line-height:1.45}
 .ps-step{margin-bottom:12px}
 .ps-step-title{font-size:11.5px;font-weight:650;color:var(--ink-2);margin-bottom:6px}
-.ps-item{display:grid;grid-template-columns:18px 1fr;gap:9px;align-items:start;padding:5px 0}
-.ps-check{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--border-2);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;margin-top:1px}
-.ps-item.done .ps-check{background:var(--teal);border-color:var(--teal)}
-.ps-q{font-size:12.5px;color:var(--ink-2);line-height:1.4}
-.ps-item.done .ps-q{color:var(--ink)}
-.ps-note{font-size:12px;color:var(--teal);margin-top:3px;line-height:1.4;font-style:italic}
-.ps-complete{font-size:12.5px;color:var(--teal);font-weight:600;padding:2px 0 10px}
+/* An item: a status circle, the question, and (if answered) an expand arrow. */
+.trk-item{border-radius:var(--r-sm)}
+.trk-item-head{width:100%;display:flex;align-items:flex-start;gap:9px;padding:5px 4px;background:none;border:none;font-family:inherit;text-align:left;cursor:pointer}
+.trk-item-head[disabled]{cursor:default}
+.trk-item-head:not([disabled]):hover{background:var(--canvas)}
+.trk-dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;margin-top:2px;border:1.5px solid var(--border-2);background:#fff}
+.state-progress .trk-dot{background:var(--ink-3);border-color:var(--ink-3)}   /* gray: in progress */
+.state-done .trk-dot{background:var(--teal);border-color:var(--teal)}          /* green: done */
+.trk-q{flex:1;font-size:12.5px;color:var(--ink-2);line-height:1.4}
+.state-done .trk-q{color:var(--ink)}
+.trk-arrow{font-size:10px;color:var(--ink-3);flex-shrink:0;margin-top:2px;transition:transform .18s}
+.trk-item.open .trk-arrow{transform:rotate(180deg)}
+.trk-answer{font-size:12px;color:var(--teal);line-height:1.5;padding:2px 4px 8px 22px;font-style:italic}
 
 /* ── Research-gap map ── */
 .gap-map-card{margin-bottom:26px;padding:16px 16px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm)}
@@ -251,6 +264,7 @@
         </div>
       </div>
 
+      <div class="panel-resizer" id="panel-resizer" title="Drag to resize"></div>
       <div class="proposal-sidepanel" id="proposal-sidepanel">
         <div class="proposal-doc-head">
           <h3>Research Proposal</h3>
@@ -615,6 +629,8 @@ function applyPanelState(collapsed) {
   const panel = document.getElementById('proposal-sidepanel');
   const btn   = document.getElementById('pb-toggle-panel');
   if (panel) panel.classList.toggle('collapsed', collapsed);
+  const rz = document.getElementById('panel-resizer');
+  if (rz) rz.classList.toggle('visible', !collapsed && panel && panel.classList.contains('visible'));
   if (btn) {
     btn.setAttribute('aria-expanded', String(!collapsed));
     document.getElementById('pb-toggle-label').textContent =
@@ -629,6 +645,9 @@ function showProposalPanel() {
   const panel = document.getElementById('proposal-sidepanel');
   if (!panel) return;
   panel.classList.add('visible');
+  const rz = document.getElementById('panel-resizer');
+  if (rz) rz.classList.toggle('visible', !panel.classList.contains('collapsed'));
+  applyPanelWidth();
   const btn = document.getElementById('pb-toggle-panel');
   if (btn) btn.style.display = 'inline-flex';
   applyPanelState(panelCollapsedPref());
@@ -876,6 +895,45 @@ function toggleTracker(id) {
   renderTracker();
 }
 
+// ── Resizable proposal panel ───────────────────────────────────────────────
+const PANEL_W = 'advisor_panel_width';
+function applyPanelWidth() {
+  let w;
+  try { w = parseInt(localStorage.getItem(PANEL_W), 10); } catch (e) {}
+  const panel = document.getElementById('proposal-sidepanel');
+  if (panel && w && w >= 300) panel.style.width = w + 'px';
+}
+(function initResizer() {
+  const resizer = document.getElementById('panel-resizer');
+  const layout  = document.getElementById('advisor-layout');
+  const panel   = document.getElementById('proposal-sidepanel');
+  if (!resizer || !layout || !panel) return;
+  let dragging = false;
+  resizer.addEventListener('mousedown', e => {
+    dragging = true; document.body.classList.add('resizing');
+    resizer.classList.add('dragging'); e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const right = layout.getBoundingClientRect().right;
+    let w = right - e.clientX;                    // panel sits on the right
+    w = Math.max(300, Math.min(w, layout.clientWidth - 360));  // leave room for chat
+    panel.style.width = w + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false; document.body.classList.remove('resizing');
+    resizer.classList.remove('dragging');
+    try { localStorage.setItem(PANEL_W, parseInt(panel.style.width, 10)); } catch (e) {}
+  });
+})();
+
+const _itemOpen = new Set();   // item keys the reader has expanded to see the answer
+function toggleItem(key) {
+  if (_itemOpen.has(key)) _itemOpen.delete(key); else _itemOpen.add(key);
+  renderTracker();
+}
+
 function renderTracker() {
   const stageWrap = document.getElementById('ps-stage');
   const stageName = document.getElementById('ps-stage-name');
@@ -890,10 +948,10 @@ function renderTracker() {
   let html = '';
   for (const sec of secs) {
     const open = _trkIsOpen(sec);
-    const count = sec.complete ? '✓' : `${sec.answered}/${sec.total}`;
+    const count = sec.complete ? 'done' : `${sec.answered}/${sec.total}`;
     html += `<div class="trk ${open ? 'open' : ''} ${sec.complete ? 'done' : ''}">`
       + `<button class="trk-head" onclick="toggleTracker('${sec.id}')" aria-expanded="${open}">`
-      + `<span class="trk-chev">▸</span>`
+      + `<span class="trk-chev">▾</span>`
       + `<span class="trk-title">${esc(sec.title)}</span>`
       + `<span class="trk-count">${count}</span></button>`;
     if (open) {
@@ -902,11 +960,18 @@ function renderTracker() {
       for (const g of sec.groups) {
         html += `<div class="ps-step"><div class="ps-step-title">${esc(g.title)}</div>`;
         for (const it of g.items) {
-          html += `<div class="ps-item ${it.done ? 'done' : ''}">`
-            + `<span class="ps-check">${it.done ? '✓' : ''}</span>`
-            + `<div><div class="ps-q">${esc(it.label)}</div>`
-            + (it.note ? `<div class="ps-note">${esc(it.note)}</div>` : '')
-            + `</div></div>`;
+          // Status: green done, gray in-progress (active section), white not started.
+          const state = it.done ? 'done' : (sec.active ? 'progress' : 'todo');
+          const hasAnswer = !!it.note;
+          const iopen = hasAnswer && _itemOpen.has(it.key);
+          html += `<div class="trk-item state-${state} ${iopen ? 'open' : ''}">`
+            + `<button class="trk-item-head" ${hasAnswer ? `onclick="toggleItem('${it.key}')"` : 'disabled'}>`
+            + `<span class="trk-dot" title="${state === 'done' ? 'done' : state === 'progress' ? 'in progress' : 'not started'}"></span>`
+            + `<span class="trk-q">${esc(it.label)}</span>`
+            + (hasAnswer ? `<span class="trk-arrow">▾</span>` : '')
+            + `</button>`
+            + (iopen ? `<div class="trk-answer">${esc(it.note)}</div>` : '')
+            + `</div>`;
         }
         html += '</div>';
       }
