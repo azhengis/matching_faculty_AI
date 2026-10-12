@@ -51,7 +51,6 @@ from text_clean import split_interests, is_topic_line
 import doc_extract
 import auth
 import firebase_auth
-import proposal_doc
 import advisor_prompt   # assembles the advisor's system prompt from prompts/
 
 # ── LiteLLM ───────────────────────────────────────────────────────────────────
@@ -3303,6 +3302,7 @@ def _build_proposal_docx(researcher_name: str, proposal: dict, references: list 
     become plain paragraphs. Any references passed are listed at the end.
     """
     if style:
+        import proposal_doc   # lazy: keeps python-docx/lxml out of the startup path
         return proposal_doc.build(proposal, researcher_name, references, style, affiliation)
 
     import io
