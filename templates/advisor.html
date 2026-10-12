@@ -45,6 +45,18 @@
 .ps-stage-k{font-size:9.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#fff;background:var(--navy-lift);padding:3px 8px;border-radius:999px}
 #ps-stage-name{font-size:13px;font-weight:600;color:var(--navy)}
 
+/* ── Progress trackers (foldable) ── */
+.trk{margin-bottom:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm);overflow:hidden}
+.trk-head{width:100%;display:flex;align-items:center;gap:9px;padding:12px 14px;background:none;border:none;font-family:inherit;cursor:pointer;text-align:left}
+.trk-head:hover{background:var(--canvas)}
+.trk-chev{font-size:10px;color:var(--ink-3);transition:transform .18s}
+.trk.open .trk-chev{transform:rotate(90deg)}
+.trk-title{flex:1;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--navy)}
+.trk-count{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.trk.done .trk-count{color:var(--teal);font-weight:700}
+.trk-body{padding:2px 14px 12px}
+.trk-note{font-size:13px;color:var(--ink);font-style:italic;background:var(--teal-bg);border-radius:var(--r-sm);padding:9px 11px;margin-bottom:12px;line-height:1.45}
+
 /* ── Problem-statement tracker ── */
 .ps-tracker{margin-bottom:26px;padding:16px 16px 6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm)}
 .ps-tracker-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
@@ -248,14 +260,7 @@
           </div>
         </div>
 
-        <div class="ps-tracker" id="ps-tracker" style="display:none">
-          <div class="ps-tracker-head">
-            <span class="ps-tracker-title">Problem statement</span>
-            <span class="ps-tracker-count" id="ps-tracker-count"></span>
-          </div>
-          <div class="ps-tracker-sub">The questions your problem statement needs. They fill in as you answer them.</div>
-          <div id="ps-tracker-steps"></div>
-        </div>
+        <div id="trackers"></div>
 
         <div class="gap-map-card" id="gap-map-card" style="display:none">
           <div class="gap-map-head">
@@ -853,43 +858,64 @@ function isLocked(k) {
   return !!(_proposal && Array.isArray(_proposal.edited_sections) && _proposal.edited_sections.includes(k));
 }
 
-// The stage indicator and the problem-statement checklist. Shown from the
-// start of the problem-specification stages, so the researcher sees the
-// roadmap — which questions their problem statement needs — before anything is
-// written, and watches items tick off as they answer them.
+// The stage indicator and the foldable progress trackers (problem statement,
+// research questions). Shown from the start so the researcher sees the roadmap
+// before anything is written, and watches items tick off as they answer them.
+// Each section folds and unfolds.
+let _trkOpen = {};   // section id -> explicit user toggle, overriding the default
+
+function _trkIsOpen(sec) {
+  if (sec.id in _trkOpen) return _trkOpen[sec.id];
+  return sec.active && !sec.complete;   // default: open the one in progress
+}
+
+function toggleTracker(id) {
+  const secs = (_proposal && _proposal.trackers) || [];
+  const sec = secs.find(s => s.id === id);
+  _trkOpen[id] = !(sec ? _trkIsOpen(sec) : false);
+  renderTracker();
+}
+
 function renderTracker() {
   const stageWrap = document.getElementById('ps-stage');
   const stageName = document.getElementById('ps-stage-name');
-  const t = _proposal && _proposal.tracker;
-
   const label = (_proposal && _proposal.stage_label) || '';
   if (label) { stageName.textContent = label; stageWrap.style.display = 'inline-flex'; }
   else stageWrap.style.display = 'none';
 
-  const wrap = document.getElementById('ps-tracker');
-  // Show the checklist while the problem is still being worked (Stages 1-2 and
-  // 3). Once the problem statement is saved it is complete, and the proposal
-  // sections below take over.
-  const stage = _proposal && _proposal.stage;
-  const show = t && t.steps && (stage === '1-2' || stage === '3');
-  if (!show) { wrap.style.display = 'none'; return; }
+  const host = document.getElementById('trackers');
+  const secs = (_proposal && _proposal.trackers) || [];
+  if (!secs.length) { host.innerHTML = ''; return; }
 
   let html = '';
-  for (const step of t.steps) {
-    html += `<div class="ps-step"><div class="ps-step-title">${esc(step.title)}</div>`;
-    for (const it of step.items) {
-      html += `<div class="ps-item ${it.done ? 'done' : ''}">`
-        + `<span class="ps-check">${it.done ? '✓' : ''}</span>`
-        + `<div><div class="ps-q">${esc(it.question)}</div>`
-        + (it.note ? `<div class="ps-note">${esc(it.note)}</div>` : '')
-        + `</div></div>`;
+  for (const sec of secs) {
+    const open = _trkIsOpen(sec);
+    const count = sec.complete ? '✓' : `${sec.answered}/${sec.total}`;
+    html += `<div class="trk ${open ? 'open' : ''} ${sec.complete ? 'done' : ''}">`
+      + `<button class="trk-head" onclick="toggleTracker('${sec.id}')" aria-expanded="${open}">`
+      + `<span class="trk-chev">▸</span>`
+      + `<span class="trk-title">${esc(sec.title)}</span>`
+      + `<span class="trk-count">${count}</span></button>`;
+    if (open) {
+      html += '<div class="trk-body">';
+      if (sec.note) html += `<div class="trk-note">“${esc(sec.note)}”</div>`;
+      for (const g of sec.groups) {
+        html += `<div class="ps-step"><div class="ps-step-title">${esc(g.title)}</div>`;
+        for (const it of g.items) {
+          html += `<div class="ps-item ${it.done ? 'done' : ''}">`
+            + `<span class="ps-check">${it.done ? '✓' : ''}</span>`
+            + `<div><div class="ps-q">${esc(it.label)}</div>`
+            + (it.note ? `<div class="ps-note">${esc(it.note)}</div>` : '')
+            + `</div></div>`;
+        }
+        html += '</div>';
+      }
+      html += '</div>';
     }
     html += '</div>';
   }
-  document.getElementById('ps-tracker-steps').innerHTML = html;
-  document.getElementById('ps-tracker-count').textContent = `${t.answered}/${t.total}`;
-  wrap.style.display = 'block';
-  showProposalPanel();   // the tracker is reason enough to reveal the panel
+  host.innerHTML = html;
+  showProposalPanel();
 }
 
 function renderProposalPanel() {

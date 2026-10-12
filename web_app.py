@@ -2133,7 +2133,7 @@ def _read_proposal(con, project_id) -> dict:
     # panel can show where the researcher is and what still needs answering.
     proposal["stage"] = _derive_stage(proposal)
     proposal["stage_label"] = _STAGE_LABELS[proposal["stage"]]
-    proposal["tracker"] = _problem_statement_tracker(proposal, _read_progress(con, project_id))
+    proposal["trackers"] = _build_trackers(proposal, _read_progress(con, project_id))
     return proposal
 
 
@@ -2185,7 +2185,21 @@ _PS_STEPS = [
                        "The research objectives — the concrete steps."),
     ]),
 ]
-_PROGRESS_FIELDS = [k for _, items in _PS_STEPS for (k, _p, _t) in items]
+# Research-question criteria, from the guide. Each is a quality the drafted
+# question must meet; the advisor marks it as the question is refined. rq_question
+# holds the actual drafted question, shown at the top of that tracker section.
+_RQ_ITEMS = [
+    ("rq_focused",      "Focused on a single problem or issue"),
+    ("rq_researchable", "Answerable with primary and/or secondary sources"),
+    ("rq_feasible",     "Feasible within the timeframe and practical constraints"),
+    ("rq_specific",     "Specific enough to answer thoroughly"),
+    ("rq_complex",      "Complex — not a yes/no question or an easily-found fact"),
+    ("rq_relevant",     "Relevant to the field of study and/or society"),
+]
+_RQ_FIELDS = [k for k, _label in _RQ_ITEMS]
+
+_PROGRESS_FIELDS = ([k for _, items in _PS_STEPS for (k, _p, _t) in items]
+                    + ["rq_question"] + _RQ_FIELDS)
 
 
 def _read_progress(con, project_id) -> dict:
@@ -2202,38 +2216,62 @@ def _read_progress(con, project_id) -> dict:
         return {}
 
 
-def _problem_statement_tracker(proposal: dict, progress: dict) -> dict:
-    """Display-ready checklist: each step, each item with the question that fits
-    the project's type, whether it is answered, and the captured answer.
+def _build_trackers(proposal: dict, progress: dict) -> list:
+    """The foldable progress sections shown in the panel.
 
-    Marked complete once the problem statement is saved (Stage 4). Until then
-    the panel shows exactly which of the guide's questions still need an
-    answer, from the ongoing conversation."""
-    ptype = (progress.get("problem_type") or "").lower()
-    theoretical = ptype == "theoretical"
-    steps = []
-    answered = 0
-    for title, items in _PS_STEPS:
-        rendered = []
-        for key, practical_q, theoretical_q in items:
+    One section per stage of the work that has a checklist: the problem
+    statement (the guide's three steps) and the research questions (the guide's
+    quality criteria). Each section carries whether it is active at the current
+    stage and whether it is complete, so the panel can expand the one in
+    progress and fold the finished ones."""
+    stage = _derive_stage(proposal)
+
+    def group(title, items):
+        rendered, answered = [], 0
+        for key, label in items:
             note = (progress.get(key) or "").strip()
-            done = bool(note)
-            if done:
+            if note:
                 answered += 1
-            rendered.append({
-                "key": key,
-                "question": theoretical_q if theoretical else practical_q,
-                "done": done,
-                "note": note,
-            })
-        steps.append({"title": title, "items": rendered})
-    return {
-        "problem_type": ptype,
-        "steps": steps,
-        "answered": answered,
-        "total": len(_PROGRESS_FIELDS),
-        "complete": bool((proposal.get("problem_statement") or "").strip()),
-    }
+            rendered.append({"key": key, "label": label, "done": bool(note), "note": note})
+        return {"title": title, "items": rendered}, answered
+
+    # ── Problem statement: the three steps, in practical or theoretical form ──
+    theoretical = (progress.get("problem_type") or "").lower() == "theoretical"
+    ps_groups, ps_answered = [], 0
+    for title, items in _PS_STEPS:
+        pairs = [(k, (t if theoretical else p)) for (k, p, t) in items]
+        g, a = group(title, pairs)
+        ps_groups.append(g); ps_answered += a
+    ps_total = sum(len(g["items"]) for g in ps_groups)
+    ps_complete = bool((proposal.get("problem_statement") or "").strip())
+
+    # ── Research questions: the quality criteria, with the drafted question ──
+    rq_group, rq_answered = group("A good research question is", _RQ_ITEMS)
+    rq_complete = bool((proposal.get("research_questions") or "").strip())
+
+    return [
+        {
+            "id": "problem_statement",
+            "title": "Problem statement",
+            "note": "",
+            "groups": ps_groups,
+            "answered": ps_answered,
+            "total": ps_total,
+            "complete": ps_complete,
+            "active": stage in ("1-2", "3"),
+            "problem_type": (progress.get("problem_type") or ""),
+        },
+        {
+            "id": "research_questions",
+            "title": "Research questions",
+            "note": (progress.get("rq_question") or "").strip(),
+            "groups": [rq_group],
+            "answered": rq_answered,
+            "total": len(_RQ_ITEMS),
+            "complete": rq_complete,
+            "active": not ps_complete or not rq_complete,
+        },
+    ]
 
 
 def _note_progress(project_id, args: dict) -> dict:
@@ -2862,6 +2900,13 @@ _ADVISOR_TOOLS = [{
                 "why_3": {"type": "string", "description": "Wider relevance elsewhere (practical) OR consequences for society (theoretical)."},
                 "aim": {"type": "string", "description": "The overall research aim, in one sentence."},
                 "objectives": {"type": "string", "description": "The concrete objectives — the steps to achieve the aim."},
+                "rq_question": {"type": "string", "description": "The drafted research question itself, as it currently stands. Update it as it sharpens."},
+                "rq_focused": {"type": "string", "description": "Set once the question is focused on a single problem or issue (note how)."},
+                "rq_researchable": {"type": "string", "description": "Set once it is answerable with primary and/or secondary sources."},
+                "rq_feasible": {"type": "string", "description": "Set once it is feasible within the timeframe and practical constraints."},
+                "rq_specific": {"type": "string", "description": "Set once it is specific enough to answer thoroughly."},
+                "rq_complex": {"type": "string", "description": "Set once it is complex — not a yes/no question, and not answerable with an easily-found fact."},
+                "rq_relevant": {"type": "string", "description": "Set once it is relevant to the field and/or society."},
             },
         }
     }

@@ -282,8 +282,9 @@ def test_get_proposal_returns_empty_defaults_when_none_saved(tmp_path, monkeypat
     for f in web_app._PROPOSAL_FIELDS:
         assert body[f] == "", f"{f} should be blank"
     assert body["edited_sections"] == []
-    assert body["stage"] == "1-2"            # nothing saved yet
-    assert body["tracker"]["answered"] == 0  # the empty checklist
+    assert body["stage"] == "1-2"                  # nothing saved yet
+    assert [t["id"] for t in body["trackers"]] == ["problem_statement", "research_questions"]
+    assert all(t["answered"] == 0 for t in body["trackers"])  # empty checklists
 
 
 def test_get_proposal_returns_saved_values(tmp_path, monkeypatch):
