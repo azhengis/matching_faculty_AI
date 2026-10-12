@@ -122,6 +122,79 @@ def test_a_complete_reply_is_not_flagged(project, monkeypatch):
     assert "truncated" not in _chat(project)
 
 
+# ── 1b. An orphaned tool_use never reaches the model ───────────────────────
+
+def test_a_tool_that_raises_still_gets_a_result_so_the_turn_is_valid(project, monkeypatch):
+    """A tool_use with no tool_result after it is a 400 from Anthropic, and the
+    orphan used to be persisted and poison every later turn. If a tool raises,
+    the model gets an error result for that call and carries on."""
+    _stub(monkeypatch,
+          _resp("Checking the literature.",
+                tool=("search_literature", {"query": "x"})),
+          _resp("Nothing solid came back — tell me more about the setting."))
+
+    def boom(**kw):
+        raise RuntimeError("OpenAlex timed out")
+    monkeypatch.setattr(web_app, "_search_literature", boom)
+
+    reply = _chat(project)["reply"]
+    assert "tell me more about the setting" in reply
+
+    con = sqlite3.connect(web_app.DB_PATH)
+    hist = json.loads(con.execute(
+        "SELECT chat_history FROM projects WHERE id = 1").fetchone()[0])
+    con.close()
+    # Every assistant tool_call is answered by a tool result with the same id.
+    for e in hist:
+        if e["role"] == "assistant" and e.get("tool_calls"):
+            call_ids = {c["id"] for c in e["tool_calls"]}
+            answered = {x["tool_call_id"] for x in hist if x["role"] == "tool"}
+            assert call_ids <= answered
+
+
+def test_a_conversation_already_holding_an_orphan_is_healed(project, monkeypatch):
+    """The conversation the researcher already wedged: a stored tool_use with no
+    result. On the next message it is paired-off before the request is built,
+    so the turn goes through instead of 400ing again."""
+    con = sqlite3.connect(web_app.DB_PATH)
+    poisoned = [
+        {"role": "user", "content": "earlier question"},
+        {"role": "assistant", "content": "Let me look.",
+         "tool_calls": [{"id": "toulu_orphan", "type": "function",
+                         "function": {"name": "search_literature", "arguments": "{}"}}]},
+        # no tool result — this is the orphan
+    ]
+    con.execute("UPDATE projects SET chat_history = ? WHERE id = 1",
+                (json.dumps(poisoned),))
+    con.commit(); con.close()
+    web_app._sessions.clear()
+
+    _stub(monkeypatch, _resp("Good question — what's the population?"))
+    reply = _chat(project, "a fresh message")["reply"]
+    assert "what's the population?" in reply
+
+
+def test__pair_tools_strips_both_kinds_of_orphan():
+    pair = lambda call_id: {"id": call_id, "type": "function",
+                            "function": {"name": "f", "arguments": "{}"}}
+    msgs = [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "a", "tool_calls": [pair("1")]},
+        {"role": "tool", "tool_call_id": "1", "content": "{}"},       # paired — kept
+        {"role": "assistant", "content": "b", "tool_calls": [pair("2")]},  # orphan call
+        {"role": "assistant", "content": "c"},
+        {"role": "tool", "tool_call_id": "9", "content": "{}"},       # orphan result
+        {"role": "assistant", "content": "d"},
+    ]
+    out = web_app._pair_tools(msgs)
+    # The paired call/result survive; the orphan call keeps its prose but loses
+    # the dangling tool_calls; the orphan result is dropped entirely.
+    assert [m["role"] for m in out] == [
+        "user", "assistant", "tool", "assistant", "assistant", "assistant"]
+    assert out[3] == {"role": "assistant", "content": "b"}   # tool_calls stripped
+    assert all(m.get("role") != "tool" or m.get("tool_call_id") == "1" for m in out)
+
+
 # ── 2. Nothing said before a tool call is lost ─────────────────────────────
 
 def test_what_the_advisor_says_before_reaching_for_a_tool_still_arrives(project, monkeypatch):

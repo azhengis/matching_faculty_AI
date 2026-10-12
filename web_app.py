@@ -2729,6 +2729,44 @@ def _recent(history: list) -> list:
     return tail
 
 
+def _pair_tools(msgs: list) -> list:
+    """Drop tool blocks that have lost their partner.
+
+    The Anthropic API rejects any assistant ``tool_use`` not immediately
+    followed by its ``tool_result``, and any ``tool_result`` with no preceding
+    ``tool_use``. An orphan gets into the transcript when a tool raised between
+    recording the call and recording its result (an older failure mode, now
+    guarded at the call site) — and once stored, it poisoned every later turn
+    with a 400. This removes both kinds of orphan, keeping any prose the
+    assistant wrote alongside a stripped call, so one bad turn can no longer
+    wedge the whole conversation."""
+    out: list = []
+    i, n = 0, len(msgs)
+    while i < n:
+        m = msgs[i]
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            # Gather the tool results that immediately follow this call.
+            results: dict = {}
+            j = i + 1
+            while j < n and msgs[j].get("role") == "tool":
+                results[msgs[j].get("tool_call_id")] = msgs[j]
+                j += 1
+            ids = {tc["id"] for tc in m["tool_calls"]}
+            if ids and ids <= set(results):
+                out.append(m)
+                out.extend(results[tc["id"]] for tc in m["tool_calls"])
+            elif (m.get("content") or "").strip():
+                # Incomplete pairing: keep the prose, drop the dangling call.
+                out.append({"role": "assistant", "content": m["content"]})
+            i = j
+        elif m.get("role") == "tool":
+            i += 1          # a result with no call before it — drop it
+        else:
+            out.append(m)
+            i += 1
+    return out
+
+
 def _advisor_system_prompt(profile: dict) -> tuple[str, str]:
     """Return (STABLE, VOLATILE) halves of the advisor prompt.
 
@@ -4650,7 +4688,11 @@ async def api_advisor_chat(req: Request):
     history = _sessions.get(session_key)
     if history is None:
         history = list(stored_history)
-        _sessions[session_key] = history
+    # Heal any orphaned tool block left by an earlier failed turn before it can
+    # reach the model as a malformed request. Cheap, and it repairs a
+    # conversation that a past failure already wedged.
+    history = _pair_tools(history)
+    _sessions[session_key] = history
     history.append({"role": "user", "content": message})
     messages = [{"role": "system",
                  "content": _cached_system(stable_prompt, volatile_prompt)}] + _recent(history)
@@ -4703,22 +4745,30 @@ async def api_advisor_chat(req: Request):
             if tcs:
                 continuing = False
                 for tc in msg.tool_calls:
-                    args = json.loads(tc.function.arguments)
-                    if tc.function.name == "save_proposal":
-                        result = _save_proposal(project_id, args)
-                    elif tc.function.name == "note_progress":
-                        result = _note_progress(project_id, args)
-                    elif tc.function.name == "search_literature":
-                        result = _search_literature(query=args.get("query", ""))
-                        # Turn the real hits into a gap map the researcher can
-                        # see, and accumulate them as the reference list.
-                        gap_map = _compute_gap_map(args.get("query", ""), result.get("results", []))
-                        if gap_map:
-                            _save_gap_map(project_id, gap_map)
-                        _add_references(project_id, result.get("results", []))
-                    else:
-                        result = _advisor_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
-                        _record_matches(project_id, result.get("results", []))
+                    # Every tool_use MUST get a tool_result, even on failure.
+                    # If a tool raised here and we skipped its result, the
+                    # dangling tool_use was persisted and every later turn hit
+                    # a 400. Hand the model an error result instead and let it
+                    # recover, rather than orphaning the call.
+                    try:
+                        args = json.loads(tc.function.arguments)
+                        if tc.function.name == "save_proposal":
+                            result = _save_proposal(project_id, args)
+                        elif tc.function.name == "note_progress":
+                            result = _note_progress(project_id, args)
+                        elif tc.function.name == "search_literature":
+                            result = _search_literature(query=args.get("query", ""))
+                            # Turn the real hits into a gap map the researcher
+                            # can see, and accumulate them as the reference list.
+                            gap_map = _compute_gap_map(args.get("query", ""), result.get("results", []))
+                            if gap_map:
+                                _save_gap_map(project_id, gap_map)
+                            _add_references(project_id, result.get("results", []))
+                        else:
+                            result = _advisor_search(query=args.get("query", ""), mode=args.get("mode", "semantic"))
+                            _record_matches(project_id, result.get("results", []))
+                    except Exception as tool_err:
+                        result = {"error": f"{tc.function.name} failed: {tool_err}"}
                     tool_entry = {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)}
                     history.append(tool_entry); messages.append(tool_entry)
                 continue
