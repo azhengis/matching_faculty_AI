@@ -23,6 +23,14 @@ RUN:
     python3 search.py
 """
 import os, sys, sqlite3, pickle, re, json, hashlib
+
+# Rebuilding an embedding index needs the full SPECTER2 via torch (~1GB) and is
+# a BUILD-TIME job only — the Dockerfile sets this while baking the indexes. At
+# runtime it stays off: the server must never attempt a rebuild, because it
+# OOM-kills the container mid-startup. Instead it uses the index it has, even
+# if the faculty text has drifted slightly (a few profile self-edits), which is
+# a far better failure than the app not starting at all.
+_REBUILD_OK = os.environ.get("INDEX_REBUILD_OK", "").strip().lower() in ("1", "true", "yes")
 import numpy as np
 
 from text_clean import strip_site_chrome
@@ -655,28 +663,37 @@ def get_index(people, model):
     texts = [build_text(p) for p in people]
     fingerprint = _index_fingerprint(texts)
 
+    cache = None
     if os.path.exists(INDEX):
         with open(INDEX, "rb") as f:
             cache = pickle.load(f)
-        if (cache.get("fingerprint") == fingerprint
+
+    if cache is not None:
+        full = (cache.get("fingerprint") == fingerprint
                 and cache.get("count") == len(people)
-                and cache.get("model") == MODEL):
+                and cache.get("model") == MODEL)
+        if full:
             print(f"Loaded cached index ({len(people)} faculty, {K_CLUSTERS} clusters).\n")
             return cache["emb"], cache["labels"], cache["centroids"]
-        if cache.get("count") == len(people) and cache.get("model") == MODEL:
-            print("Faculty text changed since the index was built — rebuilding.")
+        if not _REBUILD_OK:
+            # The index exists but its fingerprint drifted — usually a handful
+            # of profile self-edits since it was baked. Rebuilding here would
+            # OOM the server, so use what we have. The embeddings for the few
+            # edited faculty are slightly stale; everything else is exact.
+            # Refresh the index offline (or in the image) when convenient.
+            print("Faculty text drifted since the index was built; using the "
+                  "existing index as-is (rebuild offline to refresh).\n", flush=True)
+            return cache["emb"], cache["labels"], cache["centroids"]
+        print("Faculty text changed since the index was built — rebuilding.")
 
-    # This path needs the FULL SPECTER2 via torch — measured ~834MB resident —
-    # because the int8 ONNX encoder exists to serve queries, not to build an
-    # index. On a 512MB-2GB container that is usually fatal, and the log just
-    # says "Killed" partway through, which reads like an app fault rather than
-    # a missing file. Say plainly what is about to happen.
-    print(f"Building SPECTER2 embeddings for {len(people)} faculty from scratch.\n"
-          f"  No usable index at {INDEX}\n"
-          f"  This needs ~1GB of memory beyond the app and takes minutes. On a\n"
-          f"  small container it will be OOM-killed. The image ships a prebuilt\n"
-          f"  index; if DATA_DIR is set, it must be seeded onto that volume.",
-          flush=True)
+    if not _REBUILD_OK:
+        raise RuntimeError(
+            f"No embedding index at {INDEX}, and rebuilding is disabled at runtime "
+            f"(it needs ~1GB and would OOM the server). The image ships a prebuilt "
+            f"index — ensure it is seeded onto DATA_DIR, or rebuild offline with "
+            f"INDEX_REBUILD_OK=1.")
+
+    print(f"Building SPECTER2 embeddings for {len(people)} faculty (build-time)...", flush=True)
     emb = model.encode(texts, normalize_embeddings=True, show_progress_bar=True)
     print(f"Clustering into {K_CLUSTERS} research-topic groups...")
     labels, centroids = kmeans(emb, K_CLUSTERS)
@@ -712,12 +729,26 @@ def get_paper_index(people, model):
         return None
 
     # Check cache
+    cache = None
     if os.path.exists(PAPER_INDEX):
         with open(PAPER_INDEX, "rb") as f:
             cache = pickle.load(f)
         if cache.get("n_papers") == len(papers_rows) and cache.get("model") == MODEL:
             print(f"Loaded paper index ({len(papers_rows)} papers for {len(cache['by_faculty'])} faculty).\n")
             return cache
+        if not _REBUILD_OK:
+            # Drifted, but rebuilding here would OOM. Use the existing paper
+            # index; the collaborator search's paper evidence is slightly stale
+            # at worst. (If there is no usable cache, return None below and the
+            # search simply runs without per-paper evidence.)
+            print("Paper set drifted since the index was built; using the "
+                  "existing paper index as-is.\n", flush=True)
+            return cache
+
+    if not _REBUILD_OK:
+        print("No usable paper index and rebuilding is disabled at runtime; "
+              "collaborator search will run without per-paper evidence.\n", flush=True)
+        return None
 
     print(f"Building paper embeddings ({len(papers_rows)} papers)...")
     texts = [

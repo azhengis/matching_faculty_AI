@@ -69,8 +69,11 @@ COPY data/seed_faculty.db.gz data/
 # The runtime default is 8, sized for a small container. The builder has room,
 # and index building is the one place throughput matters — this halves the bake.
 ENV ONNX_BATCH=16
+# INDEX_REBUILD_OK=1 is set ONLY here, in the builder, so this step is allowed
+# to build the indexes. The runtime stage never sets it, so the server refuses
+# to rebuild and uses the baked/seeded index instead of OOM-killing itself.
 RUN gunzip -c data/seed_faculty.db.gz > /build/faculty.db \
-    && python -c "\
+    && INDEX_REBUILD_OK=1 python -c "\
 import search as sm; \
 sm.DB='/build/faculty.db'; sm.INDEX='/build/faculty_index.pkl'; sm.PAPER_INDEX='/build/paper_index.pkl'; \
 from sentence_transformers import SentenceTransformer; \
