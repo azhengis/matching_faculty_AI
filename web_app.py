@@ -81,7 +81,15 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 # ── Shared in-memory state ────────────────────────────────────────────────────
 _st: dict = {}
 _sessions: dict[str, list] = {}   # session_id → conversation history (mirrors projects.chat_history)
-MAX_STORED_TURNS = 80             # transcript tail kept per project; the proposal is the durable record
+# The whole conversation is kept for DISPLAY — the researcher reads it back on
+# reload and after a redeploy, and losing the opening (which is where the
+# problem took shape) is disorienting. This was 80, which trimmed the start of
+# any longer conversation; the visible transcript then appeared to begin
+# partway through, around where research questions were discussed. The cap is
+# generous rather than unbounded only so one marathon project cannot grow a
+# single row without limit. What the MODEL sees each turn is separate and much
+# smaller (see _recent / MAX_SENT_TURNS).
+MAX_STORED_TURNS = 1200            # transcript entries kept for the reader; the model gets _recent()
 MAX_PROMPT_DOCUMENTS = 3          # newest uploaded documents shown to the advisor
 MAX_DOCUMENT_CHARS   = 6000       # per document — a full CV blows the context window otherwise
 MAX_BIO_CHARS        = 8000       # a typed bio; generous, but not a pasted thesis
@@ -3248,9 +3256,11 @@ async def api_project_proposal_download(project_id: int, req: Request):
 def _persist_history(project_id, history: list) -> None:
     """Store the advisor conversation on the project so it survives a restart.
 
-    Only the tail is kept: the model is sent the full history each turn anyway,
-    and an unbounded transcript would eventually outgrow the context window.
-    The proposal itself is the durable record — the transcript is just continuity.
+    The near-whole transcript is kept (capped at MAX_STORED_TURNS only to bound
+    one row's growth), because this is what the researcher reads back on reload.
+    What the model receives each turn is a much shorter tail, built separately by
+    _recent(); the two are not the same, and trimming storage to the model's
+    window is what made the opening of longer conversations disappear.
     """
     try:
         payload = json.dumps(history[-MAX_STORED_TURNS:])
