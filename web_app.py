@@ -2198,8 +2198,19 @@ _RQ_ITEMS = [
 ]
 _RQ_FIELDS = [k for k, _label in _RQ_ITEMS]
 
+# Research-design checklist, from the guide: the approach, how data is
+# collected and analysed, and feasibility. This is step 4 of the process and
+# maps to the Stage 4 methodology section.
+_RD_ITEMS = [
+    ("rd_approach",   "Approach chosen: qualitative, quantitative, or mixed"),
+    ("rd_collection", "How the data will be collected"),
+    ("rd_analysis",   "How the data will be analyzed"),
+    ("rd_feasible",   "Feasible with the available data, tools, and timeframe"),
+]
+_RD_FIELDS = [k for k, _label in _RD_ITEMS]
+
 _PROGRESS_FIELDS = ([k for _, items in _PS_STEPS for (k, _p, _t) in items]
-                    + ["rq_question"] + _RQ_FIELDS)
+                    + ["rq_question"] + _RQ_FIELDS + _RD_FIELDS)
 
 
 def _read_progress(con, project_id) -> dict:
@@ -2249,6 +2260,10 @@ def _build_trackers(proposal: dict, progress: dict) -> list:
     rq_group, rq_answered = group("A good research question is", _RQ_ITEMS)
     rq_complete = bool((proposal.get("research_questions") or "").strip())
 
+    # ── Research design: approach, collection, analysis, feasibility ──
+    rd_group, rd_answered = group("Your research design", _RD_ITEMS)
+    rd_complete = bool((proposal.get("methodology") or "").strip())
+
     return [
         {
             "id": "problem_statement",
@@ -2270,6 +2285,16 @@ def _build_trackers(proposal: dict, progress: dict) -> list:
             "total": len(_RQ_ITEMS),
             "complete": rq_complete,
             "active": not ps_complete or not rq_complete,
+        },
+        {
+            "id": "research_design",
+            "title": "Research design",
+            "note": "",
+            "groups": [rd_group],
+            "answered": rd_answered,
+            "total": len(_RD_ITEMS),
+            "complete": rd_complete,
+            "active": stage == "4" and not rd_complete,
         },
     ]
 
@@ -2907,6 +2932,10 @@ _ADVISOR_TOOLS = [{
                 "rq_specific": {"type": "string", "description": "Set once it is specific enough to answer thoroughly."},
                 "rq_complex": {"type": "string", "description": "Set once it is complex — not a yes/no question, and not answerable with an easily-found fact."},
                 "rq_relevant": {"type": "string", "description": "Set once it is relevant to the field and/or society."},
+                "rd_approach": {"type": "string", "description": "The approach chosen and why: qualitative (to understand/explore), quantitative (to test/confirm), or mixed."},
+                "rd_collection": {"type": "string", "description": "How the data will be collected (the method, source, and how participants or sources are selected)."},
+                "rd_analysis": {"type": "string", "description": "How the collected data will be analyzed."},
+                "rd_feasible": {"type": "string", "description": "Set once the design is feasible with the available data, tools, and timeframe."},
             },
         }
     }

@@ -43,9 +43,9 @@ def _items(section):
 
 # ── Two sections, in order ─────────────────────────────────────────────────
 
-def test_there_are_problem_statement_and_research_question_sections(project):
+def test_the_sections_cover_the_three_checklist_stages(project):
     assert [s["id"] for s in _trackers(project)] == \
-        ["problem_statement", "research_questions"]
+        ["problem_statement", "research_questions", "research_design"]
 
 
 def test_both_start_empty_so_the_whole_roadmap_is_visible(project):
@@ -164,3 +164,57 @@ def test_the_derived_stage_still_agrees_with_the_prompt():
     assert web_app._derive_stage({}) == "1-2"
     assert web_app._derive_stage({"novelty": "N."}) == "3"
     assert web_app._derive_stage({"problem_statement": "P."}) == "4"
+
+
+# ── Research design (the third section) ────────────────────────────────────
+
+def test_there_is_a_research_design_section(project):
+    assert [s["id"] for s in _trackers(project)] == \
+        ["problem_statement", "research_questions", "research_design"]
+
+
+def test_research_design_lists_approach_collection_analysis_feasibility(project):
+    labels = [it["label"] for it in _items(_section(project, "research_design"))]
+    assert labels == [
+        "Approach chosen: qualitative, quantitative, or mixed",
+        "How the data will be collected",
+        "How the data will be analyzed",
+        "Feasible with the available data, tools, and timeframe",
+    ]
+
+
+def test_marking_the_approach_ticks_it_off(project):
+    web_app._note_progress(1, {"rd_approach": "Qualitative — to understand experience."})
+    sec = _section(project, "research_design")
+    assert sec["answered"] == 1
+    first = sec["groups"][0]["items"][0]
+    assert first["done"] and "Qualitative" in first["note"]
+
+
+def test_research_design_completes_when_the_methodology_is_saved(project):
+    assert _section(project, "research_design")["complete"] is False
+    web_app._save_proposal(1, {"methodology": "- Interviews, thematically coded."})
+    assert _section(project, "research_design")["complete"] is True
+
+
+def test_research_design_becomes_active_in_stage_four(project):
+    assert _section(project, "research_design")["active"] is False   # stage 1-2
+    web_app._save_proposal(1, {"problem_statement": "P."})            # -> stage 4
+    assert _section(project, "research_design")["active"] is True
+
+
+def test_note_progress_accepts_the_research_design_fields():
+    props = next(t["function"]["parameters"]["properties"]
+                 for t in web_app._ADVISOR_TOOLS
+                 if t["function"]["name"] == "note_progress")
+    for f in ("rd_approach", "rd_collection", "rd_analysis", "rd_feasible"):
+        assert f in props
+
+
+def test_the_advisor_has_the_research_design_ground_truth():
+    stable, _ = web_app._advisor_system_prompt(
+        {"name": "Jane", "proposal": {"problem_statement": "P."}})
+    assert "RESEARCH DESIGN — QUALITATIVE, QUANTITATIVE, OR MIXED" in stable
+    assert "QUANTITATIVE" in stable and "test" in stable.lower()
+    assert "QUALITATIVE" in stable and "understand" in stable.lower()
+    assert "WHAT THE WHOLE PROPOSAL MUST ACHIEVE" in stable
