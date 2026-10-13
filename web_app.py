@@ -2677,7 +2677,12 @@ async def api_project_proposal_edit(project_id: int, req: Request):
 
 # ── Advisor ───────────────────────────────────────────────────────────────────
 
-MAX_SENT_TURNS = 24   # transcript entries sent to the model; the proposal is the durable memory
+# Transcript entries sent to the model each turn. The saved proposal and
+# progress are the DURABLE memory (rebuilt into every prompt), but anything the
+# researcher said that is not yet recorded there lives only in this window — so
+# too small a window makes the advisor forget a recent answer and ask it again.
+# 40 keeps roughly the last 20 exchanges in view at a modest token cost.
+MAX_SENT_TURNS = 40
 
 # One model call may not take longer than this. Without it a hung upstream call
 # hangs the request until the hosting proxy gives up, and a proxy timeout is an
@@ -2722,6 +2727,14 @@ def _looks_like_options(text: str) -> bool:
     merely references the researcher's own terms alone. A false positive only
     costs one faithful rewrite; a miss leaves the prompt rules as the floor."""
     if not text:
+        return False
+    # NEVER touch a message carrying a structured list — an option block the app
+    # renders as buttons ("[1] ..."), a bulleted draft ("- ..."), or a numbered
+    # set. Those are legitimate drafted content, above all the research questions
+    # presented with "which of these is most central?", and rewriting them would
+    # delete real work and leave a dangling question with nothing below it. The
+    # inline-prose menu we target is always plain sentence text.
+    if re.search(r"(?m)^\s*(\[\d+\]|[-*•]\s|\d+[.)]\s)", text):
         return False
     if re.search(r"\([^)]*,[^)]*\)", text):          # "(batch, streaming, ...)"
         return True

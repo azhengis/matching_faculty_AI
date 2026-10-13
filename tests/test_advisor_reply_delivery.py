@@ -140,6 +140,34 @@ def test_looks_like_options_catches_the_real_failure_shapes():
     assert not f("You mentioned turnout, pay, and culture. Which came first?")
     assert not f("What do you mean by diminishing returns here?")
     assert not f("Where does the problem arise?")
+    # A STRUCTURED list is legitimate drafted content, never stripped: the
+    # research questions presented with "which of these is most central?".
+    assert not f("Here are the questions I drafted:\n[1] Does X affect Y?\n"
+                 "[2] Does Z moderate it?\nWhich of these feels most central?")
+    assert not f("Draft questions:\n- Does X affect Y, or not?\n- What explains Z?")
+    assert not f("Two options:\n1. A longitudinal study\n2. A cross-section\n"
+                 "Which fits, a or b?")
+
+
+def test_a_drafted_research_question_list_is_not_stripped(project, monkeypatch):
+    """The reported break: the advisor drafted the questions and asked which was
+    central, and the backstop ate them, leaving a dangling question with nothing
+    below. A structured list is drafted content and must survive untouched."""
+    drafted = ("Here are the research questions I drafted:\n"
+               "[1] Does remote work reduce turnover in mid-size firms?\n"
+               "[2] Does it vary by neighbourhood?\n"
+               "Which of these feels most central?")
+    calls = {"n": 0}
+
+    def completion(**kw):
+        calls["n"] += 1
+        return _resp(drafted, finish="stop")
+
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
+    body = _chat(project)
+    assert body["reply"] == drafted
+    assert calls["n"] == 1   # no rewrite pass fired
 
 
 def test_an_inline_option_list_in_a_question_is_rewritten(project, monkeypatch):
