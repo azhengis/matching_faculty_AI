@@ -77,9 +77,12 @@ body.resizing{cursor:col-resize;user-select:none}
 .trk-item-head{width:100%;display:flex;align-items:flex-start;gap:9px;padding:5px 4px;background:none;border:none;font-family:inherit;text-align:left;cursor:pointer}
 .trk-item-head[disabled]{cursor:default}
 .trk-item-head:not([disabled]):hover{background:var(--canvas)}
-.trk-dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;margin-top:2px;border:1.5px solid var(--border-2);background:#fff}
-.state-progress .trk-dot{background:var(--ink-3);border-color:var(--ink-3)}   /* gray: in progress */
-.state-done .trk-dot{background:var(--teal);border-color:var(--teal)}          /* green: done */
+/* Three states: not started = outline circle, in progress = blue half-fill,
+   done = green solid with a white check. */
+.trk-dot{position:relative;box-sizing:border-box;width:14px;height:14px;border-radius:50%;flex-shrink:0;margin-top:2px;border:1.5px solid var(--border-2);background:#fff}
+.state-progress .trk-dot{background:linear-gradient(90deg,var(--navy-lift) 0 50%,#fff 50% 100%);border-color:var(--navy-lift)}  /* blue half-filled: in progress */
+.state-done .trk-dot{background:var(--green);border-color:var(--green)}          /* green solid: done */
+.state-done .trk-dot::after{content:"";position:absolute;top:50%;left:50%;width:3px;height:6px;border:solid #fff;border-width:0 1.6px 1.6px 0;transform:translate(-50%,-62%) rotate(45deg)}  /* white check */
 .trk-q{flex:1;font-size:12.5px;color:var(--ink-2);line-height:1.4}
 .state-done .trk-q{color:var(--ink)}
 .trk-arrow{font-size:10px;color:var(--ink-3);flex-shrink:0;margin-top:2px;transition:transform .18s}
@@ -952,11 +955,18 @@ function renderTracker() {
     if (open) {
       html += '<div class="trk-body">';
       if (sec.note) html += `<div class="trk-note">“${esc(sec.note)}”</div>`;
+      // The single "in progress" marker is the first unanswered item of the
+      // active section — the one the professor is on now. Everything after it
+      // is "not started"; everything answered is "done".
+      let progressKey = null;
+      if (sec.active && !sec.complete) {
+        for (const g of sec.groups) { for (const it of g.items) { if (!it.done) { progressKey = it.key; break; } } if (progressKey) break; }
+      }
       for (const g of sec.groups) {
         html += `<div class="ps-step"><div class="ps-step-title">${esc(g.title)}</div>`;
         for (const it of g.items) {
-          // Status: green done, gray in-progress (active section), white not started.
-          const state = it.done ? 'done' : (sec.active ? 'progress' : 'todo');
+          // done = green, the current item = blue half-fill, the rest = outline.
+          const state = it.done ? 'done' : (it.key === progressKey ? 'progress' : 'todo');
           const hasAnswer = !!it.note;
           const iopen = hasAnswer && _itemOpen.has(it.key);
           html += `<div class="trk-item state-${state} ${iopen ? 'open' : ''}">`

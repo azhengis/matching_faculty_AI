@@ -420,6 +420,15 @@ def test_stage_one_stays_out_of_data_and_methods():
     assert "Methods are Stage 4" in text
 
 
+def test_the_message_stays_short_and_does_not_stack_observations():
+    """Reported: an opening turn stacked a silent-judgment narration, a
+    from-memory literature claim, and a graded comment before finally asking two
+    questions. A turn is one clause of reflection plus one question."""
+    text = _advisor()
+    assert "KEEP THE WHOLE MESSAGE SHORT" in text
+    assert "Do NOT stack observations before the question" in text
+
+
 def test_stage_one_walks_the_whole_checklist_before_research_questions():
     """Reported: it asked a couple of clarifying questions then jumped to the
     research questions, leaving the problem-statement panel half grey. Stage 1
