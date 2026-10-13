@@ -122,6 +122,59 @@ def test_a_complete_reply_is_not_flagged(project, monkeypatch):
     assert "truncated" not in _chat(project)
 
 
+# ── 1a. A candidate list inside a question is rewritten away ───────────────
+
+def test_looks_like_options_catches_the_real_failure_shapes():
+    f = web_app._looks_like_options
+    # The two reported openers.
+    assert f("What kind of system were you watching this happen in? Something "
+             "from your CMS work, a particular cloud platform, a class of "
+             "workload (batch, streaming, transactional)?")
+    assert f("what specific system or platform have your tests actually been "
+             "on, one cloud data warehouse, a particular distributed database, "
+             "something you built yourself?")
+    # Bare "X, Y, or Z?" menu and an example marker.
+    assert f("Is it batch, streaming, or transactional?")
+    assert f("What is the setting, such as a hospital or a clinic?")
+    # A question that merely names the researcher's OWN terms is left alone.
+    assert not f("You mentioned turnout, pay, and culture. Which came first?")
+    assert not f("What do you mean by diminishing returns here?")
+    assert not f("Where does the problem arise?")
+
+
+def test_an_inline_option_list_in_a_question_is_rewritten(project, monkeypatch):
+    """The deterministic backstop: the advisor offered a menu, so the server
+    makes one rewrite pass and the researcher sees a single clean question."""
+    _stub(monkeypatch,
+          _resp("What system were you watching this on, a cloud warehouse, a "
+                "particular database, something you built yourself?", finish="stop"),
+          _resp("What system were you watching this on?", finish="stop"))
+    body = _chat(project)
+    assert body["reply"] == "What system were you watching this on?"
+
+    # The stored transcript carries the cleaned version, so a reload matches.
+    con = sqlite3.connect(web_app.DB_PATH)
+    hist = json.loads(con.execute(
+        "SELECT chat_history FROM projects WHERE id = 1").fetchone()[0])
+    con.close()
+    assert hist[-1]["content"] == "What system were you watching this on?"
+
+
+def test_a_clean_question_is_not_rewritten(project, monkeypatch):
+    """No heuristic match means no extra model call — the backstop stays out of
+    the way of a well-formed question."""
+    calls = {"n": 0}
+
+    def completion(**kw):
+        calls["n"] += 1
+        return _resp("What system were you watching this on?", finish="stop")
+
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
+    assert _chat(project)["reply"] == "What system were you watching this on?"
+    assert calls["n"] == 1
+
+
 # ── 1b. An orphaned tool_use never reaches the model ───────────────────────
 
 def test_a_tool_that_raises_still_gets_a_result_so_the_turn_is_valid(project, monkeypatch):

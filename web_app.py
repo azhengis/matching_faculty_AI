@@ -2701,6 +2701,79 @@ MAX_TOOL_ROUNDS = 8
 MAX_TURN_ROUNDS = 12
 
 
+# ── Enforce the one-question / no-candidate-list rule in code ────────────────
+# The prompt forbids the advisor from handing the researcher candidate answers
+# ("such as X, a particular Y, something you built"). It still slips this on
+# opening turns, and a researcher who is handed a menu picks from it instead of
+# saying what they actually mean — which also wrecks the collaborator matching,
+# since the idea is then partly the tool's. This is the deterministic backstop:
+# detect an offered list, and rewrite the message to a single clean question.
+_OPTION_MARKERS = re.compile(
+    r"\b(such as|for example|for instance|e\.g\.|something you|something from|"
+    r"a particular|a class of)\b", re.I)
+
+
+def _looks_like_options(text: str) -> bool:
+    """True if the message appears to hand the researcher candidate answers.
+
+    High-precision on the real failure shapes — a parenthetical comma list, an
+    example-introducing marker, a question tail that enumerates determiner-led
+    noun phrases, or an 'X, Y, or Z?' menu — while leaving a question that
+    merely references the researcher's own terms alone. A false positive only
+    costs one faithful rewrite; a miss leaves the prompt rules as the floor."""
+    if not text:
+        return False
+    if re.search(r"\([^)]*,[^)]*\)", text):          # "(batch, streaming, ...)"
+        return True
+    if _OPTION_MARKERS.search(text):
+        return True
+    for sent in re.split(r"(?<=[?])\s+", text):
+        if "?" not in sent:
+            continue
+        frags = [f.strip() for f in re.split(r",|\bor\b", sent) if f.strip()]
+        # Fragments offered as candidate noun phrases ("a db", "one X", "something...").
+        offered = sum(1 for f in frags
+                      if re.match(r"(a |an |one |some |something\b)", f, re.I))
+        if offered >= 2:
+            return True
+        # A bare "X, Y, or Z?" choice menu.
+        if re.search(r"\bor\b", sent) and len(frags) >= 3:
+            return True
+    return False
+
+
+_DEOPTION_PROMPT = (
+    "You rewrite ONE chat message from a research advisor so it obeys a hard "
+    "rule: it must ask the researcher exactly ONE open question and offer NO "
+    "candidate answers. Remove every example, option, or list the message hands "
+    "the researcher — whether introduced by 'such as' / 'like' / 'for example', "
+    "placed in a parenthetical such as '(batch, streaming, transactional)', or "
+    "written as 'A, B, or C'. Keep at most a one-clause reflection of what they "
+    "said, then the bare question. Do NOT add anything, do NOT answer the "
+    "question, and do NOT change what the question is about. Keep the advisor's "
+    "plain voice and any working title it stated. Return ONLY the rewritten "
+    "message, with no preamble or quotation marks."
+)
+
+
+def _deoption_question(text: str) -> str:
+    """Rewrite a message that slipped in candidate answers to a clean question.
+
+    Fires only when the heuristic flags the text, makes one extra model call,
+    and falls back to the original on any failure so it can never drop a turn."""
+    if not _looks_like_options(text):
+        return text
+    try:
+        resp = _litellm.completion(
+            model=CHATBOT_MODEL, max_tokens=500, timeout=LLM_CALL_TIMEOUT,
+            messages=[{"role": "system", "content": _DEOPTION_PROMPT},
+                      {"role": "user", "content": text}])
+        out = (resp.choices[0].message.content or "").strip()
+        return out or text
+    except Exception:
+        return text
+
+
 def _cached_system(stable: str, volatile: str) -> list:
     """System prompt as two blocks, the stable one marked cacheable.
 
@@ -4781,6 +4854,15 @@ async def api_advisor_chat(req: Request):
                 continue
 
             # reason "stop" (or anything else terminal): the answer is whole.
+            # Backstop the no-candidate-list rule — only the final message, only
+            # when it looks like it offered options — and keep the stored
+            # transcript in step so a reload shows the clean version too.
+            if said:
+                fixed = _deoption_question(said[-1])
+                if fixed != said[-1]:
+                    said[-1] = fixed
+                    if history and history[-1].get("role") == "assistant":
+                        history[-1]["content"] = fixed
             _persist_history(project_id, history)
             _name_project_if_untitled(project_id, history)
             return JSONResponse({"reply": "\n\n".join(said),
