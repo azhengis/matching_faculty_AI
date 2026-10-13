@@ -2677,12 +2677,15 @@ async def api_project_proposal_edit(project_id: int, req: Request):
 
 # ── Advisor ───────────────────────────────────────────────────────────────────
 
-# Transcript entries sent to the model each turn. The saved proposal and
-# progress are the DURABLE memory (rebuilt into every prompt), but anything the
-# researcher said that is not yet recorded there lives only in this window — so
-# too small a window makes the advisor forget a recent answer and ask it again.
-# 40 keeps roughly the last 20 exchanges in view at a modest token cost.
-MAX_SENT_TURNS = 40
+# Transcript entries sent to the model each turn. The durable memory is the
+# saved proposal and the recorded checklist answers (_render_captured) — both
+# rebuilt into every prompt — so a fact the advisor recorded is never forgotten
+# regardless of this number. This window only governs how much RAW back-and-forth
+# the model also sees. 200 (~100 exchanges) means a normal proposal session is
+# sent in full; the cap exists only so a pathologically long transcript cannot
+# grow the request without bound (every model has a context limit, and tokens
+# cost per turn). It is not where memory lives.
+MAX_SENT_TURNS = 200
 
 # One model call may not take longer than this. Without it a hung upstream call
 # hangs the request until the hosting proxy gives up, and a proxy timeout is an
@@ -2853,6 +2856,31 @@ def _pair_tools(msgs: list) -> list:
     return out
 
 
+def _render_captured(proposal: dict) -> str:
+    """The answers already recorded in the panel, rendered for the prompt.
+
+    THE durable memory that stops the advisor re-asking something already
+    answered. note_progress / save_proposal write it, _read_proposal rebuilds it
+    into proposal['trackers'], and this feeds it back into every turn's prompt —
+    so a recorded answer (the setting, the population, the neighbourhood) is
+    known to the model forever, not just while it sits in the chat window."""
+    lines: list = []
+    for trk in (proposal.get("trackers") or []):
+        captured: list = []
+        note = (trk.get("note") or "").strip()      # e.g. the drafted question
+        if note:
+            captured.append(f"  - {note}")
+        for g in trk.get("groups", []):
+            for it in g.get("items", []):
+                ans = (it.get("note") or "").strip()
+                if ans:
+                    captured.append(f"  - {it['label']} {ans}")
+        if captured:
+            lines.append(f"{trk['title']}:")
+            lines.extend(captured)
+    return "\n".join(lines) or "(nothing recorded yet)"
+
+
 def _advisor_system_prompt(profile: dict) -> tuple[str, str]:
     """Return (STABLE, VOLATILE) halves of the advisor prompt.
 
@@ -2939,6 +2967,7 @@ def _advisor_system_prompt(profile: dict) -> tuple[str, str]:
     volatile = advisor_prompt.volatile(
         name=name, project_title=project_title,
         proposal_state=proposal_state, gaps=gaps,
+        captured=_render_captured(proposal),
         bio=bio or "(none)",
         activities=activities or "(not summarised)",
         project=project or "(none)",

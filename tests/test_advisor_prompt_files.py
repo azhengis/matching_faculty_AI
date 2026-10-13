@@ -77,8 +77,31 @@ def test_the_stable_half_asks_for_exactly_what_web_app_supplies():
 
 def test_the_volatile_half_asks_for_exactly_what_web_app_supplies():
     assert advisor_prompt.volatile_placeholders() == {
-        "name", "project_title", "proposal_state", "gaps", "bio",
+        "name", "project_title", "proposal_state", "gaps", "captured", "bio",
         "activities", "project", "paper_lines", "document_lines", "link_lines"}
+
+
+def test_recorded_answers_are_fed_back_into_every_prompt():
+    """The memory fix. An answer recorded in the panel (progress) must appear in
+    the prompt, so the advisor cannot re-ask it once the chat scrolls past the
+    model's window — which is exactly what happened with the neighbourhood."""
+    proposal = {"trackers": [
+        {"title": "Problem statement", "note": "", "groups": [
+            {"items": [
+                {"label": "Who does it affect?",
+                 "note": "low-income Southeast neighbourhoods"}]}]},
+        {"title": "Research questions",
+         "note": "Does remote work reduce turnover?", "groups": []},
+    ]}
+    _, volatile = web_app._advisor_system_prompt({"name": "Jane", "proposal": proposal})
+    assert "DO NOT ASK AGAIN" in volatile
+    assert "low-income Southeast neighbourhoods" in volatile
+    assert "Does remote work reduce turnover?" in volatile
+
+
+def test_captured_is_blank_when_nothing_recorded():
+    assert web_app._render_captured({}) == "(nothing recorded yet)"
+    assert web_app._render_captured({"trackers": []}) == "(nothing recorded yet)"
 
 
 def test_nothing_unfilled_survives_into_a_built_prompt():
