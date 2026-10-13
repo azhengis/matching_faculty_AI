@@ -427,6 +427,9 @@ def test_the_message_stays_short_and_does_not_stack_observations():
     text = _advisor()
     assert "KEEP THE WHOLE MESSAGE SHORT" in text
     assert "Do NOT stack observations before the question" in text
+    # The pre-send checklist names the exact failure patterns literally.
+    assert "BEFORE YOU SEND, CHECK FOUR THINGS" in text
+    assert "(batch, streaming, transactional)" in text
 
 
 def test_stage_one_walks_the_whole_checklist_before_research_questions():
