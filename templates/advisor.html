@@ -88,6 +88,15 @@ body.resizing{cursor:col-resize;user-select:none}
 .trk-arrow{font-size:10px;color:var(--ink-3);flex-shrink:0;margin-top:2px;transition:transform .18s}
 .trk-item.open .trk-arrow{transform:rotate(180deg)}
 .trk-answer{font-size:12px;color:var(--teal);line-height:1.5;padding:2px 4px 8px 22px;font-style:italic}
+.trk-lock{font-size:10.5px;color:var(--navy-lift);flex-shrink:0;margin-top:1px}
+.trk-edit{padding:2px 4px 10px 22px;display:flex;flex-direction:column;gap:6px}
+.trk-input{width:100%;box-sizing:border-box;font:inherit;font-size:12px;color:var(--ink);background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r-sm);padding:6px 8px;resize:vertical;outline:none}
+.trk-input:focus{border-color:var(--navy-lift);box-shadow:0 0 0 2px rgba(11,78,146,.12)}
+.trk-edit-row{display:flex;gap:10px;align-items:center}
+.trk-save{font:inherit;font-size:11.5px;font-weight:650;color:#fff;background:var(--navy-lift);border:none;border-radius:var(--r-sm);padding:5px 13px;cursor:pointer}
+.trk-save:hover{background:var(--navy)}
+.trk-release{font:inherit;font-size:11.5px;color:var(--ink-3);background:none;border:none;cursor:pointer;text-decoration:underline;padding:0}
+.trk-release:hover{color:var(--ink-2)}
 
 /* ── Research-gap map ── */
 .gap-map-card{margin-bottom:26px;padding:16px 16px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-sm)}
@@ -932,6 +941,49 @@ function toggleItem(key) {
   renderTracker();
 }
 
+// Re-pull the proposal (which carries the trackers) and repaint the panel.
+async function refreshProposalFromServer() {
+  try {
+    const res = await fetch(`/api/projects/${_projectId}/proposal`);
+    if (res.ok) _proposal = await res.json();
+  } catch (e) { return; }
+  renderTracker();
+  renderProposalPanel();
+}
+
+// Save the researcher's own answer to one checklist item. It locks, so the
+// advisor stops asking that question and will not overwrite the wording.
+async function saveItem(key) {
+  const ta = document.getElementById('trkin-' + key);
+  if (!ta) return;
+  const text = ta.value.trim();
+  try {
+    const res = await fetch(`/api/projects/${_projectId}/progress`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key, text })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not save');
+  } catch (e) {
+    alert('Could not save this answer: ' + e.message);
+    return;
+  }
+  _itemOpen.delete(key);
+  await refreshProposalFromServer();
+}
+
+// Hand a hand-edited item back to the advisor (keeps the text, drops the lock).
+async function releaseItem(key) {
+  try {
+    const res = await fetch(`/api/projects/${_projectId}/progress`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key, release: true })
+    });
+    if (!res.ok) return;
+  } catch (e) { return; }
+  await refreshProposalFromServer();
+}
+
 function renderTracker() {
   const stageWrap = document.getElementById('ps-stage');
   const stageName = document.getElementById('ps-stage-name');
@@ -967,16 +1019,24 @@ function renderTracker() {
         for (const it of g.items) {
           // done = green, the current item = blue half-fill, the rest = outline.
           const state = it.done ? 'done' : (it.key === progressKey ? 'progress' : 'todo');
-          const hasAnswer = !!it.note;
-          const iopen = hasAnswer && _itemOpen.has(it.key);
+          const iopen = _itemOpen.has(it.key);   // every item opens, to read OR edit
           html += `<div class="trk-item state-${state} ${iopen ? 'open' : ''}">`
-            + `<button class="trk-item-head" ${hasAnswer ? `onclick="toggleItem('${it.key}')"` : 'disabled'}>`
+            + `<button class="trk-item-head" onclick="toggleItem('${it.key}')">`
             + `<span class="trk-dot" title="${state === 'done' ? 'done' : state === 'progress' ? 'in progress' : 'not started'}"></span>`
             + `<span class="trk-q">${esc(it.label)}</span>`
-            + (hasAnswer ? `<span class="trk-arrow">▾</span>` : '')
-            + `</button>`
-            + (iopen ? `<div class="trk-answer">${esc(it.note)}</div>` : '')
-            + `</div>`;
+            + (it.locked ? `<span class="trk-lock" title="You edited this; the advisor won't change it">✎</span>` : '')
+            + `<span class="trk-arrow">▾</span>`
+            + `</button>`;
+          if (iopen) {
+            html += `<div class="trk-edit">`
+              + `<textarea class="trk-input" id="trkin-${it.key}" rows="2" `
+              + `placeholder="Type the answer in your own words…">${esc(it.note || '')}</textarea>`
+              + `<div class="trk-edit-row">`
+              + `<button class="trk-save" onclick="saveItem('${it.key}')">Save</button>`
+              + (it.locked ? `<button class="trk-release" onclick="releaseItem('${it.key}')">Let the advisor manage this</button>` : '')
+              + `</div></div>`;
+          }
+          html += `</div>`;
         }
         html += '</div>';
       }

@@ -122,6 +122,52 @@ def test_a_complete_reply_is_not_flagged(project, monkeypatch):
     assert "truncated" not in _chat(project)
 
 
+# ── 0. Hand-editing a checklist answer in the panel ────────────────────────
+
+def test_a_checklist_answer_can_be_hand_edited_and_locks(project):
+    """The panel's problem-statement questions can be answered by hand, not only
+    by the advisor. A hand-entered answer locks: the advisor can neither
+    overwrite it nor ask that question again."""
+    r = _run(web_app.api_project_progress_edit(
+        1, _FakeRequest({"key": "ctx_1", "text": "low-income Southeast neighbourhoods"}, project)))
+    assert json.loads(r.body)["status"] == "saved"
+
+    con = sqlite3.connect(web_app.DB_PATH)
+    prog = json.loads(con.execute("SELECT progress FROM projects WHERE id=1").fetchone()[0])
+    assert prog["ctx_1"] == "low-income Southeast neighbourhoods"
+    assert "ctx_1" in prog["_locked"]
+
+    # The advisor must NOT overwrite a hand-locked item.
+    web_app._note_progress(1, {"ctx_1": "something the model made up"})
+    prog = json.loads(con.execute("SELECT progress FROM projects WHERE id=1").fetchone()[0])
+    assert prog["ctx_1"] == "low-income Southeast neighbourhoods"
+
+    # The tracker carries the note and marks it locked for the UI.
+    proposal = web_app._read_proposal(con, 1)
+    items = [it for trk in proposal["trackers"] for g in trk["groups"] for it in g["items"]]
+    ctx1 = next(it for it in items if it["key"] == "ctx_1")
+    assert ctx1["note"] == "low-income Southeast neighbourhoods"
+    assert ctx1["locked"] is True
+    con.close()
+
+
+def test_releasing_a_hand_edited_item_returns_it_to_the_advisor(project):
+    _run(web_app.api_project_progress_edit(1, _FakeRequest({"key": "ctx_2", "text": "mine"}, project)))
+    _run(web_app.api_project_progress_edit(1, _FakeRequest({"key": "ctx_2", "release": True}, project)))
+    web_app._note_progress(1, {"ctx_2": "advisor value"})
+
+    con = sqlite3.connect(web_app.DB_PATH)
+    prog = json.loads(con.execute("SELECT progress FROM projects WHERE id=1").fetchone()[0])
+    con.close()
+    assert prog["ctx_2"] == "advisor value"        # lock gone, advisor can write
+    assert "ctx_2" not in prog.get("_locked", [])
+
+
+def test_an_unknown_checklist_key_is_rejected(project):
+    r = _run(web_app.api_project_progress_edit(1, _FakeRequest({"key": "not_a_field", "text": "x"}, project)))
+    assert r.status_code == 400
+
+
 # ── 1a. A candidate list inside a question is rewritten away ───────────────
 
 def test_looks_like_options_catches_the_real_failure_shapes():

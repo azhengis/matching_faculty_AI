@@ -2236,6 +2236,7 @@ def _build_trackers(proposal: dict, progress: dict) -> list:
     stage and whether it is complete, so the panel can expand the one in
     progress and fold the finished ones."""
     stage = _derive_stage(proposal)
+    locked = set(progress.get("_locked") or [])   # items the researcher typed in by hand
 
     def group(title, items):
         rendered, answered = [], 0
@@ -2243,7 +2244,8 @@ def _build_trackers(proposal: dict, progress: dict) -> list:
             note = (progress.get(key) or "").strip()
             if note:
                 answered += 1
-            rendered.append({"key": key, "label": label, "done": bool(note), "note": note})
+            rendered.append({"key": key, "label": label, "done": bool(note),
+                             "note": note, "locked": key in locked})
         return {"title": title, "items": rendered}, answered
 
     # ── Problem statement: the three steps, in practical or theoretical form ──
@@ -2313,6 +2315,7 @@ def _note_progress(project_id, args: dict) -> dict:
     con = sqlite3.connect(DB_PATH)
     try:
         current = _read_progress(con, pid)
+        locked = set(current.get("_locked") or [])   # researcher's own answers
         changed = []
         pt = (args.get("problem_type") or "").strip().lower()
         if pt in ("practical", "theoretical"):
@@ -2320,6 +2323,10 @@ def _note_progress(project_id, args: dict) -> dict:
             changed.append("problem_type")
         for field in _PROGRESS_FIELDS:
             if field not in args:
+                continue
+            if field in locked:
+                # The researcher hand-entered this one in the panel; the advisor
+                # does not get to overwrite it.
                 continue
             value = " ".join(str(args[field] or "").split())[:400]
             if value:
@@ -2673,6 +2680,55 @@ async def api_project_proposal_edit(project_id: int, req: Request):
     con.commit()
     con.close()
     return JSONResponse({"status": "saved", "section": section, "edited_sections": edited})
+
+
+@app.put("/api/projects/{project_id}/progress")
+async def api_project_progress_edit(project_id: int, req: Request):
+    """Save the researcher's own answer to one checklist item in the panel.
+
+    Body: {"key": "ctx_1", "text": "..."} — writes the answer into the same
+    progress store the advisor fills, and LOCKS it so the advisor neither
+    overwrites it nor asks that question again (the lock is enforced in
+    _note_progress, and the captured answer is fed back into every prompt).
+    Body: {"key": "ctx_1", "release": true} — hands the item back to the advisor
+    (clears the lock; leaves the text).
+    Body: {"key": "ctx_1", "text": ""} — clears the answer and the lock.
+    """
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    body = await req.json()
+    key  = (body.get("key") or "").strip()
+    if key not in _PROGRESS_FIELDS:
+        return JSONResponse({"error": f"Unknown item: {key}"}, status_code=400)
+
+    con = sqlite3.connect(DB_PATH)
+    try:
+        if _owned_project(con, user, project_id) is None:
+            return JSONResponse({"error": "No such project"}, status_code=404)
+        progress = _read_progress(con, project_id)
+        locked   = [k for k in (progress.get("_locked") or []) if k in _PROGRESS_FIELDS]
+
+        if body.get("release"):
+            locked = [k for k in locked if k != key]
+        else:
+            text = " ".join(str(body.get("text") or "").split())[:400]
+            if text:
+                progress[key] = text
+                if key not in locked:
+                    locked.append(key)
+            else:                       # empty text clears the answer and lock
+                progress.pop(key, None)
+                locked = [k for k in locked if k != key]
+
+        progress["_locked"] = locked
+        con.execute("UPDATE projects SET progress = ?, updated_at = datetime('now') WHERE id = ?",
+                    (json.dumps(progress), project_id))
+        con.commit()
+    finally:
+        con.close()
+    return JSONResponse({"status": "saved", "key": key, "locked": locked})
 
 
 # ── Advisor ───────────────────────────────────────────────────────────────────
@@ -4822,7 +4878,13 @@ async def api_advisor_chat(req: Request):
         # is its continuation rather than a new message.
         continuing = False
         for _round in range(MAX_TURN_ROUNDS):
-            resp    = _litellm.completion(model=CHATBOT_MODEL, max_tokens=1800,
+            # High ceiling so a normal reply is never cut off mid-sentence —
+            # max_tokens is required by the API, so "no limit" means setting it
+            # generously, not omitting it. The brevity rules keep turns short,
+            # so a high cap costs nothing (you pay only for tokens generated);
+            # the continue-and-stitch logic below stays as a safety net for the
+            # rare case (a full proposal draft) that still runs past it.
+            resp    = _litellm.completion(model=CHATBOT_MODEL, max_tokens=8192,
                                           timeout=LLM_CALL_TIMEOUT,
                                           tools=_ADVISOR_TOOLS, messages=messages)
             msg     = resp.choices[0].message
