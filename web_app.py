@@ -2835,6 +2835,14 @@ _OPTION_MARKERS = re.compile(
     r"a particular|a class of)\b", re.I)
 
 
+def _has_structured_list(text: str) -> bool:
+    """A message carrying an option block ("[1] ..."), a bulleted draft
+    ("- ..."), or a numbered set. That is legitimate drafted content — above all
+    the research questions shown with "which of these is most central?" — and
+    the tidy pass must leave it completely alone."""
+    return bool(re.search(r"(?m)^\s*(\[\d+\]|[-*•]\s|\d+[.)]\s)", text or ""))
+
+
 def _looks_like_options(text: str) -> bool:
     """True if the message appears to hand the researcher candidate answers.
 
@@ -2843,15 +2851,7 @@ def _looks_like_options(text: str) -> bool:
     noun phrases, or an 'X, Y, or Z?' menu — while leaving a question that
     merely references the researcher's own terms alone. A false positive only
     costs one faithful rewrite; a miss leaves the prompt rules as the floor."""
-    if not text:
-        return False
-    # NEVER touch a message carrying a structured list — an option block the app
-    # renders as buttons ("[1] ..."), a bulleted draft ("- ..."), or a numbered
-    # set. Those are legitimate drafted content, above all the research questions
-    # presented with "which of these is most central?", and rewriting them would
-    # delete real work and leave a dangling question with nothing below it. The
-    # inline-prose menu we target is always plain sentence text.
-    if re.search(r"(?m)^\s*(\[\d+\]|[-*•]\s|\d+[.)]\s)", text):
+    if not text or _has_structured_list(text):
         return False
     if re.search(r"\([^)]*,[^)]*\)", text):          # "(batch, streaming, ...)"
         return True
@@ -2872,36 +2872,58 @@ def _looks_like_options(text: str) -> bool:
     return False
 
 
+def _needs_tidy(text: str) -> bool:
+    """Whether the tidy pass should rewrite this message. Two faults, both of
+    which the prompt forbids and the model still produces: a candidate list, or
+    more than one question crammed into a turn. Structured drafted content is
+    always left alone."""
+    if not text or _has_structured_list(text):
+        return False
+    return _looks_like_options(text) or text.count("?") >= 2
+
+
 _DEOPTION_PROMPT = (
     "You rewrite ONE chat message from a research advisor so it obeys a hard "
     "rule: it must ask the researcher exactly ONE open question and offer NO "
-    "candidate answers. Remove every example, option, or list the message hands "
-    "the researcher — whether introduced by 'such as' / 'like' / 'for example', "
+    "candidate answers. Keep ONLY the single most important question; drop the "
+    "rest. Remove every example, option, or list the message hands the "
+    "researcher — whether introduced by 'such as' / 'like' / 'for example', "
     "placed in a parenthetical such as '(batch, streaming, transactional)', or "
     "written as 'A, B, or C'. Keep at most a one-clause reflection of what they "
-    "said, then the bare question. Do NOT add anything, do NOT answer the "
-    "question, and do NOT change what the question is about. Keep the advisor's "
-    "plain voice and any working title it stated. Return ONLY the rewritten "
-    "message, with no preamble or quotation marks."
+    "said, then the bare question. The result must contain exactly one question "
+    "mark. Do NOT add anything, do NOT answer the question, and do NOT change "
+    "what the question is about. Keep the advisor's plain voice and any working "
+    "title it stated. Return ONLY the rewritten message, with no preamble or "
+    "quotation marks."
 )
 
 
 def _deoption_question(text: str) -> str:
-    """Rewrite a message that slipped in candidate answers to a clean question.
+    """Tidy a message that slipped in a candidate list or stacked questions down
+    to one clean question.
 
-    Fires only when the heuristic flags the text, makes one extra model call,
-    and falls back to the original on any failure so it can never drop a turn."""
-    if not _looks_like_options(text):
+    Fires only when _needs_tidy flags the text. Re-checks the rewrite and tries
+    once more if it is still bad (the rewrite is itself a model call and can
+    disobey), and falls back to whatever it has on any failure so it can never
+    drop a turn."""
+    if not _needs_tidy(text):
         return text
-    try:
-        resp = _litellm.completion(
-            model=CHATBOT_MODEL, max_tokens=500, timeout=LLM_CALL_TIMEOUT,
-            messages=[{"role": "system", "content": _DEOPTION_PROMPT},
-                      {"role": "user", "content": text}])
-        out = (resp.choices[0].message.content or "").strip()
-        return out or text
-    except Exception:
-        return text
+    current = text
+    for _ in range(2):
+        try:
+            resp = _litellm.completion(
+                model=CHATBOT_MODEL, max_tokens=500, timeout=LLM_CALL_TIMEOUT,
+                messages=[{"role": "system", "content": _DEOPTION_PROMPT},
+                          {"role": "user", "content": current}])
+            out = (resp.choices[0].message.content or "").strip()
+        except Exception:
+            return current
+        if not out:
+            return current
+        current = out
+        if not _needs_tidy(current):
+            break
+    return current
 
 
 # The scripted opening messages the client sends to kick off a fresh

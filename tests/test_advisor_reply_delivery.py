@@ -312,6 +312,49 @@ def test_looks_like_options_catches_the_real_failure_shapes():
     assert not f("Draft questions:\n- Does X affect Y, or not?\n- What explains Z?")
     assert not f("Two options:\n1. A longitudinal study\n2. A cross-section\n"
                  "Which fits, a or b?")
+    # The reported plant-disease pile-up: a run-on question ending in a menu.
+    assert f("whose images are you imagining, what crop or disease system, and "
+             "what is producing the variation, phones in a farmer's field, "
+             "agronomists doing spot checks, something else?")
+
+
+def test_needs_tidy_catches_lists_and_stacked_questions():
+    t = web_app._needs_tidy
+    assert t("Is it A, B, or C?")                       # a list
+    assert t("What is the setting? And what crop?")     # two questions
+    assert not t("Where does the problem arise?")       # one clean question
+    # Structured drafted content is never tidied, even with several questions.
+    assert not t("Drafts:\n[1] Does X?\n[2] Does Y?\nWhich is central?")
+
+
+def test_a_message_with_two_questions_is_tidied_to_one(project, monkeypatch):
+    _stub(monkeypatch,
+          _resp("What is the setting? And what crop are you picturing?", finish="stop"),
+          _resp("What is the setting?", finish="stop"))
+    assert _chat(project)["reply"] == "What is the setting?"
+
+
+def test_a_drafted_list_with_several_questions_is_left_alone(project, monkeypatch):
+    drafted = "Here are drafts:\n[1] Does X affect turnover?\n[2] Does Y?\nWhich is central?"
+    calls = {"n": 0}
+
+    def completion(**kw):
+        calls["n"] += 1
+        return _resp(drafted, finish="stop")
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
+    assert _chat(project)["reply"] == drafted
+    assert calls["n"] == 1        # no tidy pass fired
+
+
+def test_the_tidy_pass_retries_a_bad_rewrite(project, monkeypatch):
+    """The rewrite is itself a model call and can disobey; a still-bad result is
+    retried once more before giving up."""
+    _stub(monkeypatch,
+          _resp("A? B? C?", finish="stop"),               # original: 3 questions
+          _resp("Still bad, X or Y or Z?", finish="stop"), # rewrite 1: still a menu
+          _resp("What is X?", finish="stop"))              # rewrite 2: clean
+    assert _chat(project)["reply"] == "What is X?"
 
 
 def test_a_drafted_research_question_list_is_not_stripped(project, monkeypatch):
