@@ -122,6 +122,40 @@ def test_a_complete_reply_is_not_flagged(project, monkeypatch):
     assert "truncated" not in _chat(project)
 
 
+# ── 0a. The fixed opening greeting ─────────────────────────────────────────
+
+def test_the_first_message_is_a_fixed_greeting_with_the_name(project, monkeypatch):
+    """The opening is a canned greeting addressed by first name, not a
+    model-written one — so the model is not even called for it."""
+    calls = {"n": 0}
+
+    def completion(**kw):
+        calls["n"] += 1
+        return _resp("model generated", finish="stop")
+
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
+
+    body = _chat(project, "Let's start a new project.")
+    assert body["reply"].startswith("Hi Jane!")
+    assert "shape it into" in body["reply"]
+    assert calls["n"] == 0        # the model was NOT called for the opening
+
+    # Stored as the assistant's first turn, after the hidden kickoff.
+    con = sqlite3.connect(web_app.DB_PATH)
+    hist = json.loads(con.execute(
+        "SELECT chat_history FROM projects WHERE id = 1").fetchone()[0])
+    con.close()
+    assert hist[-1]["role"] == "assistant" and hist[-1]["content"].startswith("Hi Jane!")
+
+
+def test_the_message_after_the_greeting_goes_to_the_model(project, monkeypatch):
+    """Only the FIRST turn is canned; everything after is the real advisor."""
+    _chat(project, "Let's start a new project.")        # greeting, no model
+    _stub(monkeypatch, _resp("A real reply.", finish="stop"))
+    assert _chat(project, "I study turnover.")["reply"] == "A real reply."
+
+
 # ── 0. Hand-editing a checklist answer in the panel ────────────────────────
 
 def test_a_checklist_answer_can_be_hand_edited_and_locks(project):

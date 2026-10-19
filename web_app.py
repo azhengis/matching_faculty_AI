@@ -2855,6 +2855,33 @@ def _deoption_question(text: str) -> str:
         return text
 
 
+# The scripted opening messages the client sends to kick off a fresh
+# conversation. They are never shown to the researcher; they only tell the
+# server a new conversation is starting. Keep in step with the `scripted` list
+# in advisor.html.
+_KICKOFF_MESSAGES = {
+    "Let's start a new project.",
+    "I’m back — where were we?",
+    "Hello.",
+}
+
+
+def _opening_greeting(name: str) -> str:
+    """The fixed first message from the advisor, addressed to the researcher by
+    first name. Deliberately canned (not model-written) so every project opens
+    the same, welcoming way and invites a rough idea without demanding rigour."""
+    first = (name or "").strip().split()
+    hello = f"Hi {first[0]}!" if first else "Hi there!"
+    return (
+        f"{hello} What research ideas have you been thinking about lately? "
+        "You can share a topic you're interested in, a problem you'd like to "
+        "explore, or even just a rough idea you're curious about. No need to "
+        "have everything figured out yet. We can talk it through, shape it into "
+        "a research proposal, and find people whose expertise could be a good "
+        "fit for your project."
+    )
+
+
 def _cached_system(stable: str, volatile: str) -> list:
     """System prompt as two blocks, the stable one marked cacheable.
 
@@ -4874,6 +4901,19 @@ async def api_advisor_chat(req: Request):
     history = _pair_tools(history)
     _sessions[session_key] = history
     history.append({"role": "user", "content": message})
+
+    # First-ever advisor turn: open with ONE fixed greeting rather than a
+    # model-written one, so every project starts the same, on-brand way. Only
+    # for the scripted kickoff, and only before the advisor has ever spoken in
+    # this project — every later message goes to the model as normal. Stored as
+    # the assistant's first turn so it persists and the model sees it.
+    if (message in _KICKOFF_MESSAGES
+            and not any(e.get("role") == "assistant" for e in history)):
+        greeting = _opening_greeting(profile.get("name") or "")
+        history.append({"role": "assistant", "content": greeting})
+        _persist_history(project_id, history)
+        return JSONResponse({"reply": greeting, "session_id": session_id})
+
     messages = [{"role": "system",
                  "content": _cached_system(stable_prompt, volatile_prompt)}] + _recent(history)
 
