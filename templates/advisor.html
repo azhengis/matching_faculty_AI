@@ -206,6 +206,9 @@ body.resizing{cursor:col-resize;user-select:none}
 .dot:nth-child(3){animation-delay:.3s}
 @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
 
+/* Authoritative: a component's own display rule otherwise beats the UA
+   [hidden] default, leaving the attach menu, chip and mic always visible. */
+[hidden]{display:none!important}
 .input-bar{padding:14px 0 20px;flex-shrink:0;display:flex;gap:9px;align-items:flex-end}
 .icon-btn{align-self:flex-end;width:42px;height:44px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:20px;line-height:1;color:var(--ink-2);background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r-md);cursor:pointer;box-shadow:var(--sh-sm);transition:background .15s,border-color .15s,color .15s}
 .icon-btn:hover{background:var(--canvas);color:var(--ink)}
@@ -302,7 +305,7 @@ body.resizing{cursor:col-resize;user-select:none}
           <textarea class="chat-input" id="chat-input" rows="1"
                     placeholder="Answer the advisor, or ask anything about your research…"></textarea>
           <button class="icon-btn" id="btn-voice" type="button" title="Record your message"
-                  aria-label="Record your message" onclick="toggleVoice()" hidden>🎙</button>
+                  aria-label="Record your message" onclick="toggleVoice()" hidden><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg></button>
           <button class="btn-send" id="btn-send" onclick="sendMessage()">Send</button>
           <input type="file" id="attach-input" hidden onchange="onAttachPicked(event)">
         </div>
