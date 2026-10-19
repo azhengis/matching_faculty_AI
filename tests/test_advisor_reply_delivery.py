@@ -122,6 +122,68 @@ def test_a_complete_reply_is_not_flagged(project, monkeypatch):
     assert "truncated" not in _chat(project)
 
 
+# ── 0b. Attachments (file / photo) ─────────────────────────────────────────
+
+def test_a_file_attachment_is_folded_into_the_message(project, monkeypatch):
+    """An attached document's extracted text is folded into the stored message,
+    so the advisor reads it and it persists."""
+    def completion(**kw):
+        return _resp("Thanks, I read it.", finish="stop")
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
+
+    body = json.loads(_run(web_app.api_advisor_chat(_FakeRequest(
+        {"message": "Here is my draft.", "project_id": 1,
+         "attachment": {"kind": "file", "name": "draft.pdf",
+                        "text": "The turnover gap is X."}}, project))).body)
+    assert body["reply"] == "Thanks, I read it."
+
+    con = sqlite3.connect(web_app.DB_PATH)
+    hist = json.loads(con.execute("SELECT chat_history FROM projects WHERE id=1").fetchone()[0])
+    con.close()
+    user = [e["content"] for e in hist if e["role"] == "user"][-1]
+    assert "draft.pdf" in user and "The turnover gap is X." in user
+
+
+def test_an_image_attachment_reaches_the_model_but_not_the_stored_history(project, monkeypatch):
+    """A photo is passed to the model as an image for this turn, but the stored
+    transcript keeps only a placeholder — so a big image is not re-sent forever."""
+    captured = {}
+
+    def completion(**kw):
+        captured["messages"] = list(kw["messages"])   # snapshot before the loop appends
+        return _resp("I can see it.", finish="stop")
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
+
+    data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
+    body = json.loads(_run(web_app.api_advisor_chat(_FakeRequest(
+        {"message": "What is this?", "project_id": 1,
+         "attachment": {"kind": "image", "name": "chart.png", "data_url": data_url}}, project))).body)
+    assert body["reply"] == "I can see it."
+
+    last = captured["messages"][-1]
+    assert isinstance(last["content"], list)
+    assert any(b.get("type") == "image_url" for b in last["content"])
+
+    con = sqlite3.connect(web_app.DB_PATH)
+    hist = json.loads(con.execute("SELECT chat_history FROM projects WHERE id=1").fetchone()[0])
+    con.close()
+    stored = [e["content"] for e in hist if e["role"] == "user"][-1]
+    assert "[Attached image: chart.png]" in stored
+    assert "base64" not in stored        # the raw image is NOT persisted
+
+
+def test_a_message_can_be_empty_when_something_is_attached(project, monkeypatch):
+    monkeypatch.setattr(web_app, "CHATBOT_MODEL", "test/model")
+    monkeypatch.setattr(web_app, "_litellm",
+                        types.SimpleNamespace(completion=lambda **kw: _resp("Got it.", finish="stop")))
+    body = json.loads(_run(web_app.api_advisor_chat(_FakeRequest(
+        {"message": "", "project_id": 1,
+         "attachment": {"kind": "file", "name": "n.txt", "text": "hello"}}, project))).body)
+    assert body["reply"] == "Got it."
+
+
 # ── 0a. The fixed opening greeting ─────────────────────────────────────────
 
 def test_the_first_message_is_a_fixed_greeting_with_the_name(project, monkeypatch):

@@ -1618,6 +1618,55 @@ async def api_profile_extract_file(file: UploadFile = File(...)):
     return JSONResponse({"text": text})
 
 
+# How much extracted document text to attach to one chat turn. Enough for a
+# paper or a few pages; a hard cap so a huge PDF cannot blow up the request.
+ATTACH_TEXT_CAP = 12000
+_ATTACH_IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg",
+                       ".jpeg": "image/jpeg", ".gif": "image/gif",
+                       ".webp": "image/webp"}
+_ATTACH_TEXT_EXT = (".txt", ".md", ".csv")
+
+
+@app.post("/api/advisor/attach")
+async def api_advisor_attach(req: Request, file: UploadFile = File(...)):
+    """Take a file or photo the researcher attached to a chat message.
+
+    A document (.pdf/.docx/.txt/.md/.csv) comes back as extracted text; an image
+    comes back as a data URL. The client holds the result and sends it with the
+    next chat message, where the advisor reads the text or sees the image."""
+    user = _current_user(req)
+    if not user:
+        return JSONResponse({"error": "Not logged in"}, status_code=401)
+
+    filename = file.filename or "file"
+    content  = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"error": "File is too large (10MB max)."}, status_code=400)
+
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext in _ATTACH_IMAGE_TYPES:
+        import base64
+        data_url = (f"data:{_ATTACH_IMAGE_TYPES[ext]};base64,"
+                    + base64.b64encode(content).decode("ascii"))
+        return JSONResponse({"kind": "image", "name": filename, "data_url": data_url})
+
+    if ext in (".pdf", ".docx"):
+        try:
+            text = doc_extract.extract_text(filename, content)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=422)
+    elif ext in _ATTACH_TEXT_EXT:
+        text = content.decode("utf-8", "replace")
+    else:
+        return JSONResponse(
+            {"error": "Unsupported file. Attach a PDF, Word doc, text file, or an image."},
+            status_code=400)
+
+    return JSONResponse({"kind": "file", "name": filename,
+                         "text": (text or "").strip()[:ATTACH_TEXT_CAP]})
+
+
 @app.get("/api/profile/me")
 async def api_profile_me(req: Request):
     """Load the logged-in user's profile, if one exists yet."""
@@ -4798,8 +4847,9 @@ async def api_advisor_chat(req: Request):
     body       = await req.json()
     message    = (body.get("message") or "").strip()
     project_id = body.get("project_id")
+    attachment = body.get("attachment") or None
 
-    if not message:
+    if not message and not attachment:
         return JSONResponse({"error": "Empty message"}, status_code=400)
     if not project_id:
         return JSONResponse({"error": "Start a project before talking to the advisor."},
@@ -4900,7 +4950,26 @@ async def api_advisor_chat(req: Request):
     # conversation that a past failure already wedged.
     history = _pair_tools(history)
     _sessions[session_key] = history
-    history.append({"role": "user", "content": message})
+
+    # An attached document is folded into the stored message as text the advisor
+    # reads; an attached image is kept out of history (only a placeholder) and
+    # passed to the model for THIS turn alone, so a big image is not re-sent on
+    # every later turn.
+    stored_text = message
+    image_url   = None
+    if attachment:
+        name = str(attachment.get("name") or "attachment")
+        if attachment.get("kind") == "file":
+            txt = str(attachment.get("text") or "").strip()[:ATTACH_TEXT_CAP]
+            if txt:
+                stored_text = (message + f"\n\n[Attached file: {name}]\n{txt}").strip()
+        elif attachment.get("kind") == "image":
+            url = str(attachment.get("data_url") or "")
+            if url.startswith("data:image/"):
+                image_url = url
+                stored_text = (message + f"\n\n[Attached image: {name}]").strip()
+
+    history.append({"role": "user", "content": stored_text})
 
     # First-ever advisor turn: open with ONE fixed greeting rather than a
     # model-written one, so every project starts the same, on-brand way. Only
@@ -4916,6 +4985,13 @@ async def api_advisor_chat(req: Request):
 
     messages = [{"role": "system",
                  "content": _cached_system(stable_prompt, volatile_prompt)}] + _recent(history)
+
+    # Give the model the actual image for this turn only (the stored history
+    # keeps just the text placeholder). The last message is the user's.
+    if image_url and messages and messages[-1].get("role") == "user":
+        messages[-1] = {"role": "user", "content": [
+            {"type": "text", "text": stored_text or "Please look at this image."},
+            {"type": "image_url", "image_url": {"url": image_url}}]}
 
     # Everything the advisor says across one turn, including anything it wrote
     # before reaching for a tool. Returning only the final message dropped
