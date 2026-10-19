@@ -168,6 +168,29 @@ def test_an_unknown_checklist_key_is_rejected(project):
     assert r.status_code == 400
 
 
+def test_trackers_tag_which_items_are_editable_answers_vs_criteria():
+    """The research-questions items are pass/fail criteria, not free-text
+    answers, so the panel must not offer an edit box there. The question itself
+    is the research-questions tracker's editable note."""
+    trackers = web_app._build_trackers({}, {})
+    by_id = {t["id"]: t for t in trackers}
+    assert by_id["problem_statement"]["item_kind"] == "answer"
+    assert by_id["research_design"]["item_kind"] == "answer"
+    assert by_id["research_questions"]["item_kind"] == "criteria"
+    assert by_id["research_questions"]["note_key"] == "rq_question"
+
+
+def test_the_drafted_question_shows_and_locks_in_the_research_questions_box(project):
+    _run(web_app.api_project_progress_edit(
+        1, _FakeRequest({"key": "rq_question", "text": "Does remote work cut turnover?"}, project)))
+    con = sqlite3.connect(web_app.DB_PATH)
+    rq = next(t for t in web_app._read_proposal(con, 1)["trackers"]
+              if t["id"] == "research_questions")
+    con.close()
+    assert rq["note"] == "Does remote work cut turnover?"
+    assert rq["note_locked"] is True
+
+
 # ── 1a. A candidate list inside a question is rewritten away ───────────────
 
 def test_looks_like_options_catches_the_real_failure_shapes():

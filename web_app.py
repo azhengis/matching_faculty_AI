@@ -2271,6 +2271,8 @@ def _build_trackers(proposal: dict, progress: dict) -> list:
             "id": "problem_statement",
             "title": "Problem statement",
             "note": "",
+            # Items hold the researcher's own free-text answers — editable.
+            "item_kind": "answer",
             "groups": ps_groups,
             "answered": ps_answered,
             "total": ps_total,
@@ -2281,7 +2283,13 @@ def _build_trackers(proposal: dict, progress: dict) -> list:
         {
             "id": "research_questions",
             "title": "Research questions",
+            # The note IS the drafted question; it is editable, and can lock.
             "note": (progress.get("rq_question") or "").strip(),
+            "note_key": "rq_question",
+            "note_locked": "rq_question" in locked,
+            # Items are quality CRITERIA the question must meet — pass/fail
+            # checks the advisor marks, not answers to type into.
+            "item_kind": "criteria",
             "groups": [rq_group],
             "answered": rq_answered,
             "total": len(_RQ_ITEMS),
@@ -2292,6 +2300,7 @@ def _build_trackers(proposal: dict, progress: dict) -> list:
             "id": "research_design",
             "title": "Research design",
             "note": "",
+            "item_kind": "answer",
             "groups": [rd_group],
             "answered": rd_answered,
             "total": len(_RD_ITEMS),
