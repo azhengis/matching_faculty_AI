@@ -222,7 +222,9 @@ body.resizing{cursor:col-resize;user-select:none}
 .attach-chip img{height:30px;width:30px;object-fit:cover;border-radius:4px}
 .attach-chip .chip-x{margin-left:4px;font-size:15px;line-height:1;color:var(--ink-3);background:none;border:none;cursor:pointer}
 .attach-chip .chip-x:hover{color:var(--scarlet)}
-.msg-main{position:relative}
+.msg-main{position:relative;display:flex;flex-direction:column;min-width:0;flex:1}
+.msg.user .msg-main{align-items:flex-end}   /* bubble hugs the avatar on the right */
+.msg.bot  .msg-main{align-items:flex-start}
 .copy-btn{margin-top:5px;font:inherit;font-size:11px;color:var(--ink-3);background:none;border:none;cursor:pointer;padding:2px 4px;opacity:0;transition:opacity .12s}
 .msg:hover .copy-btn{opacity:1}
 .copy-btn:hover{color:var(--ink);text-decoration:underline}
