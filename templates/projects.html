@@ -115,9 +115,8 @@ const SECTION_LABELS = {
   research_questions:'Research questions', hypotheses:'Hypotheses',
   assumptions_delimitations:'Assumptions & delimitations',
   related_work:'Literature review', methodology:'Research design & methodology',
-  ai_role:'Role of AI & data science', ethical_considerations:'Ethical considerations',
+  ethical_considerations:'Ethical considerations',
   expected_outcomes:'Expected outcomes', plan_of_work:'Plan of work',
-  conclusions_future_work:'Conclusions & future work',
 };
 const SECTION_ORDER = Object.keys(SECTION_LABELS);
 
@@ -182,7 +181,10 @@ function showList() {
       </div>`;
     return;
   }
-  slot.innerHTML = _projects.map(p => `
+  // The resume card already shows the most recent project (when there are 2+),
+  // so drop it from the list below — each project appears exactly once.
+  const listed = _projects.length >= 2 ? _projects.slice(1) : _projects;
+  slot.innerHTML = listed.map(p => `
     <div class="project-row">
       <div class="project-row-top">
         <div class="project-row-title">${esc(p.title)}</div>
