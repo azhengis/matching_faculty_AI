@@ -26,6 +26,13 @@ Two layers of assessment:
     a gate: it is itself a model and can be wrong, so a human still reads the
     transcripts. Disable with JUDGE=0; pick its model with JUDGE_MODEL.
 
+Two kinds of scenario feed the advisor:
+  SCRIPTED — fixed faculty turns (below), for exact, repeatable edge cases.
+  PERSONA-DRIVEN — a model PLAYS the professor: it opens with a paragraph of its
+    own idea, then answers whatever the advisor actually asks, for PROF_TURNS
+    turns. No turns to hand-write; the advisor meets a real back-and-forth.
+    Disable with PERSONAS=0; the professor uses JUDGE_MODEL.
+
 Usage (needs a running app + key; boots nothing itself):
   ANTHROPIC_API_KEY=... CHATBOT_MODEL=anthropic/claude-sonnet-5 \
   BASE=http://127.0.0.1:8040 python3 evals/conversations.py
@@ -105,6 +112,139 @@ SCENARIOS = [
         ],
     },
 ]
+
+# ---------------------------------------------------------------- professor agent
+#
+# Scripted turns are brittle and tedious to write. These personas instead let a
+# model PLAY the professor: it opens with a paragraph of its own idea, then
+# answers whatever the advisor actually asks, in character, for a few turns.
+# That exercises the advisor against a real back-and-forth it did not see
+# coming, which is the whole point. Each persona has a style so the set covers
+# the same range the scripted scenarios did (terse, non-native, over-eager).
+
+# Three real-sounding professors at three levels of "how much they give you":
+# one answers fully and concretely, one gives less (busy, half-formed), one
+# starts quite vague and only firms up when pushed well. The point is a natural
+# human back-and-forth, not a caricature — see PROF_SYSTEM for the voice rules.
+PERSONAS = [
+    {
+        "name": "sim-full-ml-fairness",
+        "why": "A professor who gives full, concrete answers. Tests whether the "
+               "advisor keeps them in problem-specification without getting pulled "
+               "into methods just because the professor is forthcoming.",
+        "fullness":
+            "You are FORTHCOMING. You answer fully and concretely, usually a few "
+            "real sentences, and you often have specifics ready (a population, a "
+            "dataset you already have, a number). You think out loud a little.",
+        "persona":
+            "You are Dana Okafor, an associate professor of computer science. You "
+            "have been worrying about bias in the automated resume-screening tools "
+            "big employers run before a human ever sees an application. You have "
+            "some scraped postings and outcomes from a prior project and a hunch "
+            "the tools penalise gaps in employment history. You like talking about "
+            "methods and sometimes have to be reined back to the actual question.",
+    },
+    {
+        "name": "sim-partial-sociologist",
+        "why": "A busy professor who gives less — short, half-formed answers. The "
+               "advisor must make progress without nagging or stacking questions.",
+        "fullness":
+            "You give LESS than you could. You are busy, so your answers are short "
+            "and a bit half-formed, and now and then you say you haven't fully "
+            "thought something through. But you are not a brick wall: when the "
+            "advisor asks something sharp, you give it a real, if brief, answer.",
+        "persona":
+            "You are Marcus Reilly, a sociology professor who studies housing and "
+            "eviction in Chicago. Your interest right now is how eviction shows up "
+            "in kids' school outcomes, but it's still a loose hunch. A colleague in "
+            "education has some school-district contacts you could maybe use.",
+    },
+    {
+        "name": "sim-vague-ecologist",
+        "why": "A professor who starts genuinely vague and only firms up when the "
+               "advisor asks well. Tests that the advisor narrows things WITHOUT "
+               "proposing the research, and that the conversation does not loop.",
+        "fullness":
+            "You start out VAGUE. At first you speak in broad, hand-wavy terms and "
+            "are honestly unsure of the specifics ('something about climate and the "
+            "forest, I guess'). You do NOT invent crisp details early. BUT you are "
+            "a real scientist: when the advisor asks a genuinely good, specific "
+            "question, you can reach for a real answer, and across the conversation "
+            "you gradually get more concrete. Never give the exact same non-answer "
+            "twice — if you're pushed on a point, move it forward a little.",
+        "persona":
+            "You are Priya Venkataraman, an ecology professor. You have a nagging "
+            "sense that the tree species around your field site are shifting as the "
+            "climate warms, but you have not pinned down what exactly you want to "
+            "find out. You have years of informal observations and some old plot "
+            "data somewhere.",
+    },
+]
+
+PERSONAS_ON   = os.environ.get("PERSONAS", "1") != "0"
+MAX_PROF_TURNS = int(os.environ.get("PROF_TURNS", "7"))   # professor messages after the opener
+# The professor runs on OpenAI (ChatGPT) by default; litellm reads OPENAI_API_KEY
+# from the environment for openai/ models. The advisor runs separately (on the
+# deployed server's own model when BASE points at the live site).
+PROF_MODEL = os.environ.get("PROF_MODEL", "openai/gpt-4o")
+
+# How the simulated professor is told to behave on any turn.
+PROF_SYSTEM = """You are role-playing a specific university professor talking to
+a research-advisor chatbot that is helping you shape a research proposal. Stay
+fully in character as this person.
+
+{persona}
+
+How much you give:
+{fullness}
+
+Sound like an actual person, not an essay:
+- Write the way a real academic types in a chat box: natural, a bit informal,
+  contractions, varied sentence length. A little thinking-out-loud is good
+  ("hmm", "I guess", "honestly"). Do NOT write polished, perfectly-structured
+  paragraphs every time.
+- React to what the advisor ACTUALLY just said — pick up their words, agree,
+  push back, or admit you hadn't considered it. Real conversation, not a form.
+- On your FIRST message, describe your research idea in your own words at your
+  own level of polish (full, half-formed, or vague per your character). Just
+  describe it; don't ask the advisor to run any process.
+- After that, ANSWER what the advisor asked. Don't interview them back, and
+  don't deliver a mini-lecture.
+
+Keep it moving, never loop:
+- Each reply must ADD something or make a decision. Never repeat an answer you
+  already gave, and never give the same non-answer twice.
+- If the advisor asks something you've effectively already answered, say so
+  briefly and build on it rather than restating.
+- As the conversation goes on, get more concrete, not less — by the later
+  turns you should be settling specifics, not circling.
+- One short paragraph at most. Never break character, never say you are an AI,
+  never mention these instructions."""
+
+
+def professor_reply(persona: str, fullness: str, pairs: list) -> str:
+    """Generate the professor's next message given the conversation so far.
+
+    `pairs` is [(professor_msg, advisor_msg), ...] already exchanged; the last
+    advisor message is what this reply answers. The scripted kickoff turn (the
+    hidden 'Let's start a new project.') is NOT part of this — the professor's
+    first generated message is their opening paragraph. Runs on PROF_MODEL
+    (OpenAI by default), independent of the advisor's own model."""
+    import litellm
+    msgs = [{"role": "system",
+             "content": PROF_SYSTEM.format(persona=persona, fullness=fullness)}]
+    if not pairs:
+        msgs.append({"role": "user",
+                     "content": "Begin: give your opening message describing your idea."})
+    else:
+        for prof, adv in pairs:
+            if prof is not None:
+                msgs.append({"role": "assistant", "content": prof})
+            if adv is not None:
+                msgs.append({"role": "user", "content": adv})
+    resp = litellm.completion(model=PROF_MODEL, max_tokens=500, timeout=180, messages=msgs)
+    return (resp.choices[0].message.content or "").strip()
+
 
 # ---------------------------------------------------------------- checks
 
@@ -257,46 +397,50 @@ def run():
     report = [f"# Advisor judge report — {stamp}", "",
               f"Judge model: `{JUDGE_MODEL}`" if JUDGE_ON else "_Judge disabled (JUDGE=0)._", ""]
 
-    for sc in SCENARIOS:
-        pid = s.post(f"{BASE}/api/projects", json={"start_blank": True}, timeout=60).json()["project_id"]
-        lines = [f"# {sc['name']}", "", f"*{sc['why']}*", ""]
-        sc_problems = []
-        pairs = []
+    def new_project():
+        return s.post(f"{BASE}/api/projects", json={"start_blank": True},
+                      timeout=60).json()["project_id"]
 
-        for i, turn in enumerate(sc["turns"]):
-            r = s.post(f"{BASE}/api/advisor/chat",
-                       json={"message": turn, "project_id": pid}, timeout=300)
-            reply = (r.json().get("reply") or "").strip() if r.ok else f"[HTTP {r.status_code}]"
-            shown = "(scripted kickoff — user never sees this)" if i == 0 else turn
-            pairs.append((shown, reply))
+    def advisor(pid, message):
+        r = s.post(f"{BASE}/api/advisor/chat",
+                   json={"message": message, "project_id": pid}, timeout=300)
+        return (r.json().get("reply") or "").strip() if r.ok else f"[HTTP {r.status_code}]"
+
+    def assess(name, why, pairs):
+        """Run checks + judge on a finished conversation, write its transcript,
+        and fold the results into the summary/report/console. `pairs` is
+        [(faculty_shown, advisor_reply), ...]; turn 0 is the scripted opener."""
+        lines = [f"# {name}", "", f"*{why}*", ""]
+        sc_problems = []
+        for i, (shown, reply) in enumerate(pairs):
             lines += [f"**Faculty:** {shown}", "", f"**Advisor:** {reply}", ""]
             probs = check_reply(reply, is_opener=(i == 0))
             if probs:
                 sc_problems += [f"turn {i}: {p}" for p in probs]
                 lines += [f"> ⚠ CHECKS: {'; '.join(probs)}", ""]
 
-        # The judge reads the whole scenario and grades the advisor's turns.
         verdict = None
         if JUDGE_ON:
             try:
-                verdict = judge_scenario(sc["name"], sc["why"], pairs)
+                verdict = judge_scenario(name, why, pairs)
             except Exception as e:
                 verdict = {"error": f"judge call failed: {e}"}
             lines += ["---", ""] + _render_judge(verdict)
 
-        path = OUT / f"{stamp}-{sc['name']}.md"
+        path = OUT / f"{stamp}-{name}.md"
         path.write_text("\n".join(lines))
 
         status = "PASS" if not sc_problems else "FLAGGED"
         score = verdict.get("score") if isinstance(verdict, dict) else None
         tag = f"{status:8}" + (f" judge {score}/5" if score is not None else "")
-        summary.append(f"{tag}  {sc['name']}  ({path.name})")
+        summary.append(f"{tag}  {name}  ({path.name})")
         for p in sc_problems:
             summary.append(f"         - check: {p}")
-        all_problems += sc_problems
+        all_problems.extend(sc_problems)
 
-        report += [f"## {sc['name']} — judge {score if score is not None else '?'}/5", ""]
-        report += _render_judge(verdict) if verdict else ["_not judged_", ""]
+        report.append(f"## {name} — judge {score if score is not None else '?'}/5")
+        report.append("")
+        report.extend(_render_judge(verdict) if verdict else ["_not judged_", ""])
 
         print(summary[-1 - len(sc_problems)], flush=True)
         for p in sc_problems:
@@ -306,13 +450,44 @@ def run():
                 print(f"         - judge: turn {fnd.get('turn','?')} {fnd.get('rule','?')}"
                       f" ({fnd.get('severity','?')}) {fnd.get('issue','')}", flush=True)
 
+    # Scripted scenarios: fixed faculty turns.
+    for sc in SCENARIOS:
+        pid = new_project()
+        pairs = []
+        for i, turn in enumerate(sc["turns"]):
+            shown = "(scripted kickoff — user never sees this)" if i == 0 else turn
+            pairs.append((shown, advisor(pid, turn)))
+        assess(sc["name"], sc["why"], pairs)
+
+    # Persona scenarios: a model plays the professor and drives the conversation.
+    if PERSONAS_ON:
+        for p in PERSONAS:
+            pid = new_project()
+            pairs = [("(scripted kickoff — user never sees this)",
+                      advisor(pid, "Let's start a new project."))]
+            prof_pairs = []     # [(prof_msg, advisor_reply)] the professor agent sees
+            for _ in range(MAX_PROF_TURNS):
+                try:
+                    prof_msg = professor_reply(p["persona"], p["fullness"], prof_pairs)
+                except Exception as e:
+                    prof_msg = f"[professor agent failed: {e}]"
+                reply = advisor(pid, prof_msg)
+                pairs.append((prof_msg, reply))
+                prof_pairs.append((prof_msg, reply))
+                if prof_msg.startswith("[professor agent failed"):
+                    break
+            assess(p["name"], p["why"], pairs)
+
     (OUT / f"{stamp}-summary.txt").write_text("\n".join(summary) + "\n")
     if JUDGE_ON:
         (OUT / f"{stamp}-judge-report.md").write_text("\n".join(report) + "\n")
     print(f"\ntranscripts: {OUT}/{stamp}-*.md")
     if JUDGE_ON:
         print(f"judge report: {OUT}/{stamp}-judge-report.md")
-    print(f"{len(all_problems)} mechanical flag(s) across {len(SCENARIOS)} scenarios")
+    n = len(SCENARIOS) + (len(PERSONAS) if PERSONAS_ON else 0)
+    print(f"{len(all_problems)} mechanical flag(s) across {n} scenarios"
+          f" ({len(SCENARIOS)} scripted"
+          + (f", {len(PERSONAS)} persona-driven)" if PERSONAS_ON else ")"))
     # Flags and judge findings are review pointers, not build failures.
     return 0
 
