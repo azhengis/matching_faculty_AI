@@ -161,9 +161,12 @@ def test_the_advisor_is_told_what_a_good_research_question_is():
 
 
 def test_the_derived_stage_still_agrees_with_the_prompt():
+    # Order: specify -> literature review (related_work) -> problem statement.
+    # The literature review gates the problem statement; novelty no longer gates.
     assert web_app._derive_stage({}) == "1-2"
-    assert web_app._derive_stage({"novelty": "N."}) == "3"
+    assert web_app._derive_stage({"related_work": "R."}) == "3"
     assert web_app._derive_stage({"problem_statement": "P."}) == "4"
+    assert web_app._derive_stage({"novelty": "N."}) == "1-2"   # novelty is not a gate
 
 
 # ── Research design (the third section) ────────────────────────────────────

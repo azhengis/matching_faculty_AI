@@ -15,9 +15,9 @@ import web_app
 
 STAGES = [
     ("stages 1-2", {}, "STAGES 1-2"),
-    ("stage 3", {"novelty": "Nobody has tested whether X holds for Y."}, "STAGE 3"),
+    ("stage 3", {"related_work": "- Smith (2023) showed X. Gap: nobody has done Y."}, "STAGE 3"),
     ("stage 4", {"problem_statement": "Caseworkers cannot contest risk scores."}, "STAGE 4"),
-    ("stage 4 over stage 3", {"novelty": "N.", "problem_statement": "P."}, "STAGE 4"),
+    ("stage 4 over stage 3", {"related_work": "R.", "problem_statement": "P."}, "STAGE 4"),
 ]
 
 
@@ -37,23 +37,23 @@ def test_exactly_one_stage_directive_is_present(label, proposal, expected):
     directives = [line for line in stable.splitlines()
                   if line.startswith(("STAGES 1-2 —", "STAGE 3 —", "STAGE 4 —"))
                   and ("Nothing is settled" in line or "is settled and saved" in line
-                       or "Novelty is settled" in line)]
+                       or "are done and saved" in line)]
     assert len(directives) == 1, f"expected one stage directive, got {directives}"
 
 
-def test_a_saved_problem_statement_outranks_a_saved_novelty_claim():
-    """A project that acquired a problem statement before novelty existed as a
-    step must not be dragged back to Stage 3."""
+def test_a_saved_problem_statement_outranks_a_saved_literature_review():
+    """A project with a problem statement must not be dragged back to Stage 3
+    just because the literature review is also saved."""
     stable, _ = web_app._advisor_system_prompt(
-        {"name": "Jane", "proposal": {"novelty": "N.", "problem_statement": "P."}})
+        {"name": "Jane", "proposal": {"related_work": "R.", "problem_statement": "P."}})
     assert "STAGE 4 — BUILD THE PROPOSAL" in stable
-    assert "STAGE 3 — WRITE THE PROBLEM STATEMENT. Novelty is settled" not in stable
+    assert "STAGE 3 — WRITE THE PROBLEM STATEMENT. The literature" not in stable
 
 
 def test_whitespace_only_sections_do_not_advance_the_stage():
     """A save that wrote only a blank line would otherwise skip the interview."""
     stable, _ = web_app._advisor_system_prompt(
-        {"name": "Jane", "proposal": {"novelty": "   \n  ", "problem_statement": ""}})
+        {"name": "Jane", "proposal": {"related_work": "   \n  ", "problem_statement": ""}})
     assert "STAGES 1-2" in stable
 
 
@@ -63,7 +63,7 @@ def test_each_stage_assembles_the_same_bytes_every_time():
     prompt is stage-conditional now, so the invariant moved: within a stage it
     must be byte-stable, because that is what prompt caching requires. Across
     stages it is deliberately different."""
-    for proposal in ({}, {"novelty": "N."}, {"problem_statement": "P."}):
+    for proposal in ({}, {"related_work": "R."}, {"problem_statement": "P."}):
         a, _ = web_app._advisor_system_prompt({"name": "Jane", "proposal": proposal})
         b, _ = web_app._advisor_system_prompt({"name": "Jane", "proposal": proposal})
         assert a == b
@@ -74,7 +74,7 @@ def test_the_stages_really_do_send_different_instructions():
     would pass while the saving had silently disappeared."""
     prompts = {
         st: web_app._advisor_system_prompt({"name": "Jane", "proposal": p})[0]
-        for st, p in (("1-2", {}), ("3", {"novelty": "N."}),
+        for st, p in (("1-2", {}), ("3", {"related_work": "R."}),
                       ("4", {"problem_statement": "P."}))
     }
     assert len(set(prompts.values())) == 3

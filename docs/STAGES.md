@@ -35,9 +35,14 @@ remembers — so a reload or a resumed session always lands in the right place.
 
 | Saved state | Stage |
 |---|---|
-| nothing yet | **Stages 1–2** — specify the problem, test novelty |
-| `novelty` saved | **Stage 3** — write the problem statement |
-| `problem_statement` saved | **Stage 4** — build the proposal |
+| nothing yet | **Stages 1–2** — specify the problem, then search the literature and write the review |
+| `related_work` saved | **Stage 3** — write the problem statement |
+| `problem_statement` saved | **Stage 4** — build the rest of the proposal |
+
+The order is deliberate: **search → gap → problem → novelty**. The literature
+review is written right after the search (its gap is the evidence the rest
+depends on), *then* the problem statement, and only *then* the novelty claim —
+you cannot say what is new about a problem you have not yet defined.
 
 ### Stage 1 — Specify the research problem
 
@@ -77,26 +82,28 @@ skipping only what an earlier answer already settled.
 > researchable, feasible, specific, complex (not yes/no, not a lookup), and
 > relevant — and not built on a value judgment.
 
-### Stage 2 — Test whether it is new
+### Stage 2 — Search the literature and write the review
 
-Before anything is written down, the advisor checks that the problem is
-actually novel.
+Before the problem statement is written, the advisor goes and reads what exists.
 
 - The researcher names the gap **first** (so the search doesn't hand them one).
 - The advisor searches the live literature (OpenAlex), reads what comes back,
-  and gives a plain verdict: **clearly new**, **partly covered**, or **already
-  well covered**.
-- If it isn't novel, it offers honest ways forward (a new population, method,
-  data, timeframe; or a deliberate replication) rather than sending them away.
-- **Gate:** a confirmed novelty claim is saved — *"Nobody has yet ___, and this
-  project will."* This unlocks Stage 3.
+  and gives a plain read of the ground: **open**, **partly covered**, or
+  **already well covered**.
+- If the ground is crowded, it offers honest ways forward (a new population,
+  method, data, timeframe; or a deliberate replication) rather than sending
+  them away.
+- It writes the **literature review** — 3–5 directly-relevant works, ending in
+  an explicit **gap statement**. **Gate:** saving the review (`related_work`)
+  unlocks Stage 3. The formal novelty claim is *not* made here — it comes later,
+  built on this gap once the problem is defined.
 
 A "Research landscape" panel shows how close each found paper is to the idea.
 
 ### Stage 3 — Write the problem statement
 
 A three-to-four paragraph statement, drafted in the chat and confirmed before
-it is saved:
+it is saved, built on the gap the literature review just established:
 
 1. Background and real-world impact.
 2. The specific problem in context — field, population/setting, scope.
@@ -114,11 +121,13 @@ to study.
 
 - **Outline first** — a two-page sketch of the whole proposal, cheap to throw
   away, to catch inconsistencies early.
-- Then section by section (saved as each settles, shown in the panel):
-  background, objectives, research questions, hypotheses *(optional)*,
-  assumptions & delimitations, literature review, **methodology**, the role of
-  AI, ethical considerations, expected outcomes, plan of work, conclusions,
-  keywords, abstract, and a final title check.
+- Then section by section, **in this order** (saved as each settles, shown in
+  the panel): novelty & contribution *(draft)*, objectives *(with the
+  Introduction/background)*, research questions *(final)* + hypotheses
+  *(optional)*, **research design & methodology** *(which now also carries the
+  role of AI and data science)*, assumptions & delimitations, ethical
+  considerations, expected outcomes *(ending in "future directions")*, plan of
+  work, a novelty & title re-check, and finally abstract + keywords together.
 - **Methodology is the research design:** settle the approach first —
   **qualitative** (to understand), **quantitative** (to test), or **mixed** —
   and let the aim decide it; then how data is collected and analysed, and
@@ -145,7 +154,7 @@ Beside the chat, the proposal panel shows:
   item has a status circle (green done · gray in progress · white not started)
   and expands to show the captured answer. The section in progress opens by
   default; finished ones fold to a single ✓.
-- **The research landscape** (during novelty testing).
+- **The research landscape** (during the literature search).
 - **The proposal sections** as they are saved.
 - **Matched collaborators.**
 - **References** from the literature search.

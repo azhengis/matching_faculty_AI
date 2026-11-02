@@ -273,10 +273,13 @@ def _init_profiles_db():
     _add_column(con, "proposals", "novelty", "TEXT")
 
     # A one-paragraph abstract summarising the whole proposal, auto-drafted once
-    # the other sections are settled; the ethical-considerations section a full
-    # academic proposal needs; and ai_role, which is the whole point of an AI
-    # Institute tool — where AI and data science actually enter this project,
-    # as method, as subject, or not at all.
+    # the other sections are settled; and the ethical-considerations section a
+    # full academic proposal needs.
+    #
+    # ai_role is a LEGACY column: the role of AI and data science used to be its
+    # own section, but it is now folded into methodology. The column is kept
+    # (SQLite cannot drop one cleanly) but is no longer in _PROPOSAL_FIELDS, so
+    # it is never read, written, or shown. Do not reuse it.
     for _col in ("abstract", "ethical_considerations", "ai_role"):
         _add_column(con, "proposals", _col, "TEXT")
 
@@ -284,8 +287,12 @@ def _init_profiles_db():
     # keywords and hypotheses belong to the front matter; assumptions and
     # delimitations is the section that says what has to be true for the work
     # to hold and what it deliberately does not cover; plan_of_work carries the
-    # deliverables and schedule that "expected outcomes" alone never gave us;
-    # conclusions_future_work closes the document.
+    # deliverables and schedule that "expected outcomes" alone never gave us.
+    #
+    # conclusions_future_work is a LEGACY column: a proposal has no results yet,
+    # so there is nothing to conclude. The forward-looking part now folds into
+    # expected_outcomes as "future directions". The column is kept but is no
+    # longer in _PROPOSAL_FIELDS, so it is never read, written, or shown.
     #
     # hypotheses is deliberately OPTIONAL. A falsifiable hypothesis is the
     # right form for an experimental project and the wrong one for a
@@ -2093,22 +2100,29 @@ async def api_profile_faculty_overrides(email: str, req: Request):
 # Every section of the proposal, in the order it appears in the finished
 # document. Bamshad's suggested organization is the spine: title and abstract,
 # introduction (background, objectives, hypotheses, assumptions, importance),
-# related work, design and methodology, plan of work and outcomes, conclusions,
-# references. Three of ours sit outside his list on purpose — novelty and
-# problem_statement are the gates the interview has to pass before anything is
-# written, and ai_role is why an AI Institute built this at all.
+# related work, design and methodology, plan of work and outcomes, references.
+# novelty and problem_statement sit outside his list on purpose: the problem
+# statement is the gate the interview has to pass before the rest of the
+# proposal is built, and novelty is the contribution claim drafted after it.
+# The role of AI and data science is no longer its own section — it lives
+# inside methodology.
 #
 # Two of his elements are deliberately NOT fields here. "Importance and
 # benefits" is a required part of `background` rather than a section of its
 # own, because splitting it produces two paragraphs that repeat each other.
 # "References" is generated from the literature the novelty search actually
 # returned (projects.lit_references), not written by hand.
+# NOTE: ai_role and conclusions_future_work were removed as standalone sections.
+# The AI / data-science role is now folded into methodology, and forward-looking
+# notes fold into expected_outcomes as "future directions" — a proposal has no
+# results yet, so there is nothing to conclude. Their DB columns are left in
+# place (harmless orphans; SQLite cannot drop a column cleanly) but are no longer
+# read, written, shown, or asked about.
 _PROPOSAL_FIELDS = [
     "title", "keywords", "abstract", "problem_statement", "novelty", "background",
     "objectives", "hypotheses", "assumptions_delimitations",
-    "research_questions", "related_work", "methodology", "ai_role",
+    "research_questions", "related_work", "methodology",
     "ethical_considerations", "expected_outcomes", "plan_of_work",
-    "conclusions_future_work",
 ]
 
 # The SQL is derived rather than written out, so adding a section above is a
@@ -2199,9 +2213,15 @@ _STAGE_LABELS = {
 
 
 def _derive_stage(proposal: dict) -> str:
+    # Order: specify (1-2) -> literature search & review -> problem statement
+    # (3) -> build the rest (4). The gate for writing the problem statement is
+    # now the literature review (related_work), NOT novelty: the search and the
+    # gap come first, then the problem, then the novelty claim about it. novelty
+    # is no longer a gate — it is a build-phase section drafted after the problem
+    # statement and finalized after methodology.
     if (proposal.get("problem_statement") or "").strip():
         return "4"
-    if (proposal.get("novelty") or "").strip():
+    if (proposal.get("related_work") or "").strip():
         return "3"
     return "1-2"
 
@@ -3100,9 +3120,11 @@ def _advisor_system_prompt(profile: dict) -> tuple[str, str]:
     gaps = ", ".join(empty) if empty else "none — every section has a draft"
 
     # The stage is derived from durable state, not conversation memory, so it
-    # survives restarts and resumed sessions. The problem statement is the
-    # stronger gate: a project that has one from before novelty existed as a
-    # step is not dragged back to the beginning.
+    # survives restarts and resumed sessions. The order is: specify -> literature
+    # search & review -> problem statement -> build the rest. The literature
+    # review (related_work) gates the problem statement; the problem statement
+    # gates the build. novelty is NOT a gate: it is drafted after the problem
+    # statement and finalized after methodology.
     # The same derivation names the stage twice over: the line the model reads,
     # and the key deciding which instruction sections get sent at all. They are
     # produced together so they can never disagree — a prompt saying STAGE 4
@@ -3110,20 +3132,27 @@ def _advisor_system_prompt(profile: dict) -> tuple[str, str]:
     if (proposal.get("problem_statement") or "").strip():
         stage = "4"
         stage_line = ("STAGE 4 — BUILD THE PROPOSAL. The problem statement is settled and saved. "
-                      "Build the remaining proposal sections; every section must stay consistent "
-                      "with the saved problem statement and novelty claim.")
-    elif (proposal.get("novelty") or "").strip():
+                      "Build the remaining sections in order: novelty (draft) -> objectives -> "
+                      "research questions (final) + hypotheses -> methodology (including the role of AI "
+                      "and data science) -> assumptions & delimitations -> ethical considerations -> "
+                      "expected outcomes -> plan of work -> novelty & title re-check -> abstract + "
+                      "keywords. Every section must stay consistent with the saved problem statement "
+                      "and literature review.")
+    elif (proposal.get("related_work") or "").strip():
         stage = "3"
-        stage_line = ("STAGE 3 — WRITE THE PROBLEM STATEMENT. Novelty is settled and saved, but no "
-                      "problem statement has been written yet. Draft it, confirm the wording, save it. "
-                      "Do NOT draft or save any other proposal section first.")
+        stage_line = ("STAGE 3 — WRITE THE PROBLEM STATEMENT. The literature search and review are "
+                      "done and saved, so the gap is now evidenced. Draft the problem statement from "
+                      "that gap, confirm the wording, and save it. Do NOT draft or save any other "
+                      "proposal section first, and do NOT make the novelty claim yet — that comes "
+                      "after the problem statement.")
     else:
         stage = "1-2"
-        stage_line = ("STAGES 1-2 — SPECIFY THE PROBLEM, THEN TEST ITS NOVELTY. Nothing is settled yet. "
-                      "Draw out a specific problem, a primary objective, and 2-4 research questions by "
-                      "ASKING — do not suggest what to study. Do NOT draft or save any proposal section "
-                      "(other than research_questions) until the problem is specific, its novelty is "
-                      "established and saved, and a problem statement is confirmed and saved.")
+        stage_line = ("STAGES 1-2 — SPECIFY THE PROBLEM, THEN SEARCH THE LITERATURE. Nothing is settled "
+                      "yet. First draw out a specific problem, a working title, and 2-4 draft research "
+                      "questions by ASKING — do not suggest what to study. Then search the live "
+                      "literature and write the literature review (related_work), ending in the gap "
+                      "this project takes on. Do NOT write the problem statement or the novelty claim "
+                      "until the literature review is saved.")
 
     stable = advisor_prompt.stable(name=name, stage_line=stage_line, stage=stage)
 
@@ -3198,22 +3227,20 @@ _ADVISOR_TOOLS = [{
             "type": "object",
             "properties": {
                 "abstract": {"type": "string", "description": "A one-paragraph (~150-250 word) summary of the WHOLE proposal — the problem, the aim, the approach, and the expected contribution. Write it LAST, once the other sections are settled, and only after the researcher confirms it. It leads the document."},
-                "novelty": {"type": "string", "description": "What makes this project NEW, settled in Stage 2. A short paragraph on what the existing literature already establishes, followed by an explicit contribution claim of the form 'Nobody has yet ___, and this project will.' Save only after the researcher confirms it. Saving this unlocks Stage 3."},
-                "problem_statement": {"type": "string", "description": "The sharpened, SPECIFIC problem statement settled in Stage 3. THREE TO FOUR PARAGRAPHS, not one: (1) the background that motivates the problem, its real-world impact, and why it matters to the field; (2) the specific problem in context — the field of study, the exact population or setting, and the scope, stated so a reader knows what is in and what is out; (3) how the problem has been addressed before and the precise gap this project takes on, consistent with the saved novelty claim; (4) the research objectives that follow from it. This is the deliverable the whole first phase exists to produce, so a single paragraph is not enough. Save it only after the researcher confirms the wording. Saving this unlocks Stage 4."},
+                "novelty": {"type": "string", "description": "What makes this project NEW and what it contributes. A short paragraph on what the existing literature (the saved literature review) already establishes, followed by an explicit contribution claim of the form 'Nobody has yet ___, and this project will.' DRAFT it early, right after the problem statement, then FINALIZE it after the methodology is settled — the contribution often comes from the method itself — and re-check it at the very end. Save only after the researcher confirms it."},
+                "problem_statement": {"type": "string", "description": "The sharpened, SPECIFIC problem statement, written AFTER the literature search and review so the gap is evidenced. THREE TO FOUR PARAGRAPHS, not one: (1) the background that motivates the problem, its real-world impact, and why it matters to the field; (2) the specific problem in context — the field of study, the exact population or setting, and the scope, stated so a reader knows what is in and what is out; (3) how the problem has been addressed before and the precise gap this project takes on, consistent with the saved literature review; (4) the research objectives that follow from it. This is the deliverable the whole first phase exists to produce, so a single paragraph is not enough. Save it only after the researcher confirms the wording. Saving this unlocks the rest of the proposal build."},
                 "title": {"type": "string", "description": "The project's working title — what this research is called. Settle a first version EARLY, in the opening exchange, from what the researcher says the work is about; it is provisional and expected to change. Then sharpen it whenever the problem does: when the problem statement is confirmed, and again when the proposal is finished. A title that is still drifting late is a signal the problem has not actually settled, and worth saying so. 3-15 words, title case, naming the specific topic rather than the field. Not a sentence, no trailing period. This also names the project everywhere it is listed."},
                 "keywords": {"type": "string", "description": "Four to eight keywords or short key phrases for indexing the proposal, comma-separated on one line. Drawn from the problem statement and methodology, in the vocabulary the field actually searches by. Settle these late, once the problem and methods are stable."},
                 "hypotheses": {"type": "string", "description": "OPTIONAL, and only where the project's tradition makes hypotheses the right form. Specific FALSIFIABLE hypotheses matching the research questions: each states an expected relationship or outcome precisely enough that a stated result would refute it. Bulleted list (lines starting with '- '). Leave this unsaved for descriptive, exploratory, humanistic, or qualitative projects where research questions are the correct instrument — an empty section is better than a hypothesis invented to fill a heading."},
                 "assumptions_delimitations": {"type": "string", "description": "Two things, kept separate. ASSUMPTIONS: what must be true for the research design to hold — about the data, the measures, the population, or the mechanism — with the one that does the most work named first, and what happens to the project if it is false. DELIMITATIONS: the boundaries the researcher is deliberately drawing, and why. What population, setting, timeframe, or question is out of scope on purpose. Bulleted list (lines starting with '- '), grouped under the two labels."},
                 "plan_of_work": {"type": "string", "description": "The schedule and deliverables: what happens in what order, roughly when, and what exists at the end of each phase. Phases tied to the methodology components already settled, each with its concrete deliverable (a cleaned dataset, a coded corpus, a working model, a submitted manuscript). Bulleted list (lines starting with '- '). This is what a reviewer checks feasibility against, so vague phases are worse than fewer honest ones."},
-                "conclusions_future_work": {"type": "string", "description": "What the project will have established when it is done, stated against the research questions, and where the line of work goes next — the questions this project opens but does not answer. A short paragraph or a few bullets. Written near the end, once outcomes are settled."},
                 "background": {"type": "string", "description": "The problem, its context, and why it matters now. Two or three developed paragraphs of prose — what is broken or unknown, who it affects, what changed recently, and what still can't be answered. This section also carries the IMPORTANCE AND BENEFITS: who is better off if this succeeds and what specifically changes for them, stated concretely rather than as a claim about the field's significance. Not a one-line summary."},
                 "objectives": {"type": "string", "description": "What the research aims to find out, build, or change. 2-4 aims, each a full sentence naming what will exist or be known at the end. Prose or a bulleted list."},
                 "research_questions": {"type": "string", "description": "3-5 research questions, each a full question that evidence could answer. Group by theme when there is more than one angle. Bulleted list (lines starting with '- '). Where the project's tradition calls for falsifiable hypotheses, the questions stay here and the hypotheses go in their own `hypotheses` section rather than being mixed in."},
-                "related_work": {"type": "string", "description": "A focused literature review of 3-5 studies that bear DIRECTLY on the gap in the saved novelty claim, favouring the last ~5 years. For each: what it established and precisely where it stops short of this project. Depth over breadth — do not pad with loosely-related work. Ends with an explicit statement of the GAP this project fills, consistent with the saved novelty claim. Bulleted list (lines starting with '- '), with the gap as a final prose line."},
-                "methodology": {"type": "string", "description": "The methodological approach, component by component. For each: what it is, how data will be COLLECTED, and how it will be ANALYZED, plus what it is meant to establish. Bulleted list (lines starting with '- ')."},
-                "ai_role": {"type": "string", "description": "Where AI and data science actually enter this project — as a method that makes part of the work possible, as part of the subject being studied, or both. Name the specific technique and what it does that a conventional approach could not, plus what it cannot be trusted to do. An honest 'AI is not central here, and forcing it in would weaken the work' is a valid and valuable answer — save that rather than inventing a use. A short paragraph or bulleted list."},
+                "related_work": {"type": "string", "description": "The literature review, written RIGHT AFTER the literature search (before the problem statement and the novelty claim, both of which depend on it). A focused review of 3-5 studies that bear DIRECTLY on the problem, favouring the last ~5 years. For each: what it established and precisely where it stops short of this project. Depth over breadth — do not pad with loosely-related work. Ends with an explicit statement of the GAP this project fills. Bulleted list (lines starting with '- '), with the gap as a final prose line."},
+                "methodology": {"type": "string", "description": "The methodological approach (the research design), component by component. For each: what it is, how data will be COLLECTED, and how it will be ANALYZED, plus what it is meant to establish. INCLUDE THE ROLE OF AI AND DATA SCIENCE here where it applies — name the specific technique, what it does that a conventional approach could not, and what it cannot be trusted to do; if AI is not central to this project, simply do not force it in. Bulleted list (lines starting with '- ')."},
                 "ethical_considerations": {"type": "string", "description": "How the research will be conducted ethically: consent, privacy/data protection, risks to participants, bias and fairness, IRB/approval where relevant, and responsible use of AI. A few sentences or a short bulleted list, specific to THIS project's data and methods — not boilerplate."},
-                "expected_outcomes": {"type": "string", "description": "3-5 concrete outcomes — datasets, frameworks, findings, publications, policy briefs — each with a clause on who benefits or what changes. Bulleted list (lines starting with '- ')."}
+                "expected_outcomes": {"type": "string", "description": "3-5 concrete outcomes — datasets, frameworks, findings, publications, policy briefs — each with a clause on who benefits or what changes. May end with one or two 'future directions' lines (the forward-looking part a conclusions section would carry) — a proposal has no results yet, so there is nothing to conclude. Bulleted list (lines starting with '- ')."}
             },
             # Deliberately empty: sections are saved one at a time as the
             # conversation settles each one, so no single field is ever required.
@@ -3733,11 +3760,9 @@ def _build_proposal_docx(researcher_name: str, proposal: dict, references: list 
         ("Assumptions and Delimitations", proposal.get("assumptions_delimitations", "")),
         ("Literature Review", proposal.get("related_work", "")),
         ("Research Design and Methodology", proposal.get("methodology", "")),
-        ("The Role of AI and Data Science", proposal.get("ai_role", "")),
         ("Ethical Considerations", proposal.get("ethical_considerations", "")),
         ("Expected Outcomes", proposal.get("expected_outcomes", "")),
         ("Plan of Work", proposal.get("plan_of_work", "")),
-        ("Conclusions and Future Work", proposal.get("conclusions_future_work", "")),
     ]
 
     for heading, text in sections:

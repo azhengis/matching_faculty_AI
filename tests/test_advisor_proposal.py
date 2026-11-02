@@ -167,27 +167,24 @@ def test_save_proposal_stores_abstract_and_ethical_considerations(tmp_path, monk
     )
 
 
-def test_save_proposal_stores_the_ai_role_section(tmp_path, monkeypatch):
-    """Where AI enters the project is its own section, saved like any other.
-
-    Including the honest negative answer — "AI is peripheral here" is a real
-    result the advisor is told to record rather than invent a use.
-    """
+def test_save_proposal_ignores_a_removed_section(tmp_path, monkeypatch):
+    """ai_role is no longer a proposal section (the role of AI folds into
+    methodology). save_proposal must not write it — passing it is a no-op, not
+    an error, and nothing lands in a column the app reads."""
     db_path = _setup(tmp_path, monkeypatch)
     _profile_with_project(db_path)
 
-    assert _save_proposal(1, {"methodology": "- Comparative case studies of three counties."}) == {"status": "saved"}
-    assert _save_proposal(1, {
-        "ai_role": "- AI is peripheral here: the corpus is 40 case files, small enough to hand-code, "
-                   "so an automated classifier would add error without saving effort.",
-    }) == {"status": "saved"}
+    assert _save_proposal(1, {"methodology": "- Comparative case studies of three counties. "
+                                             "AI is peripheral here: 40 case files, hand-coded."}) == {"status": "saved"}
+    # ai_role is not in _PROPOSAL_FIELDS, so it is silently ignored.
+    assert "ai_role" not in web_app._PROPOSAL_FIELDS
+    assert "conclusions_future_work" not in web_app._PROPOSAL_FIELDS
 
     con = sqlite3.connect(db_path)
     row = con.execute(
-        "SELECT ai_role, methodology FROM proposals WHERE project_id = 1").fetchone()
+        "SELECT methodology FROM proposals WHERE project_id = 1").fetchone()
     con.close()
-    assert row[0].startswith("- AI is peripheral here")
-    assert row[1] == "- Comparative case studies of three counties."
+    assert row[0].startswith("- Comparative case studies")
 
 
 def test_save_proposal_rejects_a_call_with_no_section_text(tmp_path, monkeypatch):

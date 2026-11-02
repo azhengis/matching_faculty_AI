@@ -484,12 +484,12 @@ def test_the_gap_kinds_are_not_listed_for_them():
     assert 'Ask it as "what kind of gap is it?" and let them name it' in text
 
 
-def test_the_research_questions_still_come_before_the_gap():
-    """Confirmed decision: questions first, then the gap. A later spec
-    proposed the reverse and was not adopted."""
+def test_the_research_questions_still_come_before_the_literature_search():
+    """Draft research questions are part of specifying the problem (Stage 1),
+    which comes before the literature search and review (Stage 2)."""
     text = _advisor()
-    assert text.index("STAGE 1 — SPECIFY THE RESEARCH PROBLEM") < text.index("STAGE 2 — TEST WHETHER IT IS NOVEL")
-    assert "SPECIFIC RESEARCH QUESTIONS" in text.split("STAGE 2 — TEST WHETHER IT IS NOVEL")[0]
+    assert text.index("STAGE 1 — SPECIFY THE RESEARCH PROBLEM") < text.index("STAGE 2 — SEARCH THE LITERATURE AND WRITE THE REVIEW")
+    assert "SPECIFIC RESEARCH QUESTIONS" in text.split("STAGE 2 — SEARCH THE LITERATURE AND WRITE THE REVIEW")[0]
 
 
 # ── Legibility and the closing check ───────────────────────────────────────

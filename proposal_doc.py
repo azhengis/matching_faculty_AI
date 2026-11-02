@@ -38,11 +38,9 @@ _SECTIONS = [
     ("Assumptions and Delimitations", "assumptions_delimitations"),
     ("Literature Review", "related_work"),
     ("Research Design and Methodology", "methodology"),
-    ("The Role of AI and Data Science", "ai_role"),
     ("Ethical Considerations", "ethical_considerations"),
     ("Expected Outcomes", "expected_outcomes"),
     ("Plan of Work", "plan_of_work"),
-    ("Conclusions and Future Work", "conclusions_future_work"),
 ]
 
 _FONT = "Times New Roman"
