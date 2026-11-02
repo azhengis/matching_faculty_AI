@@ -50,6 +50,7 @@ SECTIONS = [
     "11_collaborators",
     "12_tone",
     "13_send_check",
+    "99_lessons",
 ]
 
 # ── Which sections a given stage actually needs ──────────────────────────────
@@ -68,6 +69,10 @@ SPINE = [
     "00_role", "01_how_you_think", "01a_research_process", "02_lenses",
     "03_stages_and_opening", "09_option_blocks", "10_saving", "12_tone",
     "13_send_check",
+    # Curated lessons distilled from eval findings, read every turn. Kept LAST so
+    # it refines the rules above without being buried among them. Edited only
+    # through the reviewed improve loop (evals/improve.py), never by hand in bulk.
+    "99_lessons",
 ]
 
 # Then the stage's own instructions, PLUS THE NEXT STAGE'S. The lookahead is

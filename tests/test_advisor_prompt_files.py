@@ -67,6 +67,16 @@ def test_the_sections_are_sent_in_the_declared_order():
     assert positions == sorted(positions), "sections are assembled out of order"
 
 
+def test_the_lessons_section_reaches_every_stage():
+    """The learned-corrections channel is in SPINE, so a lesson added through
+    the improve loop refines the advisor at every stage, not just one."""
+    assert "99_lessons" in advisor_prompt.SPINE
+    for stage in ("1-2", "3", "4"):
+        assert "99_lessons" in advisor_prompt.sections_for(stage)
+        built = advisor_prompt.stable(name="Jane", stage_line="X", stage=stage)
+        assert "LESSONS (LEARNED CORRECTIONS)" in built
+
+
 # ── Placeholders ───────────────────────────────────────────────────────────
 
 def test_the_stable_half_asks_for_exactly_what_web_app_supplies():
