@@ -199,8 +199,9 @@ def test_the_first_message_is_a_fixed_greeting_with_the_name(project, monkeypatc
     monkeypatch.setattr(web_app, "_litellm", types.SimpleNamespace(completion=completion))
 
     body = _chat(project, "Let's start a new project.")
-    assert body["reply"].startswith("Hi Jane!")
-    assert "shape it into" in body["reply"]
+    assert body["reply"].startswith("Hello Jane!")
+    assert "strong research proposal" in body["reply"]
+    assert "Research problem:" in body["reply"]      # the six guiding points
     assert calls["n"] == 0        # the model was NOT called for the opening
 
     # Stored as the assistant's first turn, after the hidden kickoff.
@@ -208,7 +209,7 @@ def test_the_first_message_is_a_fixed_greeting_with_the_name(project, monkeypatc
     hist = json.loads(con.execute(
         "SELECT chat_history FROM projects WHERE id = 1").fetchone()[0])
     con.close()
-    assert hist[-1]["role"] == "assistant" and hist[-1]["content"].startswith("Hi Jane!")
+    assert hist[-1]["role"] == "assistant" and hist[-1]["content"].startswith("Hello Jane!")
 
 
 def test_the_message_after_the_greeting_goes_to_the_model(project, monkeypatch):

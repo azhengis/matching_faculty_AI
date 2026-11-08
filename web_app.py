@@ -2962,15 +2962,24 @@ def _opening_greeting(name: str) -> str:
     first name. Deliberately canned (not model-written) so every project opens
     the same, welcoming way and invites a rough idea without demanding rigour."""
     first = (name or "").strip().split()
-    hello = f"Hi {first[0]}!" if first else "Hi there!"
+    hello = f"Hello {first[0]}!" if first else "Hello!"
     return (
-        f"{hello} To get us started, tell me about your research in a paragraph "
-        "or two. Ideally include your problem statement, your research questions, "
-        "and anything else you already have — context, prior work, data, or rough "
-        "notes. Around 150 to 200 words is perfect. If it is still rough, or you "
-        "do not have all of that yet, that is completely fine: just share what you "
-        "are thinking in your own words, and we will shape it into a full proposal "
-        "together, one step at a time."
+        f"{hello} I'm here to help you develop your research idea into a strong "
+        "research proposal.\n\n"
+        "To get started, please describe your research idea in approximately 200 "
+        "words. Try to briefly cover these six points:\n\n"
+        "- **Research problem:** What problem or research gap do you want to "
+        "address? Why is it important?\n"
+        "- **Research objectives:** What do you want to achieve through this "
+        "research?\n"
+        "- **Research questions:** What questions do you want to answer?\n"
+        "- **Methodology:** How are you thinking of investigating the problem?\n"
+        "- **Expected contributions:** What new knowledge or insights could your "
+        "research bring?\n"
+        "- **Research context:** What field, population, or specific setting will "
+        "your research focus on?\n\n"
+        "You don't need to have everything figured out yet. If some parts are "
+        "unclear, that's fine. We can work through them together."
     )
 
 
