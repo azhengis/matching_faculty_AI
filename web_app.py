@@ -2964,12 +2964,13 @@ def _opening_greeting(name: str) -> str:
     first = (name or "").strip().split()
     hello = f"Hi {first[0]}!" if first else "Hi there!"
     return (
-        f"{hello} What research ideas have you been thinking about lately? "
-        "You can share a topic you're interested in, a problem you'd like to "
-        "explore, or even just a rough idea you're curious about. No need to "
-        "have everything figured out yet. We can talk it through, shape it into "
-        "a research proposal, and find people whose expertise could be a good "
-        "fit for your project."
+        f"{hello} To get us started, tell me about your research in a paragraph "
+        "or two. Ideally include your problem statement, your research questions, "
+        "and anything else you already have — context, prior work, data, or rough "
+        "notes. Around 150 to 200 words is perfect. If it is still rough, or you "
+        "do not have all of that yet, that is completely fine: just share what you "
+        "are thinking in your own words, and we will shape it into a full proposal "
+        "together, one step at a time."
     )
 
 

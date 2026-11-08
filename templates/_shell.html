@@ -137,6 +137,24 @@ h2{font-family:var(--serif);font-size:24px;font-weight:normal;letter-spacing:-.0
 .dl-cancel{margin-top:16px;background:none;border:none;font-family:inherit;font-size:13px;color:var(--ink-3);cursor:pointer;width:100%;padding:4px}
 .dl-cancel:hover{color:var(--ink)}
 
+/* How-it-works onboarding modal */
+.how-backdrop{position:fixed;inset:0;background:rgba(9,17,30,.58);z-index:220;display:none;align-items:center;justify-content:center;padding:24px}
+.how-backdrop.open{display:flex}
+.how-card{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--sh-lg);width:100%;max-width:560px;max-height:88vh;overflow-y:auto;padding:30px 32px 26px;animation:fp-in .18s ease-out}
+.how-eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--scarlet);margin-bottom:7px}
+.how-card h2{font-family:var(--serif);font-size:25px;letter-spacing:-.012em;margin-bottom:5px}
+.how-lede{font-size:13.5px;color:var(--ink-3);line-height:1.5;margin-bottom:20px}
+.how-step{display:flex;gap:14px;padding:13px 0;border-top:1px solid var(--border)}
+.how-step:first-of-type{border-top:none}
+.how-num{flex-shrink:0;width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.how-step-body{min-width:0}
+.how-step-title{font-size:14.5px;font-weight:650;color:var(--ink);margin-bottom:2px}
+.how-step-text{font-size:13px;color:var(--ink-2);line-height:1.5}
+.how-actions{margin-top:22px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.how-note{font-size:12px;color:var(--ink-3)}
+.how-got{background:var(--navy);color:#fff;border:none;border-radius:var(--r-md);padding:11px 22px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.how-got:hover{background:var(--navy-lift)}
+
 /* ── Faculty profile overlay ── */
 .person[data-faculty]{cursor:pointer}
 .person[data-faculty]:hover .person-name{text-decoration:underline}
@@ -195,12 +213,49 @@ h2{font-family:var(--serif);font-size:24px;font-weight:normal;letter-spacing:-.0
     <a href="/profile" data-nav="profile">
       <svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="2.8"/><path d="M4 16.5c.6-3 3-4.5 6-4.5s5.4 1.5 6 4.5"/></svg>
       Profile</a>
+    <a href="#" onclick="openHowItWorks(); return false;">
+      <svg class="ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7.2"/><path d="M8 8a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.4"/><circle cx="10" cy="14" r=".4" fill="currentColor"/></svg>
+      How it works</a>
   </nav>
   <div class="sidebar-foot">
     <div class="sidebar-email" id="sidebar-email"></div>
     <button onclick="logout()">Log out</button>
   </div>
 </aside>
+
+<!-- How-it-works onboarding, shown once on first visit and from the sidebar link -->
+<div class="how-backdrop" id="how-backdrop" onclick="if(event.target===this) closeHowItWorks()">
+  <div class="how-card" role="dialog" aria-modal="true" aria-labelledby="how-title">
+    <div class="how-eyebrow">DePaul AI Research Advisor</div>
+    <h2 id="how-title">How this works</h2>
+    <p class="how-lede">A research advisor that helps you turn an idea into a full proposal, and finds DePaul faculty whose work fits your project. Here is the shape of it.</p>
+
+    <div class="how-step"><div class="how-num">1</div><div class="how-step-body">
+      <div class="how-step-title">Start with your idea</div>
+      <div class="how-step-text">Open the <strong>Advisor</strong> and describe your research in a paragraph or two — your problem statement, research questions, and anything else you have. Not sure yet? Try <strong>Explore</strong> to draw a direction out of your work.</div>
+    </div></div>
+
+    <div class="how-step"><div class="how-num">2</div><div class="how-step-body">
+      <div class="how-step-title">We sharpen it together</div>
+      <div class="how-step-text">The advisor asks one focused question at a time to make the problem specific, then searches the live literature to find the gap your project fills. It guides with questions — the ideas stay yours.</div>
+    </div></div>
+
+    <div class="how-step"><div class="how-num">3</div><div class="how-step-body">
+      <div class="how-step-title">We build the full proposal</div>
+      <div class="how-step-text">Section by section — problem statement, objectives, methodology, and the rest — shown live in the panel beside the chat. You can edit any section yourself at any time.</div>
+    </div></div>
+
+    <div class="how-step"><div class="how-num">4</div><div class="how-step-body">
+      <div class="how-step-title">Find collaborators, then download</div>
+      <div class="how-step-text">Once the design is set, it suggests DePaul faculty whose real publications fit your project. Export the finished proposal as MLA or APA.</div>
+    </div></div>
+
+    <div class="how-actions">
+      <span class="how-note">Reopen this anytime from “How it works” in the sidebar.</span>
+      <button class="how-got" onclick="closeHowItWorks()">Got it</button>
+    </div>
+  </div>
+</div>
 
 <!-- Download-format modal, opened from the advisor panel or a project -->
 <div class="dl-backdrop" id="dl-backdrop" onclick="if(event.target===this) closeDownloadModal()">
@@ -229,6 +284,28 @@ h2{font-family:var(--serif);font-size:24px;font-weight:normal;letter-spacing:-.0
 </div>
 
 <script>
+// How-it-works onboarding — shared across pages. Shown automatically the first
+// time someone lands on Projects, and from the sidebar link any time after.
+function openHowItWorks() {
+  document.getElementById('how-backdrop').classList.add('open');
+}
+function closeHowItWorks() {
+  document.getElementById('how-backdrop').classList.remove('open');
+  try { localStorage.setItem('seen_how_it_works', '1'); } catch (_) {}
+}
+(function maybeShowHowItWorks() {
+  // Only auto-show on the dashboard, and only once per browser. localStorage can
+  // throw (private mode); fail closed (don't show) rather than error.
+  const p = location.pathname;
+  if (p !== '/projects' && p !== '/') return;
+  let seen = true;
+  try { seen = localStorage.getItem('seen_how_it_works') === '1'; } catch (_) {}
+  if (!seen) {
+    if (document.readyState !== 'loading') openHowItWorks();
+    else document.addEventListener('DOMContentLoaded', openHowItWorks);
+  }
+})();
+
 // Download-format modal — shared. The opener passes the project id.
 let _dlProjectId = null;
 function openDownloadModal(projectId) {
@@ -246,7 +323,7 @@ function doDownload(style) {
   closeDownloadModal();
 }
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeDownloadModal();
+  if (e.key === 'Escape') { closeDownloadModal(); closeHowItWorks(); }
 });
 
 // Shared by every page that renders matched people.
