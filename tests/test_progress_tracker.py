@@ -169,6 +169,27 @@ def test_the_derived_stage_still_agrees_with_the_prompt():
     assert web_app._derive_stage({"novelty": "N."}) == "1-2"   # novelty is not a gate
 
 
+def test_the_stage_4_label_names_the_current_section():
+    """'Building the proposal' is too vague — in Stage 4 the panel names the
+    specific section in progress (the first unsaved build step)."""
+    assert web_app._stage_label({"stage": "1-2"}) == "Specifying the problem"
+    assert web_app._stage_label({"stage": "3"}) == "Writing the problem statement"
+
+    # Just entered Stage 4 (only problem_statement saved) -> first step.
+    p = {"problem_statement": "P."}; p["stage"] = web_app._derive_stage(p)
+    assert web_app._stage_label(p) == "Building: novelty & contribution"
+
+    # Novelty + objectives done -> methodology is the focus.
+    p = {"problem_statement": "P.", "novelty": "N.", "objectives": "O."}
+    p["stage"] = web_app._derive_stage(p)
+    assert web_app._stage_label(p) == "Building: research design & methodology"
+
+    # Everything saved -> finalizing.
+    full = {f: "x" for f in web_app._PROPOSAL_FIELDS}
+    full["stage"] = web_app._derive_stage(full)
+    assert web_app._stage_label(full) == "Finalizing the proposal"
+
+
 # ── Research design (the third section) ────────────────────────────────────
 
 def test_there_is_a_research_design_section(project):

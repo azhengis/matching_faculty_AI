@@ -2195,7 +2195,7 @@ def _read_proposal(con, project_id) -> dict:
     # The stage the project is in, and the problem-statement tracker, so the
     # panel can show where the researcher is and what still needs answering.
     proposal["stage"] = _derive_stage(proposal)
-    proposal["stage_label"] = _STAGE_LABELS[proposal["stage"]]
+    proposal["stage_label"] = _stage_label(proposal)
     proposal["trackers"] = _build_trackers(proposal, _read_progress(con, project_id))
     return proposal
 
@@ -2208,8 +2208,37 @@ def _read_proposal(con, project_id) -> dict:
 _STAGE_LABELS = {
     "1-2": "Specifying the problem",
     "3":   "Writing the problem statement",
-    "4":   "Building the proposal",
+    "4":   "Building the proposal",   # fallback; _stage_label names the actual step
 }
+
+# Within Stage 4, the panel should say WHICH section is being worked on rather
+# than the vague "Building the proposal". The current step is the first of these
+# that is not yet saved, in build order (research_questions is omitted — it was
+# saved back in Stage 1, so it is never the Stage 4 focus).
+_STAGE4_STEPS = [
+    ("novelty",                   "Building: novelty & contribution"),
+    ("objectives",                "Building: objectives"),
+    ("methodology",               "Building: research design & methodology"),
+    ("assumptions_delimitations", "Building: assumptions & delimitations"),
+    ("ethical_considerations",    "Building: ethical considerations"),
+    ("expected_outcomes",         "Building: expected outcomes"),
+    ("plan_of_work",              "Building: plan of work"),
+    ("abstract",                  "Building: abstract & keywords"),
+]
+
+
+def _stage_label(proposal: dict) -> str:
+    """The panel's stage label. Stages 1-2 and 3 are single steps; Stage 4 names
+    the specific section in progress (the first unsaved build step), so the
+    panel says e.g. 'Building: research design & methodology', not just
+    'Building the proposal'."""
+    stage = proposal.get("stage") or _derive_stage(proposal)
+    if stage != "4":
+        return _STAGE_LABELS[stage]
+    for field, label in _STAGE4_STEPS:
+        if not (proposal.get(field) or "").strip():
+            return label
+    return "Finalizing the proposal"
 
 
 def _derive_stage(proposal: dict) -> str:
