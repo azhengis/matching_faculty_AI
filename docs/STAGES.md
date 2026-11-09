@@ -113,6 +113,15 @@ it is saved, built on the gap the literature review just established:
 The sharpened title leads it. **Gate:** saving the problem statement unlocks
 Stage 4. It is the anchor everything after must serve.
 
+**The review stop.** Because the statement is that anchor, the advisor pauses
+here before building anything: it shows the full saved statement back and asks
+the researcher to get it exactly right. They can change it two ways — **edit it
+directly in the proposal panel** (the edit is kept and the advisor won't
+overwrite it), or **say what to change in plain words** ("expand the scope",
+"add an objective", "make the gap sharper") and the advisor revises and re-saves
+it. Nothing in Stage 4 starts until the researcher confirms the statement reads
+right.
+
 ### Stage 4 — Build the proposal
 
 The stance inverts: now the advisor brings framings, names tensions, and puts

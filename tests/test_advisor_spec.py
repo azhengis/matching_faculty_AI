@@ -127,6 +127,17 @@ def test_the_title_is_re_earned_at_the_problem_statement_and_at_the_end():
     assert "the proposal drifted from its own problem statement" in STABLE
 
 
+def test_the_problem_statement_has_a_review_stop_before_stage_four():
+    """The anchor gets a deliberate review: the advisor shows the saved problem
+    statement, offers both edit paths (panel or plain-words revision), and does
+    not start building until the researcher confirms it reads right."""
+    assert "THE REVIEW STOP" in STABLE                       # end of Stage 3
+    assert "THE PROBLEM-STATEMENT REVIEW STOP COMES FIRST" in STABLE  # top of Stage 4
+    # Both edit paths are named.
+    assert "edit it directly in the proposal panel" in STABLE
+    assert "add an objective" in STABLE
+
+
 def test_a_confirmed_title_renames_the_project(tmp_path, monkeypatch):
     """One title, shown in the proposal and in the project list. Two would
     diverge the moment either changed."""
