@@ -181,12 +181,18 @@ PERSONAS = [
     },
 ]
 
+SCRIPTED_ON   = os.environ.get("SCRIPTED", "1") != "0"
 PERSONAS_ON   = os.environ.get("PERSONAS", "1") != "0"
 MAX_PROF_TURNS = int(os.environ.get("PROF_TURNS", "7"))   # professor messages after the opener
 # The professor runs on OpenAI (ChatGPT) by default; litellm reads OPENAI_API_KEY
 # from the environment for openai/ models. The advisor runs separately (on the
 # deployed server's own model when BASE points at the live site).
-PROF_MODEL = os.environ.get("PROF_MODEL", "openai/gpt-4o")
+# The professor runs on OpenAI's HTTP API DIRECTLY via requests, not through
+# litellm — litellm's sync client hangs in some environments and ignores its own
+# timeout, which stalled the whole harness. requests with an explicit timeout is
+# reliable, and the advisor (server-side, on the deployed app) is unaffected.
+PROF_MODEL = os.environ.get("PROF_MODEL", "gpt-4o").removeprefix("openai/")
+OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 # How the simulated professor is told to behave on any turn.
 PROF_SYSTEM = """You are role-playing a specific university professor talking to
@@ -228,9 +234,10 @@ def professor_reply(persona: str, fullness: str, pairs: list) -> str:
     `pairs` is [(professor_msg, advisor_msg), ...] already exchanged; the last
     advisor message is what this reply answers. The scripted kickoff turn (the
     hidden 'Let's start a new project.') is NOT part of this — the professor's
-    first generated message is their opening paragraph. Runs on PROF_MODEL
-    (OpenAI by default), independent of the advisor's own model."""
-    import litellm
+    first generated message is their opening paragraph. Calls OpenAI directly."""
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY not set — the professor runs on OpenAI")
     msgs = [{"role": "system",
              "content": PROF_SYSTEM.format(persona=persona, fullness=fullness)}]
     if not pairs:
@@ -242,8 +249,13 @@ def professor_reply(persona: str, fullness: str, pairs: list) -> str:
                 msgs.append({"role": "assistant", "content": prof})
             if adv is not None:
                 msgs.append({"role": "user", "content": adv})
-    resp = litellm.completion(model=PROF_MODEL, max_tokens=500, timeout=180, messages=msgs)
-    return (resp.choices[0].message.content or "").strip()
+    r = requests.post(
+        OPENAI_CHAT_URL,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json={"model": PROF_MODEL, "max_tokens": 500, "temperature": 0.9, "messages": msgs},
+        timeout=60)
+    r.raise_for_status()
+    return (r.json()["choices"][0]["message"]["content"] or "").strip()
 
 
 # ---------------------------------------------------------------- checks
@@ -450,14 +462,17 @@ def run():
                 print(f"         - judge: turn {fnd.get('turn','?')} {fnd.get('rule','?')}"
                       f" ({fnd.get('severity','?')}) {fnd.get('issue','')}", flush=True)
 
-    # Scripted scenarios: fixed faculty turns.
-    for sc in SCENARIOS:
-        pid = new_project()
-        pairs = []
-        for i, turn in enumerate(sc["turns"]):
-            shown = "(scripted kickoff — user never sees this)" if i == 0 else turn
-            pairs.append((shown, advisor(pid, turn)))
-        assess(sc["name"], sc["why"], pairs)
+    # Scripted scenarios: fixed faculty turns. Skippable (SCRIPTED=0) when you
+    # only want the persona-driven conversations — e.g. running against a real
+    # account, where the extra scripted projects would be clutter.
+    if SCRIPTED_ON:
+        for sc in SCENARIOS:
+            pid = new_project()
+            pairs = []
+            for i, turn in enumerate(sc["turns"]):
+                shown = "(scripted kickoff — user never sees this)" if i == 0 else turn
+                pairs.append((shown, advisor(pid, turn)))
+            assess(sc["name"], sc["why"], pairs)
 
     # Persona scenarios: a model plays the professor and drives the conversation.
     if PERSONAS_ON:
