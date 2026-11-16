@@ -76,10 +76,10 @@
 /* Flow chart */
 .flow-key{display:flex;flex-wrap:wrap;gap:18px;margin-bottom:16px;font-size:12.5px;color:var(--ink-2);font-weight:500}
 .flow-key span{display:inline-flex;align-items:center;gap:8px}
-.flow-key .b{width:26px;height:16px;border-radius:5px;background:#14263f;border:1px solid #27405d;flex-shrink:0}
-.flow-key .d{background:#0c1824;border:1.5px dashed #86b4e0}
-.flow-key .p{background:#0c1622;border:1px solid #395a7d;border-radius:999px;padding:1px 8px;font-size:11px;color:#cfe0f5}
-.board{background:#080d14;border:1px solid #182536;border-radius:18px;padding:26px 10px;overflow-x:auto;box-shadow:var(--sh-sm)}
+.flow-key .b{width:26px;height:16px;border-radius:5px;background:#0B4E92;border:1px solid #083B70;flex-shrink:0}
+.flow-key .d{background:#fff;border:1.5px dashed #0B4E92}
+.flow-key .p{background:#fff;border:1px solid var(--border-2);border-radius:999px;padding:1px 8px;font-size:11px;color:var(--ink-2)}
+.board{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:26px 10px;overflow-x:auto;box-shadow:var(--sh-sm)}
 .board pre.mermaid{margin:0;text-align:center;min-width:760px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -116,7 +116,7 @@
       </div>
       <div class="board">
 <pre class="mermaid">
-%%{init: {'theme':'base','themeVariables':{'fontFamily':'-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif','fontSize':'15px','primaryColor':'#14263f','primaryTextColor':'#c9ddf2','primaryBorderColor':'#27405d','lineColor':'#6d7f98','edgeLabelBackground':'#0c1622','tertiaryColor':'#0c1824'}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif','fontSize':'15px','primaryColor':'#0B4E92','primaryTextColor':'#FFFFFF','primaryBorderColor':'#083B70','lineColor':'#9AA7BC','edgeLabelBackground':'#FFFFFF','tertiaryColor':'#FFFFFF'}}}%%
 flowchart TD
   dirclear("Research Direction Clear?"):::decision
   objectives("Define Research Objectives")
@@ -153,9 +153,9 @@ flowchart TD
   export --> out2
   export --> out3
 
-  classDef decision fill:#0c1824,stroke:#86b4e0,stroke-width:1.5px,stroke-dasharray:6 4,color:#dce9f8;
-  classDef output fill:#13304f,stroke:#3f6a9e,color:#e6f0fb,font-weight:600;
-  classDef start fill:#0c1824,stroke:#3f6a9e,color:#e9f1fb,font-weight:600;
+  classDef decision fill:#FFFFFF,stroke:#0B4E92,stroke-width:1.5px,stroke-dasharray:6 4,color:#003366;
+  classDef output fill:#0D5C63,stroke:#094349,color:#FFFFFF,font-weight:600;
+  classDef start fill:#C41E2E,stroke:#9A1622,color:#FFFFFF,font-weight:600;
 </pre>
       </div>
     </section>
