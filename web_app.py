@@ -939,6 +939,11 @@ async def page_advisor():
     return _render_page("advisor.html", "advisor")
 
 
+@app.get("/how-it-works", response_class=HTMLResponse)
+async def page_how_it_works():
+    return _render_page("how_it_works.html", "how")
+
+
 @app.post("/api/auth/signup")
 async def api_auth_signup(req: Request):
     """Create a new account and start a session."""
