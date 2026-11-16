@@ -201,7 +201,7 @@ def test_the_first_message_is_a_fixed_greeting_with_the_name(project, monkeypatc
     body = _chat(project, "Let's start a new project.")
     assert body["reply"].startswith("Hello Jane!")
     assert "strong research proposal" in body["reply"]
-    assert "Research problem:" in body["reply"]      # the six guiding points
+    assert "Research problem:" in body["reply"]      # one of the five guiding points
     assert calls["n"] == 0        # the model was NOT called for the opening
 
     # Stored as the assistant's first turn, after the hidden kickoff.
